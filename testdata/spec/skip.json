@@ -1,0 +1,14 @@
+{
+  "_comment": "Skips against the upstream component-model test/ tree pinned in UPSTREAM.txt. Paths are relative to testdata/spec/. Each entry MUST have a reason. Run `go test ./...` to confirm no entry is stale.",
+
+  "files": [
+    {"path": "async/*.wast",                          "reason": "🔀 async — gated post-MVP feature (entire test/async/ directory)"},
+    {"path": "wasm-tools/memory64.wast",              "reason": "🐘 memory64 — gated post-MVP feature"},
+    {"path": "wasm-tools/tags.wast",                  "reason": "core exception-handling proposal — out of MVP scope"},
+    {"path": "wasmtime/tags.wast",                    "reason": "core exception-handling proposal — out of MVP scope (wast directive: ;;! exceptions = true)"},
+    {"path": "values/trap-in-post-return.wast",       "reason": "🔀 async — uses stream/future types"}
+  ],
+
+  "assertions": [
+  ]
+}

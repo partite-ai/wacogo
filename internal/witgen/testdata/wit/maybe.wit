@@ -1,0 +1,9 @@
+package example:demo;
+
+interface maybe {
+    find: func(key: u32) -> option<string>;
+}
+
+world maybehost {
+    import maybe;
+}

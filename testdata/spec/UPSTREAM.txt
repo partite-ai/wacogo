@@ -1,0 +1,6 @@
+repo:   https://github.com/WebAssembly/component-model
+commit: 5331b915a7976a12b3a94b3b3994d9b6bbc38610
+fetched: 2026-05-04
+notes:  Mirror of upstream test/ tree. Re-sync with `go run ./tools/syncspec`.
+        Files in this directory are vendored verbatim — do NOT edit.
+        Local-only tests live under testdata/local/.

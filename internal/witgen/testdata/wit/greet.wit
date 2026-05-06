@@ -1,0 +1,9 @@
+package example:demo;
+
+interface echo {
+    greet: func(name: string) -> string;
+}
+
+world echohost {
+    import echo;
+}

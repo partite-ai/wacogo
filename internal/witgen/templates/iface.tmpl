@@ -1,0 +1,363 @@
+// InterfaceName is the canonical WIT id of the interface this binding
+// was generated from.
+const InterfaceName = "{{.InterfaceName}}"
+
+{{if .Docs}}{{goDoc .Docs ""}}{{else}}// {{.WrapName}} is the Go binding for the {{.Namespace}}:{{.Package}}/{{.Name}} interface.
+// Implement it to provide a host-side component, or pass an exported wasm
+// instance to WrapInstance to obtain a {{.WrapName}} that calls into wasm.
+// Resource-typed parameters and results appear as *<R>Handle values that can
+// be passed across component boundaries.
+{{end -}}
+type {{.WrapName}} interface {
+{{- range .ParentFuncs}}
+{{if .Docs}}{{goDoc .Docs "\t"}}{{end -}}
+	{{.Sig}}
+{{- end}}
+}
+
+{{range .Resources}}
+{{if .Docs}}{{goDoc .Docs ""}}{{else}}// {{.WrapName}} is the method set of the {{.Name}} resource. A Go value
+// satisfying {{.WrapName}} can be wrapped with New{{.WrapName}}Handle to
+// produce a handle that crosses component boundaries.
+{{end -}}
+type {{.WrapName}} interface {
+{{- range .Methods}}
+{{if .Docs}}{{goDoc .Docs "\t"}}{{end -}}
+	{{methodSigForSide false .}}
+{{- end}}
+}
+
+// {{.WrapName}}Handle is a Go-side reference to a {{.Name}} resource. It embeds
+// {{.WrapName}}, so resource methods can be called directly on the handle.
+// Pass {{.WrapName}}Handle values into and out of component calls; the
+// underlying resource is bound to the appropriate instance automatically.
+type {{.WrapName}}Handle struct {
+	{{.WrapName}}              // embedded — dispatch wrapper
+	state         handleState
+}
+
+// Drop releases the resource. Idempotent — safe to call on a never-used
+// or already-dropped handle.
+func (h *{{.WrapName}}Handle) Drop(ctx context.Context) error { return h.state.drop(ctx) }
+
+// Invalidate marks the handle as transferred so it cannot be reused.
+// Generated bind/wrap code calls this after passing the handle into a
+// wasm call as own; user code rarely needs it.
+func (h *{{.WrapName}}Handle) Invalidate() {
+	h.{{.WrapName}} = nil
+	h.state = invalidatedHandleState{}
+}
+
+// LocalImpl returns the Go value originally registered as the
+// implementation backing this handle when one is reachable in this
+// process. Returns (impl, true) for handles built from local Go values
+// and for handles whose rep resolves in the defining instance's extern
+// table. Returns (zero, false) for handles whose defining instance has
+// no extern table or no entry at the rep, and for handles that have
+// been dropped or invalidated.
+func (h *{{.WrapName}}Handle) LocalImpl() ({{.WrapName}}, bool) {
+	switch s_ := h.state.(type) {
+	case *unregisteredHandleState:
+		impl_, ok_ := s_.impl.({{.WrapName}})
+		return impl_, ok_
+	case *boundHandleState:
+		if s_.rh == nil {
+			return nil, false
+		}
+		defining_ := s_.rh.Type().Instance()
+		if defining_ == nil {
+			return nil, false
+		}
+		obj_, ok_ := defining_.LookupExtern(s_.rh.Rep())
+		if !ok_ {
+			return nil, false
+		}
+		impl_, ok2_ := obj_.({{.WrapName}})
+		if !ok2_ {
+			return nil, false
+		}
+		return impl_, true
+	case *shortcutBorrowHandleState:
+		impl_, ok_ := s_.impl.({{.WrapName}})
+		return impl_, ok_
+	}
+	var zero_ {{.WrapName}}
+	return zero_, false
+}
+
+// bind drives the handle's state machine to obtain the canon handle
+// value on cc.Instance(). On an unregistered handle the impl is
+// registered into the appropriate ComponentInstance's extern table, an
+// own handle is issued, and the state transitions to bound.
+func (h *{{.WrapName}}Handle) bind(cc *host.CallContext, owner *host.ComponentInstance) (uint32, error) {
+	next_, oh_, err_ := h.state.bind(cc, owner)
+	if err_ != nil {
+		return 0, err_
+	}
+	h.state = next_
+	return oh_, nil
+}
+
+// New{{.WrapName}}Handle wraps a Go implementation of {{.WrapName}} as a
+// handle that can be passed across component boundaries.
+func New{{.WrapName}}Handle(impl {{.WrapName}}) *{{.WrapName}}Handle {
+	return &{{.WrapName}}Handle{
+		{{.WrapName}}: impl,
+		state: &unregisteredHandleState{
+			trGetter: trGetter{{.WrapName}},
+			impl:     impl,
+		},
+	}
+}
+
+// New{{.WrapName}}HandleIn is like New{{.WrapName}}Handle, but registers
+// impl with definer — the component instance that defines the {{.Name}}
+// resource — instead of resolving it from the call site. Use this when
+// constructing a handle outside the resource's defining package.
+func New{{.WrapName}}HandleIn(definer *host.ComponentInstance, impl {{.WrapName}}) *{{.WrapName}}Handle {
+	return &{{.WrapName}}Handle{
+		{{.WrapName}}: impl,
+		state: &unregisteredHandleState{
+			definer:  definer,
+			trGetter: trGetter{{.WrapName}},
+			impl:     impl,
+		},
+	}
+}
+
+// trGetter{{.WrapName}} returns the per-instance *wacogo.TypeResource
+// for the {{.Name}} resource by reading the field that NewInstance
+// populates on the package's instanceState struct.
+func trGetter{{.WrapName}}(s *instanceState) *wacogo.TypeResource {
+	return s.{{lcfirst .WrapName}}TR
+}
+
+// New{{.WrapName}}HandleFrom wraps an existing wacogo.ResourceHandle as a
+// *{{.WrapName}}Handle. impl is the dispatcher used for the embedded
+// {{.WrapName}} interface — pass the local Go impl when reachable, or a
+// forwarder constructed by the importing package when dispatch must
+// round-trip through wasm.
+func New{{.WrapName}}HandleFrom(rh wacogo.ResourceHandle, impl {{.WrapName}}) *{{.WrapName}}Handle {
+	return &{{.WrapName}}Handle{
+		{{.WrapName}}: impl,
+		state:         &boundHandleState{rh: rh},
+	}
+}
+{{end}}
+
+{{if .Resources}}
+// handleState is the package-private state machine driving each
+// *<R>Handle. Four implementations (unregistered, bound, invalidated,
+// shortcut-borrow) cover the lifecycle. bind returns the next state
+// plus the canon handle to use for this call; drop releases the canon
+// entry if one was issued.
+type handleState interface {
+	bind(cc *host.CallContext, owner *host.ComponentInstance) (handleState, uint32, error)
+	drop(ctx context.Context) error
+}
+
+// handle is the package-private sealed interface implemented by every
+// *<R>Handle in this package. Package-private to side-step potential
+// name collisions with resources literally named "handle"; structural
+// conformance still works for cross-package callers because only types
+// defined here satisfy the unexported methods.
+type handle interface {
+	bind(cc *host.CallContext, owner *host.ComponentInstance) (uint32, error)
+	Invalidate()
+}
+
+// boundHandleState — handle wraps a live wacogo.ResourceHandle. All
+// instance / handle-id / drop semantics flow through rh.
+type boundHandleState struct {
+	rh wacogo.ResourceHandle
+}
+
+func (s *boundHandleState) bind(cc *host.CallContext, _ *host.ComponentInstance) (handleState, uint32, error) {
+	if s.rh == nil {
+		return nil, 0, fmt.Errorf("wacogo/witgen: handle already dropped")
+	}
+	if s.rh.Instance() != cc.Instance() {
+		return nil, 0, fmt.Errorf("wacogo/witgen: handle bound to wrong instance")
+	}
+	return s, s.rh.HandleID(), nil
+}
+
+func (s *boundHandleState) drop(ctx context.Context) error {
+	if s.rh == nil {
+		return nil
+	}
+	err_ := s.rh.Drop(ctx)
+	s.rh = nil
+	return err_
+}
+
+// unregisteredHandleState — impl held in Go memory; not yet in any
+// extTable or canon table. On first bind, the impl is registered on
+// definer (or owner, if definer was nil) and an own handle is issued
+// onto cc.Instance(); the state transitions to bound.
+//
+// trGetter resolves the per-instance *wacogo.TypeResource for the
+// resource this handle is for by reading a field on the definer's
+// *instanceState. Each New<R>Handle / New<R>HandleIn pins a getter that
+// targets the matching resource field; bind asserts the definer's
+// UserState to *instanceState and calls it.
+type unregisteredHandleState struct {
+	definer  *host.ComponentInstance // nil = same-package; resolved to owner at bind time
+	trGetter func(*instanceState) *wacogo.TypeResource
+	impl     any
+}
+
+func (s *unregisteredHandleState) bind(cc *host.CallContext, owner *host.ComponentInstance) (handleState, uint32, error) {
+	definer_ := s.definer
+	if definer_ == nil {
+		definer_ = owner
+	}
+	state_, ok_ := definer_.UserState().(*instanceState)
+	if !ok_ {
+		return nil, 0, fmt.Errorf("wacogo/witgen: resources not defined in this component must be created via NewXXXHandleIn")
+	}
+	tr_ := s.trGetter(state_)
+	eh_ := definer_.RegisterResource(s.impl)
+	rh_ := cc.IssueOwnHandle(tr_, uint32(eh_))
+	return &boundHandleState{rh: rh_}, rh_.HandleID(), nil
+}
+
+func (s *unregisteredHandleState) drop(ctx context.Context) error {
+	if d_, ok_ := s.impl.(interface{ Drop() }); ok_ {
+		d_.Drop()
+	}
+	return nil
+}
+
+// invalidatedHandleState — handle was transferred out or invalidated.
+// Any further bind fails; drop is a no-op.
+type invalidatedHandleState struct{}
+
+func (invalidatedHandleState) bind(_ *host.CallContext, _ *host.ComponentInstance) (handleState, uint32, error) {
+	return nil, 0, fmt.Errorf("wacogo/witgen: handle has been invalidated")
+}
+
+func (invalidatedHandleState) drop(ctx context.Context) error { return nil }
+
+// shortcutBorrowHandleState — handle received via the canonical-ABI
+// same-component shortcut: the wire value was the rep itself, with no
+// callee-side table entry. defining is the resource's defining
+// component instance; rep indexes its extern table; impl is the value
+// resolved at lift time so LocalImpl returns it directly. Re-binding is
+// only valid when the next call targets defining (the shortcut applies
+// again); other targets error. drop is a no-op — the lent borrow is
+// scoped on the lender's side, not the callee's.
+type shortcutBorrowHandleState struct {
+	defining *host.ComponentInstance
+	rep      uint32
+	impl     any
+}
+
+func (s *shortcutBorrowHandleState) bind(cc *host.CallContext, _ *host.ComponentInstance) (handleState, uint32, error) {
+	if cc.Instance() != s.defining.Core() {
+		return nil, 0, fmt.Errorf("wacogo/witgen: shortcut-borrow handle cannot be re-passed to a non-defining instance")
+	}
+	return s, s.rep, nil
+}
+
+func (s *shortcutBorrowHandleState) drop(_ context.Context) error { return nil }
+
+// HandleValueFor is intended for generated bindings in packages that
+// import this interface. End users do not call it directly. It returns
+// the canon handle value that should be placed on the wire for h.
+func HandleValueFor(cc *host.CallContext, owner *host.ComponentInstance, h handle) (uint32, error) {
+	return h.bind(cc, owner)
+}
+{{end}}
+
+{{range $enum := .Enums}}
+{{if $enum.Docs}}{{goDoc $enum.Docs ""}}{{else}}// {{$enum.GoName}} corresponds to the WIT enum {{$enum.Name}}.
+{{end -}}
+type {{$enum.GoName}} uint8
+
+const (
+{{- range $i, $c := $enum.Cases}}
+{{if $c.Docs}}{{goDoc $c.Docs "\t"}}{{end -}}
+	{{$c.GoName}} {{$enum.GoName}} = {{$i}}
+{{- end}}
+)
+
+func (v {{$enum.GoName}}) String() string {
+	switch v {
+{{- range $enum.Cases}}
+	case {{.GoName}}:
+		return "{{.Name}}"
+{{- end}}
+	}
+	return "{{$enum.GoName}}(unknown)"
+}
+{{end}}
+
+{{range $flags := .Flags}}
+{{if $flags.Docs}}{{goDoc $flags.Docs ""}}{{else}}// {{$flags.GoName}} corresponds to the WIT flags {{$flags.Name}}.
+{{end -}}
+type {{$flags.GoName}} uint32
+
+const (
+{{- range $i, $c := $flags.Cases}}
+{{if $c.Docs}}{{goDoc $c.Docs "\t"}}{{end -}}
+	{{$c.GoName}} {{$flags.GoName}} = 1 << {{$i}}
+{{- end}}
+)
+{{end}}
+
+{{range .Options}}
+// {{optionName .}} corresponds to a WIT option<...> type.
+type {{optionName .}} struct {
+	IsSome bool
+	Value  {{goType .Elem}}
+}
+
+func Some{{elemName .Elem}}(v {{goType .Elem}}) {{optionName .}} {
+	return {{optionName .}}{IsSome: true, Value: v}
+}
+
+func None{{elemName .Elem}}() {{optionName .}} {
+	return {{optionName .}}{}
+}
+{{end}}
+
+{{range .Results}}{{resultDecl .}}{{end}}
+
+{{range .Records}}
+{{if .Docs}}{{goDoc .Docs ""}}{{else}}// {{.GoName}} corresponds to the WIT record {{.Name}}.
+{{end -}}
+type {{.GoName}} struct {
+{{- range .Fields}}
+{{if .Docs}}{{goDoc .Docs "\t"}}{{end -}}
+	{{.GoName}} {{goType .Type}}
+{{- end}}
+}
+{{end}}
+
+{{range $variant := .Variants}}
+{{if $variant.Docs}}{{goDoc $variant.Docs ""}}{{else}}// {{$variant.GoName}} corresponds to the WIT variant {{$variant.Name}}. Sealed:
+// only the case structs below satisfy this interface.
+{{end -}}
+type {{$variant.GoName}} interface{ is{{$variant.GoName}}() }
+
+{{range $variant.Cases}}
+{{if .Docs}}{{goDoc .Docs ""}}{{else}}// {{.GoName}} is the "{{.Name}}" case of {{$variant.GoName}}.
+{{end -}}
+type {{.GoName}} struct {
+{{- if .Payload}}
+	Value {{goType .Payload}}
+{{- end}}
+}
+func ({{.GoName}}) is{{$variant.GoName}}() {}
+{{end}}
+{{end}}
+
+{{range .Tuples}}
+// {{tupleName .}} corresponds to a WIT tuple type.
+type {{tupleName .}} struct {
+{{- range $i, $f := .Fields}}
+	F{{$i}} {{goType $f}}
+{{- end}}
+}
+{{end}}

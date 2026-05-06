@@ -1,0 +1,9 @@
+package example:demo;
+
+interface sumlist {
+    sum: func(xs: list<u32>) -> u32;
+}
+
+world summer {
+    import sumlist;
+}

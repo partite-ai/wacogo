@@ -1,0 +1,22 @@
+package example:demo;
+
+interface predicate {
+    resource gate {
+        constructor();
+
+        // Method returning bool — the regression case. PrimBool's underlying
+        // value is 0 (iota), which Go templates treat as falsy if checked
+        // with {{if}} on the interface field.
+        is-open: func() -> bool;
+
+        // Method with no result, to verify the negative path stays correct.
+        close: func();
+    }
+
+    // Freestanding func returning bool — same template path.
+    always-true: func() -> bool;
+}
+
+world boolworld {
+    import predicate;
+}

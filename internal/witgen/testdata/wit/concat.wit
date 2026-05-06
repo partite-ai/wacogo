@@ -1,0 +1,9 @@
+package example:demo;
+
+interface concat {
+    join: func(parts: list<string>, sep: string) -> string;
+}
+
+world joiner {
+    import concat;
+}

@@ -1,0 +1,13 @@
+package example:demo;
+
+interface ef {
+    enum direction { north, south, east, west }
+    flags perms { read, write, exec }
+
+    go-way: func(d: direction) -> direction;
+    check: func(p: perms) -> bool;
+}
+
+world efhost {
+    import ef;
+}

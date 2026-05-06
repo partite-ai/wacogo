@@ -1,0 +1,9 @@
+package example:demo;
+
+interface pair {
+    swap: func(p: tuple<u32, u32>) -> tuple<u32, u32>;
+}
+
+world pairhost {
+    import pair;
+}

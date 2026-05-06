@@ -1,0 +1,19 @@
+package example:host-imports;
+
+interface streams {
+    resource data-stream {
+        constructor(seed: u32);
+        read: func() -> u32;
+        write: func(v: u32);
+    }
+}
+
+interface filesystem {
+    use streams.{data-stream};
+    open: func(seed: u32) -> own<data-stream>;
+}
+
+world host-imports {
+    import streams;
+    import filesystem;
+}

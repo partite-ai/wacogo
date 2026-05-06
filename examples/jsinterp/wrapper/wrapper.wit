@@ -1,0 +1,5 @@
+package local:wrapper;
+
+world component {
+  export eval-path: func(path: string) -> result;
+}

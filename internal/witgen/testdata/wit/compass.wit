@@ -1,0 +1,11 @@
+package example:demo;
+
+interface compass {
+    enum direction { north, south, east, west }
+
+    reverse: func(d: direction) -> direction;
+}
+
+world compasshost {
+    import compass;
+}

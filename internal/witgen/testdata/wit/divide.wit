@@ -1,0 +1,9 @@
+package example:demo;
+
+interface divide {
+    divide: func(a: u32, b: u32) -> result<u32, string>;
+}
+
+world dividehost {
+    import divide;
+}

@@ -1,0 +1,62 @@
+package example:demo;
+
+/// Package-level documentation for the docs interface.
+///
+/// Multi-paragraph prose that exercises blank-line handling
+/// in goDocComment.
+interface docs {
+    /// A documented record describing a point.
+    record point {
+        /// The horizontal coordinate.
+        x: u32,
+        /// The vertical coordinate.
+        y: u32,
+    }
+
+    /// A documented enum spanning the cardinal directions.
+    enum direction {
+        /// Pointing up.
+        north,
+        /// Pointing right.
+        east,
+        /// Pointing down.
+        south,
+        /// Pointing left.
+        west,
+    }
+
+    /// A documented flags set.
+    flags perms {
+        /// Read access.
+        read,
+        /// Write access.
+        write,
+    }
+
+    /// A documented variant.
+    variant shape {
+        /// A circle, with payload radius.
+        circle(u32),
+        /// A square, with no payload.
+        square,
+    }
+
+    /// A documented resource.
+    resource counter {
+        /// Construct a fresh counter starting at zero.
+        constructor();
+        /// Increment the counter.
+        increment: func();
+        /// Return the current value.
+        current: func() -> u32;
+        /// Static helper that constructs a counter starting at one.
+        from-one: static func() -> own<counter>;
+    }
+
+    /// A documented freestanding function.
+    greet: func(name: string) -> string;
+}
+
+world docshost {
+    import docs;
+}

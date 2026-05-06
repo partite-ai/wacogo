@@ -1,0 +1,149 @@
+// Factory builds host-side instances of the {{.WrapName}} interface
+// from a Go implementation.
+type Factory struct {
+	engine *wacogo.Engine
+	comp   *host.Component
+{{- range .Resources}}
+	{{resourceFieldName .}} *host.ResourceType
+{{- end}}
+{{- range .Imports}}{{range .Resources}}
+	{{.RefField | lcfirst}} *host.ResourceTypeRef
+{{- end}}{{end}}
+}
+
+type instanceState struct {
+	impl {{.WrapName}}
+{{- range .Resources}}
+	{{lcfirst .WrapName}}TR *wacogo.TypeResource
+{{- end}}
+{{- range $imp := .Imports}}
+	{{$imp.StateField}} *wacogo.ComponentInstance
+{{- range $imp.Resources}}
+	{{.FwdFnsField}} *{{.FwdFnsType}}
+{{- end}}
+{{- end}}
+}
+
+// Deps groups the cross-component dependencies required to instantiate
+// {{.WrapName}}. Pass a populated value via NewInstance.
+type Deps struct {
+{{- range .Imports}}
+	{{.GoFieldName}} *wacogo.ComponentInstance
+{{- end}}
+}
+
+// NewFactory creates a Factory bound to e. A single Factory may be
+// reused to build multiple instances backed by different implementations.
+func NewFactory(ctx context.Context, e *wacogo.Engine) (*Factory, error) {
+	f_ := &Factory{engine: e}
+	b_ := e.NewHostBuilder("{{.Namespace}}_{{.Package}}_{{.Name}}")
+
+{{range .Resources}}	f_.{{resourceFieldName .}} = b_.AddResource("{{.Name}}", resourceDtor)
+{{end}}
+{{range .Imports}}{{range .Resources}}	f_.{{.RefField | lcfirst}} = b_.AddResourceRef("{{.Name}}")
+{{end}}{{end}}
+{{/* Imported nominals must be declared before own-interface nominals that
+     might reference them in field/case types. */}}
+{{range .Imports}}{{range directNominals .Enums}}	{{importedNominalAddTypeStmt .}}
+{{end}}{{range directNominals .Flags}}	{{importedNominalAddTypeStmt .}}
+{{end}}{{range directNominals .Records}}	{{importedNominalAddTypeStmt .}}
+{{end}}{{range directNominals .Variants}}	{{importedNominalAddTypeStmt .}}
+{{end}}{{end}}
+{{range .Enums}}	typ{{.GoName}}_ := b_.AddType("{{.Name}}", host.Enum{Cases: []string{ {{range $i, $c := .Cases}}{{if $i}}, {{end}}{{printf "%q" $c.Name}}{{end}} }})
+	_ = typ{{.GoName}}_
+{{end}}
+{{range .Flags}}	typ{{.GoName}}_ := b_.AddType("{{.Name}}", host.Flags{Names: []string{ {{range $i, $c := .Cases}}{{if $i}}, {{end}}{{printf "%q" $c.Name}}{{end}} }})
+	_ = typ{{.GoName}}_
+{{end}}
+{{range .Records}}	typ{{.GoName}}_ := b_.AddType("{{.Name}}", host.Record{Fields: []host.Field{ {{range $i, $f := .Fields}}{{if $i}}, {{end}}{Name: {{printf "%q" $f.Name}}, Type: {{$f.Type.HostTypeExpr}}}{{end}} }})
+	_ = typ{{.GoName}}_
+{{end}}
+{{range .Variants}}	typ{{.GoName}}_ := b_.AddType("{{.Name}}", host.Variant{Cases: []host.Case{ {{range $i, $c := .Cases}}{{if $i}}, {{end}}{Name: {{printf "%q" $c.Name}}, Payload: {{if $c.Payload}}{{$c.Payload.HostTypeExpr}}{{else}}nil{{end}}}{{end}} }})
+	_ = typ{{.GoName}}_
+{{end}}
+{{range .Funcs}}	b_.AddFunction("{{.WitName}}", &host.FuncType{
+		Params:  []host.Param{ {{range $i, $p := .Params}}{{if $i}}, {{end}}{Name: {{printf "%q" $p.GoName}}, Type: {{$p.Type.HostTypeExpr}}}{{end}} },
+		Results: []host.ResultDecl{ {{if ne .Result nil}}{Name: "", Type: {{.Result.HostTypeExpr}}}{{end}} },
+	}, wrap{{.GoName}}(f_))
+
+{{end}}
+{{- range $rt := .Resources}}
+{{- if $rt.Ctor}}	b_.AddFunction("[constructor]{{$rt.Name}}", &host.FuncType{
+		Params:  []host.Param{ {{range $i, $p := $rt.Ctor.Params}}{{if $i}}, {{end}}{Name: {{printf "%q" $p.GoName}}, Type: {{$p.Type.HostTypeExpr}}}{{end}} },
+		Results: []host.ResultDecl{ {Name: "", Type: f_.{{resourceFieldName $rt}}.Own()} },
+	}, wrapNew{{$rt.GoName}}(f_))
+
+{{end}}
+{{- range $m := $rt.Methods}}	b_.AddFunction("[method]{{$rt.Name}}.{{$m.Name}}", &host.FuncType{
+		Params:  []host.Param{ {Name: "self", Type: f_.{{resourceFieldName $rt}}.Borrow()}{{range $m.Params}}, {Name: {{printf "%q" .GoName}}, Type: {{.Type.HostTypeExpr}}}{{end}} },
+		Results: []host.ResultDecl{ {{if ne $m.Result nil}}{Name: "", Type: {{$m.Result.HostTypeExpr}}}{{end}} },
+	}, wrap{{$rt.GoName}}{{$m.GoName}}(f_))
+
+{{end}}
+{{- range $s := $rt.Statics}}	b_.AddFunction("[static]{{$rt.Name}}.{{$s.Name}}", &host.FuncType{
+		Params:  []host.Param{ {{range $i, $p := $s.Params}}{{if $i}}, {{end}}{Name: {{printf "%q" $p.GoName}}, Type: {{$p.Type.HostTypeExpr}}}{{end}} },
+		Results: []host.ResultDecl{ {{if ne $s.Result nil}}{Name: "", Type: {{$s.Result.HostTypeExpr}}}{{end}} },
+	}, wrap{{$s.GoName}}(f_))
+
+{{end}}
+{{- end}}	comp_, err_ := b_.Build(ctx)
+	if err_ != nil {
+		return nil, err_
+	}
+	f_.comp = comp_
+	return f_, nil
+}
+
+// NewInstance creates a fresh component instance backed by impl. Pass
+// inst.Core() to wacogo.WithInstanceImport to wire the instance into a
+// composite world. deps may be nil only when {{.WrapName}} has no
+// imports.
+func (f *Factory) NewInstance(ctx context.Context, impl {{.WrapName}}, deps *Deps, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+{{- if .Imports}}
+	if deps == nil {
+		panic("{{.GoPackage}}.NewInstance: deps is nil")
+	}
+	var missing_ []string
+{{- range .Imports}}
+	if deps.{{.GoFieldName}} == nil {
+		missing_ = append(missing_, "{{.GoFieldName}}")
+	}
+{{- end}}
+	if len(missing_) > 0 {
+		panic(fmt.Sprintf("{{.GoPackage}}.NewInstance: deps missing fields: %v", missing_))
+	}
+{{range $imp := .Imports}}{{range $res := $imp.Resources}}	opts = append(opts, host.WithResourceFrom(f.{{$res.RefField | lcfirst}}, deps.{{$imp.GoFieldName}}, "{{$res.Name}}"))
+{{end}}{{end}}	state_ := &instanceState{impl: impl{{range .Imports}}, {{.StateField}}: deps.{{.GoFieldName}}{{end}}}
+{{range $imp := .Imports}}{{range $res := $imp.Resources}}	state_.{{$res.FwdFnsField}} = &{{$res.FwdFnsType}}{
+{{range $m := $res.Source.Methods}}		fn{{$m.GoName}}: host.WrapExportedFunc(deps.{{$imp.GoFieldName}}.ExportedFunc("[method]{{$res.Name}}.{{$m.Name}}")),
+{{end}}	}
+{{end}}{{end}}{{- else}}
+	_ = deps
+	state_ := &instanceState{impl: impl}
+{{- end}}
+	opts = append(opts, host.WithUserState(state_))
+	inst_, err_ := f.comp.Instantiate(ctx, opts...)
+	if err_ != nil {
+		return nil, err_
+	}
+{{- range .Resources}}
+	state_.{{lcfirst .WrapName}}TR = inst_.Core().ExportedType("{{.Name}}").(*wacogo.TypeResource)
+{{- end}}
+	return inst_, nil
+}
+
+// Close releases resources shared by the Factory. Existing instances
+// remain callable until each is closed individually.
+func (f *Factory) Close(ctx context.Context) error { return f.comp.Close(ctx) }
+
+{{if .Resources}}
+// resourceDtor is the generic destructor invoked when canon orchestrates
+// terminal-drop on a host-defined resource handle. Type-asserts the
+// underlying Go object for an optional Drop() method and calls it.
+func resourceDtor(_ context.Context, _ *host.ComponentInstance, obj any) error {
+	if d_, ok_ := obj.(interface{ Drop() }); ok_ {
+		d_.Drop()
+	}
+	return nil
+}
+{{end}}

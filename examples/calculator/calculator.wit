@@ -1,0 +1,11 @@
+package example:demo;
+
+interface calc {
+    add: func(a: u32, b: u32) -> u32;
+    subtract: func(a: u32, b: u32) -> u32;
+    multiply: func(a: u32, b: u32) -> u32;
+}
+
+world arith {
+    import calc;
+}

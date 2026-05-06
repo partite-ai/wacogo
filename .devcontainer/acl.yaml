@@ -1,0 +1,47 @@
+version: v1
+
+services:
+  - name: some-service # Keep at least one valid service to ensure basic parsing works
+    project: test-project
+    action: enforce
+    allowed_domains:
+      - "example.com"
+
+default:
+    project: other
+    action: enforce
+    allowed_domains:
+        # Anthropic / Claude Code
+        - api.anthropic.com
+        - sentry.io
+        - statsig.anthropic.com
+        - statsig.com
+        - platform.claude.com
+
+        # VS Code
+        - marketplace.visualstudio.com
+        - vscode.blob.core.windows.net
+        - update.code.visualstudio.com
+
+        # Node / npm
+        - registry.npmjs.org
+
+        # Go modules
+        - proxy.golang.org
+        - sum.golang.org
+        - golang.org
+        - go.dev
+
+        # GitHub (sources, releases, gh CLI, raw content)
+        - github.com
+        - api.github.com
+        - codeload.github.com
+        - raw.githubusercontent.com
+        - objects.githubusercontent.com
+        - release-assets.githubusercontent.com
+        - github.githubassets.com
+
+        # Rust crates (wasm-tools install path; only matters if rebuilt at runtime)
+        - crates.io
+        - static.crates.io
+        - index.crates.io

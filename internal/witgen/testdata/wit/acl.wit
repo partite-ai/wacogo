@@ -1,0 +1,11 @@
+package example:demo;
+
+interface acl {
+    flags perms { read, write, exec }
+
+    grant: func(p: perms) -> perms;
+}
+
+world aclhost {
+    import acl;
+}

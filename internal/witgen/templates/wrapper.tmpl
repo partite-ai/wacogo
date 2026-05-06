@@ -1,0 +1,20 @@
+// {{lcfirst .WrapName}}Wrapper is the concrete type returned by WrapInstance
+// as a {{.WrapName}}. Held internally; users hold it via the {{.WrapName}}
+// interface.
+type {{lcfirst .WrapName}}Wrapper struct {
+	callerInst *host.ComponentInstance
+{{- range .WrapperFuncs}}
+	{{.FieldName}} *host.ExportedFunc
+{{- end}}
+}
+
+// WrapInstance returns a {{.WrapName}} that forwards method calls to
+// callee. caller is a Factory-built host instance whose state hosts any
+// handles minted by callee during those calls.
+func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstance) {{.WrapName}} {
+	w_ := &{{lcfirst .WrapName}}Wrapper{callerInst: caller}
+{{- range .WrapperFuncs}}
+	w_.{{.FieldName}} = host.WrapExportedFunc(callee.ExportedFunc({{printf "%q" .WitExportName}}))
+{{- end}}
+	return w_
+}

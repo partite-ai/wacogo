@@ -1,0 +1,18 @@
+package example:demo;
+
+interface streams {
+    resource handle {
+        constructor();
+        read: func() -> u32;
+    }
+}
+
+interface filesystem {
+    use streams.{handle};
+    open: func() -> own<handle>;
+}
+
+world crossres {
+    import streams;
+    import filesystem;
+}

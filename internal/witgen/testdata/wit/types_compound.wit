@@ -1,0 +1,12 @@
+package example:demo;
+
+interface mix {
+    greet: func(name: string) -> string;
+    sum: func(xs: list<u32>) -> u32;
+    pair: func() -> tuple<u32, u32>;
+    nested: func() -> list<tuple<string, u32>>;
+}
+
+world combo {
+    import mix;
+}

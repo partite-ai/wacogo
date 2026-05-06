@@ -1,0 +1,17 @@
+package example:demo;
+
+interface shape {
+    record point { x: u32, y: u32 }
+
+    variant shape-kind {
+        circle(u32),
+        rect(point),
+        none
+    }
+
+    describe: func(s: shape-kind) -> string;
+}
+
+world shapehost {
+    import shape;
+}

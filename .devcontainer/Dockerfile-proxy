@@ -1,0 +1,11 @@
+FROM golang:1.26-trixie as builder
+
+RUN go install github.com/stripe/smokescreen@latest
+
+FROM debian:trixie-slim
+
+COPY --from=builder /go/bin/smokescreen /usr/local/bin/smokescreen
+COPY acl.yaml /etc/smokescreen/acl.yaml
+COPY config.yaml /etc/smokescreen/config.yaml
+
+CMD ["smokescreen", "--config-file", "/etc/smokescreen/config.yaml", "--egress-acl-file", "/etc/smokescreen/acl.yaml", "--listen-port", "3128"]

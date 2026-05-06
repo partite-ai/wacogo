@@ -1,0 +1,16 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      # Test cleanup commonly defers Close without checking the error.
+      - path: _test\.go$
+        linters: [errcheck]
+      # Example mains are illustrative; defer Close errors are not actionable.
+      - path: examples/
+        linters: [errcheck]
+      # De Morgan's law rewrites of charset checks (e.g. !((c>='a'&&c<='z')||...))
+      # are clearer in the negated-disjunction form — keep readability over the
+      # mechanical refactor staticcheck suggests.
+      - linters: [staticcheck]
+        text: "QF1001"

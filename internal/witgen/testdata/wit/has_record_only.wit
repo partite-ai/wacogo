@@ -1,0 +1,11 @@
+package example:demo;
+
+interface points {
+    record point { x: u32, y: u32 }
+
+    midpoint: func(a: point, b: point) -> point;
+}
+
+world pointshost {
+    import points;
+}

@@ -1,0 +1,46 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+.claude/
+gocache/
+.tmp/
+# Built example binaries
+/dump
+/imports-exports
+/validate
+/testgen
+
+# Generated test fixtures
+testdata/generated/
+# Old generated dirs (pre-spec-mirror layout) — kept gitignored for clean migration
+internal/core/testdata/spec/generated/
+wasmparser/testdata/generated/
+
+# Local worktrees
+.worktrees/
+
+# Local files
+TODO.txt
+sample-components/
+
+# Uncompressed embedded wasm-tools (wasm-tools.wasm.gz is committed)
+wasmtools/wasm-tools.wasm

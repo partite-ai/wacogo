@@ -1,0 +1,10 @@
+package example:demo;
+
+interface tryops {
+    find: func(id: u32) -> option<string>;
+    parse: func(s: string) -> result<u32, string>;
+}
+
+world tryhost {
+    import tryops;
+}

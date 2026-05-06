@@ -1,0 +1,13 @@
+package example:demo;
+
+interface counterhost {
+    resource counter {
+        constructor(initial: u32);
+        increment: func();
+        current: func() -> u32;
+    }
+}
+
+world counterworld {
+    import counterhost;
+}

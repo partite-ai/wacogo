@@ -1,0 +1,17 @@
+package example:demo;
+
+interface compounds {
+    resource counter {
+        constructor(start: u32);
+        get: func() -> u32;
+    }
+    new-counters: func(starts: list<u32>) -> list<own<counter>>;
+    box-counter: func(c: own<counter>) -> record-with-counter;
+    record record-with-counter {
+        c: own<counter>,
+    }
+}
+
+world compounds-host {
+    import compounds;
+}
