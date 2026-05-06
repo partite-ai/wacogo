@@ -125,6 +125,11 @@ func translateResultErr(err error) types.ErrorCode {
 		return nil
 	}
 
+	var coded *types.CodedError
+	if errors.As(err, &coded) && coded.Code != nil {
+		return coded.Code
+	}
+
 	if errors.Is(err, context.DeadlineExceeded) {
 		return types.ErrorCodeConnectionTimeout{}
 	}
