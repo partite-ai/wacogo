@@ -2,10 +2,15 @@ package wasi
 
 import (
 	"io"
-	"net/http"
 
 	"github.com/partite-ai/wacogo/wasi/filesystem/preopens"
+	"github.com/partite-ai/wacogo/wasi/http/types"
 )
+
+// HTTPDoer is the minimal interface wasi:http/outgoing-handler uses to
+// issue outgoing requests. It is an alias for types.HTTPDoer; *http.Client
+// satisfies it.
+type HTTPDoer = types.HTTPDoer
 
 // Config configures NewWorld.
 type Config struct {
@@ -23,7 +28,14 @@ type Config struct {
 	// component. When nil, an empty preopen set is exposed.
 	Preopens func(preopens.Deps) preopens.Preopens
 
-	// HttpClient is the *http.Client used by wasi:http/outgoing-handler.
-	// When nil, http.DefaultClient is used.
-	HttpClient *http.Client
+	// HttpClient executes outgoing HTTP requests for
+	// wasi:http/outgoing-handler. When nil, http.DefaultClient is used.
+	//
+	// Implementations may modify *http.Request before issuing it (URL,
+	// headers, body) or deny it by returning an error. To surface a
+	// specific wasi:http/types ErrorCode to the guest, return a
+	// *types.CodedError (from wasi/http/types); any other error is
+	// mapped via the existing translation, falling back to
+	// ErrorCodeInternalError.
+	HttpClient HTTPDoer
 }

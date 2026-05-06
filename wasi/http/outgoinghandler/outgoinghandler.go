@@ -6,7 +6,6 @@ package outgoinghandler
 import (
 	"context"
 	"fmt"
-	"net/http"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -28,7 +27,7 @@ type (
 )
 
 type impl struct {
-	httpClient  *http.Client
+	httpClient  types.HTTPDoer
 	typesInst   *host.ComponentInstance
 	errorInst   *host.ComponentInstance
 	pollInst    *host.ComponentInstance
@@ -82,7 +81,7 @@ func NewInstance(
 	errorInst *host.ComponentInstance,
 	pollInst *host.ComponentInstance,
 	streamsInst *host.ComponentInstance,
-	httpClient *http.Client,
+	httpClient types.HTTPDoer,
 ) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
