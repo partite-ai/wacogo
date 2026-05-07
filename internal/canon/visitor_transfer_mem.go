@@ -373,7 +373,6 @@ func (v *memTransferVisitor) VisitEnum(numCases uint32) {
 func (v *memTransferVisitor) VisitVariant(cases []VariantCase) {
 	numCases := uint32(len(cases))
 	discSize := discByteSize(numCases)
-	discOff := v.assignBytes(discSize, discSize)
 
 	// Compile per-case sub-plans, measure max payload size/align.
 	type caseEntry struct {
@@ -396,12 +395,17 @@ func (v *memTransferVisitor) VisitVariant(cases []VariantCase) {
 		}
 		entries[i] = caseEntry{child.out}
 	}
-	// Align outer byteOff to payload alignment before the payload region.
+	// Per canonical-ABI spec, the variant's overall alignment is
+	// max(disc-align, max payload alignment). Aligning the disc to that
+	// ensures the variant starts on a properly-aligned boundary in any
+	// enclosing record/list/etc.
+	overallAlign := discSize
+	if maxPayloadAlign > overallAlign {
+		overallAlign = maxPayloadAlign
+	}
+	discOff := v.assignBytes(discSize, overallAlign)
 	if maxPayloadAlign > 0 {
 		v.byteOff = alignUp(v.byteOff, maxPayloadAlign)
-		if maxPayloadAlign > v.maxAlign {
-			v.maxAlign = maxPayloadAlign
-		}
 	}
 	payloadOff := v.byteOff
 	memPayloadOffset := payloadOff - discOff

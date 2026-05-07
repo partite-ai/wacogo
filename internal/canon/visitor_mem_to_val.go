@@ -381,7 +381,6 @@ func (v *memToValVisitor) VisitBorrow(rt ResourceType) {
 func (v *memToValVisitor) VisitVariant(cases []VariantCase) {
 	numCases := uint32(len(cases))
 	discSize := discByteSize(numCases)
-	discOff := v.assignBytes(discSize, discSize)
 
 	steps := make([]gocallLiftStep, len(cases))
 	var maxSize, maxPayloadAlign uint32
@@ -400,11 +399,13 @@ func (v *memToValVisitor) VisitVariant(cases []VariantCase) {
 		}
 		steps[i] = child.out[0]
 	}
+	overallAlign := discSize
+	if maxPayloadAlign > overallAlign {
+		overallAlign = maxPayloadAlign
+	}
+	discOff := v.assignBytes(discSize, overallAlign)
 	if maxPayloadAlign > 0 {
 		v.byteOff = alignUp(v.byteOff, maxPayloadAlign)
-		if maxPayloadAlign > v.maxAlign {
-			v.maxAlign = maxPayloadAlign
-		}
 	}
 	payloadOff := v.byteOff
 	memPayloadOffset := payloadOff - discOff
@@ -433,7 +434,6 @@ func (v *memToValVisitor) VisitVariant(cases []VariantCase) {
 
 func (v *memToValVisitor) VisitOption(inner Type) {
 	discSize := discByteSize(2) // 1 byte
-	discOff := v.assignBytes(discSize, discSize)
 
 	child := &memToValVisitor{}
 	inner.Accept(child)
@@ -441,11 +441,13 @@ func (v *memToValVisitor) VisitOption(inner Type) {
 	payloadAlign := child.maxAlign
 	childStep := child.out[0]
 
+	overallAlign := discSize
+	if payloadAlign > overallAlign {
+		overallAlign = payloadAlign
+	}
+	discOff := v.assignBytes(discSize, overallAlign)
 	if payloadAlign > 0 {
 		v.byteOff = alignUp(v.byteOff, payloadAlign)
-		if payloadAlign > v.maxAlign {
-			v.maxAlign = payloadAlign
-		}
 	}
 	payloadOff := v.byteOff
 	memPayloadOffset := payloadOff - discOff
@@ -473,7 +475,6 @@ func (v *memToValVisitor) VisitOption(inner Type) {
 
 func (v *memToValVisitor) VisitResult(okT, errT Type) {
 	discSize := discByteSize(2)
-	discOff := v.assignBytes(discSize, discSize)
 
 	var maxSize, maxAlignP uint32
 	compileCase := func(t Type) gocallLiftStep {
@@ -494,11 +495,13 @@ func (v *memToValVisitor) VisitResult(okT, errT Type) {
 	okStep := compileCase(okT)
 	errStep := compileCase(errT)
 
+	overallAlign := discSize
+	if maxAlignP > overallAlign {
+		overallAlign = maxAlignP
+	}
+	discOff := v.assignBytes(discSize, overallAlign)
 	if maxAlignP > 0 {
 		v.byteOff = alignUp(v.byteOff, maxAlignP)
-		if maxAlignP > v.maxAlign {
-			v.maxAlign = maxAlignP
-		}
 	}
 	payloadOff := v.byteOff
 	memPayloadOffset := payloadOff - discOff

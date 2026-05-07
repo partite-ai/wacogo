@@ -475,7 +475,6 @@ func (v *valToMemVisitor) VisitBorrow(rt ResourceType) {
 func (v *valToMemVisitor) VisitVariant(cases []VariantCase) {
 	numCases := uint32(len(cases))
 	discSize := discByteSize(numCases)
-	discOff := v.assignBytes(discSize, discSize)
 
 	entries := make([]gocallLowerStep, len(cases))
 	var maxSize, maxPayloadAlign uint32
@@ -494,11 +493,13 @@ func (v *valToMemVisitor) VisitVariant(cases []VariantCase) {
 		}
 		entries[i] = child.out[0]
 	}
+	overallAlign := discSize
+	if maxPayloadAlign > overallAlign {
+		overallAlign = maxPayloadAlign
+	}
+	discOff := v.assignBytes(discSize, overallAlign)
 	if maxPayloadAlign > 0 {
 		v.byteOff = alignUp(v.byteOff, maxPayloadAlign)
-		if maxPayloadAlign > v.maxAlign {
-			v.maxAlign = maxPayloadAlign
-		}
 	}
 	payloadOff := v.byteOff
 	memPayloadOffset := payloadOff - discOff
@@ -527,7 +528,6 @@ func (v *valToMemVisitor) VisitVariant(cases []VariantCase) {
 func (v *valToMemVisitor) VisitOption(inner Type) {
 	// Layout is variant{none; some(inner)} but with *ValOption on the Go side.
 	discSize := discByteSize(2) // 1 byte
-	discOff := v.assignBytes(discSize, discSize)
 
 	child := &valToMemVisitor{}
 	inner.Accept(child)
@@ -535,11 +535,13 @@ func (v *valToMemVisitor) VisitOption(inner Type) {
 	payloadAlign := child.maxAlign
 	childStep := child.out[0]
 
+	overallAlign := discSize
+	if payloadAlign > overallAlign {
+		overallAlign = payloadAlign
+	}
+	discOff := v.assignBytes(discSize, overallAlign)
 	if payloadAlign > 0 {
 		v.byteOff = alignUp(v.byteOff, payloadAlign)
-		if payloadAlign > v.maxAlign {
-			v.maxAlign = payloadAlign
-		}
 	}
 	payloadOff := v.byteOff
 	memPayloadOffset := payloadOff - discOff
@@ -567,7 +569,6 @@ func (v *valToMemVisitor) VisitOption(inner Type) {
 
 func (v *valToMemVisitor) VisitResult(okT, errT Type) {
 	discSize := discByteSize(2)
-	discOff := v.assignBytes(discSize, discSize)
 
 	var maxSize, maxAlignP uint32
 	compileCase := func(t Type) gocallLowerStep {
@@ -588,11 +589,13 @@ func (v *valToMemVisitor) VisitResult(okT, errT Type) {
 	okStep := compileCase(okT)
 	errStep := compileCase(errT)
 
+	overallAlign := discSize
+	if maxAlignP > overallAlign {
+		overallAlign = maxAlignP
+	}
+	discOff := v.assignBytes(discSize, overallAlign)
 	if maxAlignP > 0 {
 		v.byteOff = alignUp(v.byteOff, maxAlignP)
-		if maxAlignP > v.maxAlign {
-			v.maxAlign = maxAlignP
-		}
 	}
 	payloadOff := v.byteOff
 	memPayloadOffset := payloadOff - discOff
