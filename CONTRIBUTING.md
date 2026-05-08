@@ -116,6 +116,31 @@ tracking, gocall `*ValOwnHandle` semantics), see the "Resource
 handles across the canon/core boundary" section of
 `docs/canonical_abi.md`.
 
+## AI Policy
+
+The guiding philosophy is: AI Agents are a tool. The choice of tools
+to use is a personal decision.
+
+This has several implications:
+
+- You are perfectly free to use AI tools to develop changes in this
+  repository.
+- Other contributors should not be forced to use your tools - this
+  means that any sort of workflow where your agent autonomously
+  responds to requests, or you just proxy comments or discussion
+  to an agent will not be welcome.
+- You are responsible for your changes. If you don't understand
+  them enough to collaborate with others on them, please don't
+  submit them.
+
+Practically speaking, if you use AI tools to develop changes that you
+understand, have reviewed and can meaningfully discuss - great. If you
+don't review the code, or don't understand fully the changes your agent
+has made, please don't attempt to contribute code - good issue
+descriptions and/or detailed test cases that others who will
+review/understand the code can give to their agent are more useful in
+this case.
+
 ## Coding guidelines
 
 - **Minimal public APIs.** Each public method or struct adds to the
@@ -141,4 +166,3 @@ handles across the canon/core boundary" section of
   forwarding imports between core instances. Do not use host modules
   for import wiring.
 - **Standard Go naming** throughout.
-
