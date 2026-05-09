@@ -51,7 +51,7 @@ func main() {
 		Stdin:    os.Stdin,
 		Stdout:   os.Stdout,
 		Stderr:   os.Stderr,
-		Preopens: preopens.NewFSPreopens(scriptFS),
+		Preopens: preopens.NewFSPreopens(preopens.ImmutableFS{FS: scriptFS}),
 	})
 	if err != nil {
 		log.Fatalf("build wasi world: %v", err)

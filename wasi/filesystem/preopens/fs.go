@@ -6,17 +6,78 @@ import (
 	"hash/fnv"
 	"io"
 	"io/fs"
-	"path"
-	"strings"
+	"os"
+	"time"
 
-	streams "github.com/partite-ai/wacogo/wasi/io/streams"
 	wallclock "github.com/partite-ai/wacogo/wasi/clocks/wallclock"
 	types "github.com/partite-ai/wacogo/wasi/filesystem/types"
+	streams "github.com/partite-ai/wacogo/wasi/io/streams"
 )
 
-// NewFSPreopens returns a Config.Preopens callback that exposes the
-// root of fsys as a single preopened directory at "/". Descriptors are
-// read-only.
+// Optional capability interfaces. fsDescriptor inspects its underlying
+// fs.File for each interface and returns ErrorCodeUnsupported when a
+// requested operation has no implementation. The file-level shapes mirror
+// methods on *os.File (using io.ReaderAt, io.WriterAt, io.Seeker,
+// io.Writer, fs.ReadDirFile, plus Syncer and Truncater); the *Ater
+// interfaces cover path-relative ops with no *os.File equivalent.
+
+type Syncer interface {
+	Sync() error
+}
+
+type Truncater interface {
+	Truncate(size int64) error
+}
+
+type Chtimeser interface {
+	Chtimes(atime, mtime time.Time) error
+}
+
+type OpenAter interface {
+	OpenAt(name string, flag int, perm fs.FileMode) (fs.File, error)
+}
+
+type StatAter interface {
+	StatAt(name string) (fs.FileInfo, error)
+}
+
+type ReadlinkAter interface {
+	ReadlinkAt(name string) (string, error)
+}
+
+type ChtimesAter interface {
+	ChtimesAt(name string, atime, mtime time.Time) error
+}
+
+type MkdirAter interface {
+	MkdirAt(name string, perm fs.FileMode) error
+}
+
+type RmdirAter interface {
+	RmdirAt(name string) error
+}
+
+type UnlinkAter interface {
+	UnlinkAt(name string) error
+}
+
+type SymlinkAter interface {
+	SymlinkAt(target, linkName string) error
+}
+
+// errEscape signals an attempt by an ImmutableFS-wrapped path to
+// navigate above its root. fsErr maps it to ErrorCodeNotPermitted.
+var errEscape = errors.New("preopens: path escapes root")
+
+// errUnsupported signals that a fallback path could not satisfy a
+// capability. fsErr maps it to ErrorCodeUnsupported.
+var errUnsupported = errors.New("preopens: capability not supported")
+
+// NewFSPreopens returns a Config.Preopens callback that exposes the root
+// of fsys as a single preopened directory at "/". Files supplied through
+// fs.FS are read-only; richer fs.File implementations can opt into
+// additional operations through the optional capability interfaces in
+// this package.
 func NewFSPreopens(fsys fs.FS) func(Deps) Preopens {
 	return func(deps Deps) Preopens {
 		return &fsPreopens{fsys: fsys, deps: deps}
@@ -29,33 +90,45 @@ type fsPreopens struct {
 }
 
 func (p *fsPreopens) GetDirectories(_ context.Context) ([]TupleDescriptorString, error) {
-	desc := &fsDescriptor{fsys: p.fsys, path: ".", isDir: true, deps: p.deps}
+	root, err := p.fsys.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	desc := &fsDescriptor{file: root, deps: p.deps}
 	h := types.NewDescriptorHandleIn(p.deps.Types, desc)
 	return []TupleDescriptorString{{F0: h, F1: "/"}}, nil
 }
 
-// fsDescriptor adapts a path inside an io/fs.FS to wasi:filesystem/types.Descriptor.
-// All write operations return ErrorCodeReadOnly.
+// fsDescriptor adapts an fs.File to wasi:filesystem/types.Descriptor.
 type fsDescriptor struct {
-	fsys  fs.FS
-	path  string // path inside fsys; "." for the root
-	isDir bool
-	deps  Deps
+	file fs.File
+	deps Deps
+}
+
+func (d *fsDescriptor) Drop() {
+	_ = d.file.Close()
 }
 
 func (d *fsDescriptor) GetType(_ context.Context) (types.ResultDescriptorTypeErrorCode, error) {
-	if d.isDir {
-		return types.ResultDescriptorTypeErrorCodeOk{Value: types.DescriptorTypeDirectory}, nil
+	info, err := d.file.Stat()
+	if err != nil {
+		return types.ResultDescriptorTypeErrorCodeErr{Value: fsErr(err)}, nil
 	}
-	return types.ResultDescriptorTypeErrorCodeOk{Value: types.DescriptorTypeRegularFile}, nil
+	return types.ResultDescriptorTypeErrorCodeOk{Value: modeToType(info.Mode())}, nil
 }
 
 func (d *fsDescriptor) GetFlags(_ context.Context) (types.ResultDescriptorFlagsErrorCode, error) {
-	return types.ResultDescriptorFlagsErrorCodeOk{Value: types.DescriptorFlagsRead}, nil
+	flags := types.DescriptorFlagsRead
+	if _, ok := d.file.(io.Writer); ok {
+		flags |= types.DescriptorFlagsWrite
+	} else if _, ok := d.file.(io.WriterAt); ok {
+		flags |= types.DescriptorFlagsWrite
+	}
+	return types.ResultDescriptorFlagsErrorCodeOk{Value: flags}, nil
 }
 
 func (d *fsDescriptor) Stat(_ context.Context) (types.ResultDescriptorStatErrorCode, error) {
-	info, err := fs.Stat(d.fsys, d.path)
+	info, err := d.file.Stat()
 	if err != nil {
 		return types.ResultDescriptorStatErrorCodeErr{Value: fsErr(err)}, nil
 	}
@@ -63,11 +136,11 @@ func (d *fsDescriptor) Stat(_ context.Context) (types.ResultDescriptorStatErrorC
 }
 
 func (d *fsDescriptor) StatAt(_ context.Context, _ types.PathFlags, p string) (types.ResultDescriptorStatErrorCode, error) {
-	full, ok := joinPath(d.path, p)
+	sa, ok := d.file.(StatAter)
 	if !ok {
-		return types.ResultDescriptorStatErrorCodeErr{Value: types.ErrorCodeNotPermitted}, nil
+		return types.ResultDescriptorStatErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
-	info, err := fs.Stat(d.fsys, full)
+	info, err := sa.StatAt(p)
 	if err != nil {
 		return types.ResultDescriptorStatErrorCodeErr{Value: fsErr(err)}, nil
 	}
@@ -75,47 +148,57 @@ func (d *fsDescriptor) StatAt(_ context.Context, _ types.PathFlags, p string) (t
 }
 
 func (d *fsDescriptor) OpenAt(_ context.Context, _ types.PathFlags, p string, of types.OpenFlags, df types.DescriptorFlags) (types.ResultDescriptorErrorCode, error) {
-	if of&(types.OpenFlagsCreate|types.OpenFlagsExclusive|types.OpenFlagsTruncate) != 0 {
-		return types.ResultDescriptorErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
-	}
-	if df&types.DescriptorFlagsWrite != 0 {
-		return types.ResultDescriptorErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
-	}
-	full, ok := joinPath(d.path, p)
+	oa, ok := d.file.(OpenAter)
 	if !ok {
-		return types.ResultDescriptorErrorCodeErr{Value: types.ErrorCodeNotPermitted}, nil
+		return types.ResultDescriptorErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
-	info, err := fs.Stat(d.fsys, full)
+	child, err := oa.OpenAt(p, openFlagsToOSFlag(of, df), 0o666)
 	if err != nil {
 		return types.ResultDescriptorErrorCodeErr{Value: fsErr(err)}, nil
 	}
-	if of&types.OpenFlagsDirectory != 0 && !info.IsDir() {
-		return types.ResultDescriptorErrorCodeErr{Value: types.ErrorCodeNotDirectory}, nil
+	if of&types.OpenFlagsDirectory != 0 {
+		info, statErr := child.Stat()
+		if statErr == nil && !info.IsDir() {
+			_ = child.Close()
+			return types.ResultDescriptorErrorCodeErr{Value: types.ErrorCodeNotDirectory}, nil
+		}
 	}
-	child := &fsDescriptor{fsys: d.fsys, path: full, isDir: info.IsDir(), deps: d.deps}
-	h := types.NewDescriptorHandleIn(d.deps.Types, child)
+	desc := &fsDescriptor{file: child, deps: d.deps}
+	h := types.NewDescriptorHandleIn(d.deps.Types, desc)
 	return types.ResultDescriptorErrorCodeOk{Value: h}, nil
 }
 
-func (d *fsDescriptor) Read(_ context.Context, length uint64, offset uint64) (types.ResultTupleListU8BoolErrorCode, error) {
-	if d.isDir {
-		return types.ResultTupleListU8BoolErrorCodeErr{Value: types.ErrorCodeIsDirectory}, nil
+func openFlagsToOSFlag(of types.OpenFlags, df types.DescriptorFlags) int {
+	flag := os.O_RDONLY
+	if df&types.DescriptorFlagsWrite != 0 {
+		if df&types.DescriptorFlagsRead != 0 {
+			flag = os.O_RDWR
+		} else {
+			flag = os.O_WRONLY
+		}
 	}
-	f, err := d.fsys.Open(d.path)
+	if of&types.OpenFlagsCreate != 0 {
+		flag |= os.O_CREATE
+	}
+	if of&types.OpenFlagsExclusive != 0 {
+		flag |= os.O_EXCL
+	}
+	if of&types.OpenFlagsTruncate != 0 {
+		flag |= os.O_TRUNC
+	}
+	return flag
+}
+
+func (d *fsDescriptor) Read(_ context.Context, length uint64, offset uint64) (types.ResultTupleListU8BoolErrorCode, error) {
+	info, err := d.file.Stat()
 	if err != nil {
 		return types.ResultTupleListU8BoolErrorCodeErr{Value: fsErr(err)}, nil
 	}
-	defer f.Close()
-	if offset > 0 {
-		if err := skipBytes(f, int64(offset)); err != nil {
-			if errors.Is(err, io.EOF) {
-				return types.ResultTupleListU8BoolErrorCodeOk{Value: types.TupleListU8Bool{F0: nil, F1: true}}, nil
-			}
-			return types.ResultTupleListU8BoolErrorCodeErr{Value: fsErr(err)}, nil
-		}
+	if info.IsDir() {
+		return types.ResultTupleListU8BoolErrorCodeErr{Value: types.ErrorCodeIsDirectory}, nil
 	}
 	buf := make([]byte, length)
-	n, err := io.ReadFull(f, buf)
+	n, err := readAt(d.file, buf, int64(offset))
 	atEOF := errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 	if err != nil && !atEOF {
 		return types.ResultTupleListU8BoolErrorCodeErr{Value: fsErr(err)}, nil
@@ -123,30 +206,50 @@ func (d *fsDescriptor) Read(_ context.Context, length uint64, offset uint64) (ty
 	return types.ResultTupleListU8BoolErrorCodeOk{Value: types.TupleListU8Bool{F0: buf[:n], F1: atEOF}}, nil
 }
 
-func (d *fsDescriptor) ReadViaStream(_ context.Context, offset uint64) (types.ResultInputStreamErrorCode, error) {
-	if d.isDir {
-		return types.ResultInputStreamErrorCodeErr{Value: types.ErrorCodeIsDirectory}, nil
+func readAt(f fs.File, buf []byte, off int64) (int, error) {
+	if ra, ok := f.(io.ReaderAt); ok {
+		return ra.ReadAt(buf, off)
 	}
-	f, err := d.fsys.Open(d.path)
+	if s, ok := f.(io.Seeker); ok {
+		if _, err := s.Seek(off, io.SeekStart); err != nil {
+			return 0, err
+		}
+		return io.ReadFull(f, buf)
+	}
+	if off == 0 {
+		return io.ReadFull(f, buf)
+	}
+	return 0, errUnsupported
+}
+
+func (d *fsDescriptor) ReadViaStream(_ context.Context, offset uint64) (types.ResultInputStreamErrorCode, error) {
+	info, err := d.file.Stat()
 	if err != nil {
 		return types.ResultInputStreamErrorCodeErr{Value: fsErr(err)}, nil
 	}
+	if info.IsDir() {
+		return types.ResultInputStreamErrorCodeErr{Value: types.ErrorCodeIsDirectory}, nil
+	}
 	if offset > 0 {
-		if err := skipBytes(f, int64(offset)); err != nil && !errors.Is(err, io.EOF) {
-			f.Close()
+		s, ok := d.file.(io.Seeker)
+		if !ok {
+			return types.ResultInputStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+		}
+		if _, err := s.Seek(int64(offset), io.SeekStart); err != nil {
 			return types.ResultInputStreamErrorCodeErr{Value: fsErr(err)}, nil
 		}
 	}
-	s := streams.NewIOReaderInputStream(d.deps.Error, d.deps.Poll, f)
-	h := streams.NewInputStreamHandleIn(d.deps.Streams, s)
+	st := streams.NewIOReaderInputStream(d.deps.Error, d.deps.Poll, d.file)
+	h := streams.NewInputStreamHandleIn(d.deps.Streams, st)
 	return types.ResultInputStreamErrorCodeOk{Value: h}, nil
 }
 
 func (d *fsDescriptor) ReadDirectory(_ context.Context) (types.ResultDirectoryEntryStreamErrorCode, error) {
-	if !d.isDir {
-		return types.ResultDirectoryEntryStreamErrorCodeErr{Value: types.ErrorCodeNotDirectory}, nil
+	rd, ok := d.file.(fs.ReadDirFile)
+	if !ok {
+		return types.ResultDirectoryEntryStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
-	entries, err := fs.ReadDir(d.fsys, d.path)
+	entries, err := rd.ReadDir(-1)
 	if err != nil {
 		return types.ResultDirectoryEntryStreamErrorCodeErr{Value: fsErr(err)}, nil
 	}
@@ -155,96 +258,256 @@ func (d *fsDescriptor) ReadDirectory(_ context.Context) (types.ResultDirectoryEn
 	return types.ResultDirectoryEntryStreamErrorCodeOk{Value: h}, nil
 }
 
-func (d *fsDescriptor) MetadataHash(ctx context.Context) (types.ResultMetadataHashValueErrorCode, error) {
-	info, err := fs.Stat(d.fsys, d.path)
+func (d *fsDescriptor) MetadataHash(_ context.Context) (types.ResultMetadataHashValueErrorCode, error) {
+	info, err := d.file.Stat()
 	if err != nil {
 		return types.ResultMetadataHashValueErrorCodeErr{Value: fsErr(err)}, nil
 	}
-	return types.ResultMetadataHashValueErrorCodeOk{Value: hashInfo(d.path, info)}, nil
+	return types.ResultMetadataHashValueErrorCodeOk{Value: hashInfo(info.Name(), info)}, nil
 }
 
 func (d *fsDescriptor) MetadataHashAt(_ context.Context, _ types.PathFlags, p string) (types.ResultMetadataHashValueErrorCode, error) {
-	full, ok := joinPath(d.path, p)
+	sa, ok := d.file.(StatAter)
 	if !ok {
-		return types.ResultMetadataHashValueErrorCodeErr{Value: types.ErrorCodeNotPermitted}, nil
+		return types.ResultMetadataHashValueErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
-	info, err := fs.Stat(d.fsys, full)
+	info, err := sa.StatAt(p)
 	if err != nil {
 		return types.ResultMetadataHashValueErrorCodeErr{Value: fsErr(err)}, nil
 	}
-	return types.ResultMetadataHashValueErrorCodeOk{Value: hashInfo(full, info)}, nil
+	return types.ResultMetadataHashValueErrorCodeOk{Value: hashInfo(p, info)}, nil
 }
 
 func (d *fsDescriptor) IsSameObject(_ context.Context, _ *types.DescriptorHandle) (bool, error) {
-	// io/fs has no inode/identity primitive and the generated handle
-	// wrappers hide the underlying impl, so we can't reliably compare.
 	return false, nil
 }
 
-func (d *fsDescriptor) ReadlinkAt(_ context.Context, _ string) (types.ResultStringErrorCode, error) {
-	return types.ResultStringErrorCodeErr{Value: types.ErrorCodeNotPermitted}, nil
+func (d *fsDescriptor) ReadlinkAt(_ context.Context, p string) (types.ResultStringErrorCode, error) {
+	rl, ok := d.file.(ReadlinkAter)
+	if !ok {
+		return types.ResultStringErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	target, err := rl.ReadlinkAt(p)
+	if err != nil {
+		return types.ResultStringErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.ResultStringErrorCodeOk{Value: target}, nil
 }
 
 func (d *fsDescriptor) Sync(_ context.Context) (types.Result_ErrorCode, error) {
+	s, ok := d.file.(Syncer)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if err := s.Sync(); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
 	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) SyncData(_ context.Context) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeOk{}, nil
+func (d *fsDescriptor) SyncData(ctx context.Context) (types.Result_ErrorCode, error) {
+	return d.Sync(ctx)
 }
-
-// Write-side methods all return read-only errors.
 
 func (d *fsDescriptor) Advise(_ context.Context, _ uint64, _ uint64, _ types.Advice) (types.Result_ErrorCode, error) {
 	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) Write(_ context.Context, _ []uint8, _ uint64) (types.ResultU64ErrorCode, error) {
-	return types.ResultU64ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) Write(_ context.Context, data []uint8, offset uint64) (types.ResultU64ErrorCode, error) {
+	if wa, ok := d.file.(io.WriterAt); ok {
+		n, err := wa.WriteAt(data, int64(offset))
+		if err != nil {
+			return types.ResultU64ErrorCodeErr{Value: fsErr(err)}, nil
+		}
+		return types.ResultU64ErrorCodeOk{Value: uint64(n)}, nil
+	}
+	if s, ok := d.file.(io.Seeker); ok {
+		if w, ok := d.file.(io.Writer); ok {
+			if _, err := s.Seek(int64(offset), io.SeekStart); err != nil {
+				return types.ResultU64ErrorCodeErr{Value: fsErr(err)}, nil
+			}
+			n, err := w.Write(data)
+			if err != nil {
+				return types.ResultU64ErrorCodeErr{Value: fsErr(err)}, nil
+			}
+			return types.ResultU64ErrorCodeOk{Value: uint64(n)}, nil
+		}
+	}
+	return types.ResultU64ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 }
 
-func (d *fsDescriptor) WriteViaStream(_ context.Context, _ uint64) (types.ResultOutputStreamErrorCode, error) {
-	return types.ResultOutputStreamErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) WriteViaStream(_ context.Context, offset uint64) (types.ResultOutputStreamErrorCode, error) {
+	w, ok := d.file.(io.Writer)
+	if !ok {
+		return types.ResultOutputStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if offset > 0 {
+		s, ok := d.file.(io.Seeker)
+		if !ok {
+			return types.ResultOutputStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+		}
+		if _, err := s.Seek(int64(offset), io.SeekStart); err != nil {
+			return types.ResultOutputStreamErrorCodeErr{Value: fsErr(err)}, nil
+		}
+	}
+	st := streams.NewIOWriterOutputStream(d.deps.Error, d.deps.Poll, w)
+	h := streams.NewOutputStreamHandleIn(d.deps.Streams, st)
+	return types.ResultOutputStreamErrorCodeOk{Value: h}, nil
 }
 
 func (d *fsDescriptor) AppendViaStream(_ context.Context) (types.ResultOutputStreamErrorCode, error) {
-	return types.ResultOutputStreamErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+	w, ok := d.file.(io.Writer)
+	if !ok {
+		return types.ResultOutputStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if s, ok := d.file.(io.Seeker); ok {
+		if _, err := s.Seek(0, io.SeekEnd); err != nil {
+			return types.ResultOutputStreamErrorCodeErr{Value: fsErr(err)}, nil
+		}
+	}
+	st := streams.NewIOWriterOutputStream(d.deps.Error, d.deps.Poll, w)
+	h := streams.NewOutputStreamHandleIn(d.deps.Streams, st)
+	return types.ResultOutputStreamErrorCodeOk{Value: h}, nil
 }
 
-func (d *fsDescriptor) SetSize(_ context.Context, _ uint64) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) SetSize(_ context.Context, size uint64) (types.Result_ErrorCode, error) {
+	t, ok := d.file.(Truncater)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if err := t.Truncate(int64(size)); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) SetTimes(_ context.Context, _ types.NewTimestamp, _ types.NewTimestamp) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) SetTimes(_ context.Context, atim types.NewTimestamp, mtim types.NewTimestamp) (types.Result_ErrorCode, error) {
+	c, ok := d.file.(Chtimeser)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	a, m := resolveTimestamp(atim), resolveTimestamp(mtim)
+	if err := c.Chtimes(a, m); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) SetTimesAt(_ context.Context, _ types.PathFlags, _ string, _ types.NewTimestamp, _ types.NewTimestamp) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) SetTimesAt(_ context.Context, _ types.PathFlags, p string, atim types.NewTimestamp, mtim types.NewTimestamp) (types.Result_ErrorCode, error) {
+	c, ok := d.file.(ChtimesAter)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	a, m := resolveTimestamp(atim), resolveTimestamp(mtim)
+	if err := c.ChtimesAt(p, a, m); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) CreateDirectoryAt(_ context.Context, _ string) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+// resolveTimestamp converts a NewTimestamp variant to a time.Time. Both
+// NoChange and Now collapse onto the zero value and time.Now respectively;
+// callers are expected to interpret time.Time{} as "leave unchanged" if
+// their backend supports it.
+func resolveTimestamp(t types.NewTimestamp) time.Time {
+	switch v := t.(type) {
+	case types.NewTimestampNow:
+		return time.Now()
+	case types.NewTimestampTimestamp:
+		return time.Unix(int64(v.Value.Seconds), int64(v.Value.Nanoseconds))
+	}
+	return time.Time{}
 }
 
-func (d *fsDescriptor) RemoveDirectoryAt(_ context.Context, _ string) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) CreateDirectoryAt(_ context.Context, p string) (types.Result_ErrorCode, error) {
+	m, ok := d.file.(MkdirAter)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if err := m.MkdirAt(p, 0o755); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) UnlinkFileAt(_ context.Context, _ string) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) RemoveDirectoryAt(_ context.Context, p string) (types.Result_ErrorCode, error) {
+	r, ok := d.file.(RmdirAter)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if err := r.RmdirAt(p); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) LinkAt(_ context.Context, _ types.PathFlags, _ string, _ *types.DescriptorHandle, _ string) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) UnlinkFileAt(_ context.Context, p string) (types.Result_ErrorCode, error) {
+	u, ok := d.file.(UnlinkAter)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if err := u.UnlinkAt(p); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) RenameAt(_ context.Context, _ string, _ *types.DescriptorHandle, _ string) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+// LinkAt and RenameAt cross descriptor boundaries. On unix we dispatch
+// to linkat(2)/renameat(2) when both descriptors expose Fd() uintptr;
+// otherwise (and on non-unix builds) we report Unsupported.
+
+func (d *fsDescriptor) LinkAt(_ context.Context, _ types.PathFlags, srcPath string, newDir *types.DescriptorHandle, dstPath string) (types.Result_ErrorCode, error) {
+	dst, ok := dstFile(newDir)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if err := linkAt(d.file, srcPath, dst, dstPath); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
 }
 
-func (d *fsDescriptor) SymlinkAt(_ context.Context, _ string, _ string) (types.Result_ErrorCode, error) {
-	return types.Result_ErrorCodeErr{Value: types.ErrorCodeReadOnly}, nil
+func (d *fsDescriptor) RenameAt(_ context.Context, srcPath string, newDir *types.DescriptorHandle, dstPath string) (types.Result_ErrorCode, error) {
+	dst, ok := dstFile(newDir)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if err := renameAt(d.file, srcPath, dst, dstPath); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
+}
+
+// dstFile resolves the cross-descriptor argument of LinkAt/RenameAt to a
+// local fsDescriptor's underlying fs.File. Cross-component handles or
+// non-fsDescriptor impls fall back to Unsupported.
+func dstFile(h *types.DescriptorHandle) (fs.File, bool) {
+	impl, ok := h.LocalImpl()
+	if !ok {
+		return nil, false
+	}
+	d, ok := impl.(*fsDescriptor)
+	if !ok {
+		return nil, false
+	}
+	return d.file, true
+}
+
+// fdFile is satisfied by any fs.File that exposes a unix file descriptor
+// (e.g. *os.File). LinkAt/RenameAt require both endpoints to implement it.
+type fdFile interface {
+	Fd() uintptr
+}
+
+func (d *fsDescriptor) SymlinkAt(_ context.Context, target string, p string) (types.Result_ErrorCode, error) {
+	s, ok := d.file.(SymlinkAter)
+	if !ok {
+		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
+	}
+	if err := s.SymlinkAt(target, p); err != nil {
+		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
+	}
+	return types.Result_ErrorCodeOk{}, nil
 }
 
 // fsDirEntryStream serves entries from a single fs.ReadDir snapshot.
@@ -261,31 +524,6 @@ func (s *fsDirEntryStream) ReadDirectoryEntry(_ context.Context) (types.ResultOp
 	s.cursor++
 	entry := types.DirectoryEntry{Type: dirEntryType(e), Name: e.Name()}
 	return types.ResultOptionDirectoryEntryErrorCodeOk{Value: types.SomeDirectoryEntry(entry)}, nil
-}
-
-// joinPath resolves p relative to base inside an fs.FS rooted at "."
-// and rejects results that escape the root or use absolute paths. The
-// returned string is suitable for fs.FS methods (uses forward slashes,
-// no leading "/", and uses "." for the root).
-func joinPath(base, p string) (string, bool) {
-	if strings.HasPrefix(p, "/") {
-		return "", false
-	}
-	joined := path.Clean(path.Join(base, p))
-	if joined == ".." || strings.HasPrefix(joined, "../") {
-		return "", false
-	}
-	return joined, true
-}
-
-// skipBytes advances by n bytes, preferring io.Seeker when available.
-func skipBytes(f fs.File, n int64) error {
-	if seeker, ok := f.(io.Seeker); ok {
-		_, err := seeker.Seek(n, io.SeekStart)
-		return err
-	}
-	_, err := io.CopyN(io.Discard, f, n)
-	return err
 }
 
 func infoToStat(info fs.FileInfo) types.DescriptorStat {
@@ -360,6 +598,10 @@ func hashInfo(p string, info fs.FileInfo) types.MetadataHashValue {
 
 func fsErr(err error) types.ErrorCode {
 	switch {
+	case errors.Is(err, errEscape):
+		return types.ErrorCodeNotPermitted
+	case errors.Is(err, errUnsupported):
+		return types.ErrorCodeUnsupported
 	case errors.Is(err, fs.ErrNotExist):
 		return types.ErrorCodeNoEntry
 	case errors.Is(err, fs.ErrPermission):
@@ -371,4 +613,3 @@ func fsErr(err error) types.ErrorCode {
 	}
 	return types.ErrorCodeIo
 }
-
