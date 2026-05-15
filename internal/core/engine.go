@@ -13,7 +13,16 @@ import (
 // EngineOption configures an Engine at construction time.
 type EngineOption func(*engineConfig)
 
-type engineConfig struct{}
+type engineConfig struct {
+	runtimeConfig wazero.RuntimeConfig
+}
+
+// WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
+// engine's runtime. If unset, wacogo uses a default config with
+// CoreFeaturesV2 and the extended-const proposal enabled.
+func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
+	return func(c *engineConfig) { c.runtimeConfig = cfg }
+}
 
 // Engine owns the wazero runtime and is the entry point for loading components.
 type Engine struct {
@@ -28,7 +37,10 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	cnf := wazero.NewRuntimeConfig().WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExtendedConst)
+	cnf := cfg.runtimeConfig
+	if cnf == nil {
+		cnf = wazero.NewRuntimeConfig().WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExtendedConst)
+	}
 	rt := wazero.NewRuntimeWithConfig(ctx, cnf)
 	return &Engine{
 		runtime:   rt,

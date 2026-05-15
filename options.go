@@ -1,6 +1,16 @@
 package wacogo
 
-import "github.com/partite-ai/wacogo/internal/core"
+import (
+	"github.com/partite-ai/wacogo/internal/core"
+	"github.com/tetratelabs/wazero"
+)
+
+// WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
+// engine's runtime. If unset, wacogo uses a default config with
+// CoreFeaturesV2 and the extended-const proposal enabled.
+func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
+	return core.WithRuntimeConfig(cfg)
+}
 
 // WithFuncImport satisfies a named func import with the given *ExportedFunc.
 func WithFuncImport(name string, f *ExportedFunc) InstantiateOption {
