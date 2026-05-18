@@ -34,7 +34,7 @@ type impl struct {
 	streamsInst *host.ComponentInstance
 }
 
-func (i *impl) Handle(_ context.Context, rh *types.OutgoingRequestHandle, ro OptionRequestOptions) (ResultFutureIncomingResponseTypesErrorCode, error) {
+func (i *impl) Handle(ctx context.Context, rh *types.OutgoingRequestHandle, ro OptionRequestOptions) (ResultFutureIncomingResponseTypesErrorCode, error) {
 	rli, ok := rh.LocalImpl()
 	if !ok {
 		return nil, fmt.Errorf("wasi:http/outgoing-handler.handle: request handle is not a local implementation")
@@ -44,7 +44,7 @@ func (i *impl) Handle(_ context.Context, rh *types.OutgoingRequestHandle, ro Opt
 		return nil, fmt.Errorf("wasi:http/outgoing-handler.handle: request handle's local implementation does not implement types.GoOutgoingRequest")
 	}
 
-	httpRequest := request.ToHTTPRequest()
+	httpRequest := request.ToHTTPRequest().WithContext(ctx)
 
 	ch := make(chan struct{})
 	respFuture := &futureIncomingResponseImpl{
