@@ -13,6 +13,7 @@ type InstantiateOption interface {
 type instantiateOpts struct {
 	resourceFroms []resourceFromOpt
 	userState     any
+	callListener  CallListener
 }
 
 type resourceFromOpt struct {
@@ -42,3 +43,14 @@ func (o userStateOpt) apply(s *instantiateOpts) { s.userState = o.s }
 func WithResourceFrom(ref *ResourceTypeRef, lender *core.ComponentInstance, lenderExport string) InstantiateOption {
 	return resourceFromOpt{ref: ref, lender: lender, lenderExport: lenderExport}
 }
+
+// WithCallListener attaches l to the ComponentInstance. Its methods are
+// invoked around every host-component function and destructor call on
+// the instance.
+func WithCallListener(l CallListener) InstantiateOption {
+	return callListenerOpt{l: l}
+}
+
+type callListenerOpt struct{ l CallListener }
+
+func (o callListenerOpt) apply(s *instantiateOpts) { s.callListener = o.l }

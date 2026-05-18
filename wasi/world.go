@@ -89,100 +89,105 @@ func NewWorld(ctx context.Context, e *wacogo.Engine, cfg *Config) (*World, error
 		httpClient = http.DefaultClient
 	}
 
+	var commonOpts []host.InstantiateOption
+	if cfg.CallListener != nil {
+		commonOpts = append(commonOpts, host.WithCallListener(cfg.CallListener))
+	}
+
 	w := &World{}
 	type step struct {
 		name string
-		run  func() (*host.ComponentInstance, error)
+		run  func(opts ...host.InstantiateOption) (*host.ComponentInstance, error)
 		set  func(*host.ComponentInstance)
 	}
 
 	steps := []step{
 		// Layer 0 — no deps
-		{"io.error", func() (*host.ComponentInstance, error) {
-			return wioerror.NewInstance(ctx, e)
+		{"io.error", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return wioerror.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.Error = i }},
-		{"io.poll", func() (*host.ComponentInstance, error) {
-			return poll.NewInstance(ctx, e)
+		{"io.poll", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return poll.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.Poll = i }},
-		{"clocks.wall-clock", func() (*host.ComponentInstance, error) {
-			return wallclock.NewInstance(ctx, e)
+		{"clocks.wall-clock", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return wallclock.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.WallClock = i }},
-		{"random.random", func() (*host.ComponentInstance, error) {
-			return randomrandom.NewInstance(ctx, e)
+		{"random.random", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return randomrandom.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.Random = i }},
-		{"random.insecure", func() (*host.ComponentInstance, error) {
-			return randominsecure.NewInstance(ctx, e)
+		{"random.insecure", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return randominsecure.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.Insecure = i }},
-		{"random.insecure-seed", func() (*host.ComponentInstance, error) {
-			return randominsecureseed.NewInstance(ctx, e)
+		{"random.insecure-seed", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return randominsecureseed.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.InsecureSeed = i }},
-		{"cli.environment", func() (*host.ComponentInstance, error) {
-			return environment.NewInstance(ctx, e, cfg.Args, cfg.Env, cfg.InitialCwd)
+		{"cli.environment", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return environment.NewInstance(ctx, e, cfg.Args, cfg.Env, cfg.InitialCwd, opts...)
 		}, func(i *host.ComponentInstance) { w.Environment = i }},
-		{"cli.exit", func() (*host.ComponentInstance, error) {
-			return exit.NewInstance(ctx, e)
+		{"cli.exit", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return exit.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.Exit = i }},
-		{"cli.terminal-input", func() (*host.ComponentInstance, error) {
-			return terminalinput.NewInstance(ctx, e)
+		{"cli.terminal-input", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return terminalinput.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.TerminalInput = i }},
-		{"cli.terminal-output", func() (*host.ComponentInstance, error) {
-			return terminaloutput.NewInstance(ctx, e)
+		{"cli.terminal-output", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return terminaloutput.NewInstance(ctx, e, opts...)
 		}, func(i *host.ComponentInstance) { w.TerminalOutput = i }},
 
 		// Layer 1 — deps on Layer 0
-		{"io.streams", func() (*host.ComponentInstance, error) {
-			return streams.NewInstance(ctx, e, w.Error, w.Poll)
+		{"io.streams", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return streams.NewInstance(ctx, e, w.Error, w.Poll, opts...)
 		}, func(i *host.ComponentInstance) { w.Streams = i }},
-		{"clocks.monotonic-clock", func() (*host.ComponentInstance, error) {
-			return monotonicclock.NewInstance(ctx, e, w.Poll)
+		{"clocks.monotonic-clock", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return monotonicclock.NewInstance(ctx, e, w.Poll, opts...)
 		}, func(i *host.ComponentInstance) { w.MonotonicClock = i }},
-		{"clocks.timezone", func() (*host.ComponentInstance, error) {
-			return timezone.NewInstance(ctx, e, w.WallClock)
+		{"clocks.timezone", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return timezone.NewInstance(ctx, e, w.WallClock, opts...)
 		}, func(i *host.ComponentInstance) { w.Timezone = i }},
-		{"sockets.network", func() (*host.ComponentInstance, error) {
-			return socketsnetwork.NewInstance(ctx, e, w.Error)
+		{"sockets.network", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return socketsnetwork.NewInstance(ctx, e, w.Error, opts...)
 		}, func(i *host.ComponentInstance) { w.Network = i }},
 
 		// Layer 2 — deps on Layer 1
-		{"sockets.instance-network", func() (*host.ComponentInstance, error) {
-			return socketsinstancenetwork.NewInstance(ctx, e, w.Network)
+		{"sockets.instance-network", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return socketsinstancenetwork.NewInstance(ctx, e, w.Network, opts...)
 		}, func(i *host.ComponentInstance) { w.InstanceNetwork = i }},
-		{"sockets.ip-name-lookup", func() (*host.ComponentInstance, error) {
-			return socketsipnamelookup.NewInstance(ctx, e, w.Network, w.Poll)
+		{"sockets.ip-name-lookup", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return socketsipnamelookup.NewInstance(ctx, e, w.Network, w.Poll, opts...)
 		}, func(i *host.ComponentInstance) { w.IPNameLookup = i }},
-		{"filesystem.types", func() (*host.ComponentInstance, error) {
-			return fstypes.NewInstance(ctx, e, w.Error, w.Poll, w.Streams, w.WallClock)
+		{"filesystem.types", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return fstypes.NewInstance(ctx, e, w.Error, w.Poll, w.Streams, w.WallClock, opts...)
 		}, func(i *host.ComponentInstance) { w.FilesystemTypes = i }},
-		{"cli.stdin", func() (*host.ComponentInstance, error) {
-			return stdin.NewInstance(ctx, e, w.Streams, w.Error, w.Poll, cfg.Stdin)
+		{"cli.stdin", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return stdin.NewInstance(ctx, e, w.Streams, w.Error, w.Poll, cfg.Stdin, opts...)
 		}, func(i *host.ComponentInstance) { w.Stdin = i }},
-		{"cli.stdout", func() (*host.ComponentInstance, error) {
-			return stdout.NewInstance(ctx, e, w.Streams, w.Error, w.Poll, cfg.Stdout)
+		{"cli.stdout", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return stdout.NewInstance(ctx, e, w.Streams, w.Error, w.Poll, cfg.Stdout, opts...)
 		}, func(i *host.ComponentInstance) { w.Stdout = i }},
-		{"cli.stderr", func() (*host.ComponentInstance, error) {
-			return stderr.NewInstance(ctx, e, w.Streams, w.Error, w.Poll, cfg.Stderr)
+		{"cli.stderr", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return stderr.NewInstance(ctx, e, w.Streams, w.Error, w.Poll, cfg.Stderr, opts...)
 		}, func(i *host.ComponentInstance) { w.Stderr = i }},
-		{"cli.terminal-stdin", func() (*host.ComponentInstance, error) {
-			return terminalstdin.NewInstance(ctx, e, w.TerminalInput)
+		{"cli.terminal-stdin", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return terminalstdin.NewInstance(ctx, e, w.TerminalInput, opts...)
 		}, func(i *host.ComponentInstance) { w.TerminalStdin = i }},
-		{"cli.terminal-stdout", func() (*host.ComponentInstance, error) {
-			return terminalstdout.NewInstance(ctx, e, w.TerminalOutput)
+		{"cli.terminal-stdout", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return terminalstdout.NewInstance(ctx, e, w.TerminalOutput, opts...)
 		}, func(i *host.ComponentInstance) { w.TerminalStdout = i }},
-		{"cli.terminal-stderr", func() (*host.ComponentInstance, error) {
-			return terminalstderr.NewInstance(ctx, e, w.TerminalOutput)
+		{"cli.terminal-stderr", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return terminalstderr.NewInstance(ctx, e, w.TerminalOutput, opts...)
 		}, func(i *host.ComponentInstance) { w.TerminalStderr = i }},
-		{"sockets.tcp", func() (*host.ComponentInstance, error) {
-			return socketstcp.NewInstance(ctx, e, w.Error, w.Network, w.Poll, w.Streams)
+		{"sockets.tcp", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return socketstcp.NewInstance(ctx, e, w.Error, w.Network, w.Poll, w.Streams, opts...)
 		}, func(i *host.ComponentInstance) { w.TCP = i }},
-		{"sockets.udp", func() (*host.ComponentInstance, error) {
-			return socketsudp.NewInstance(ctx, e, w.Network, w.Poll)
+		{"sockets.udp", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return socketsudp.NewInstance(ctx, e, w.Network, w.Poll, opts...)
 		}, func(i *host.ComponentInstance) { w.UDP = i }},
-		{"http.types", func() (*host.ComponentInstance, error) {
-			return httptypes.NewInstance(ctx, e, w.Error, w.Poll, w.Streams)
+		{"http.types", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return httptypes.NewInstance(ctx, e, w.Error, w.Poll, w.Streams, opts...)
 		}, func(i *host.ComponentInstance) { w.HttpTypes = i }},
 
 		// Layer 3 — deps on Layer 2
-		{"filesystem.preopens", func() (*host.ComponentInstance, error) {
+		{"filesystem.preopens", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 			var impl fspreopens.Preopens = fspreopens.EmptyFS{}
 			if cfg.Preopens != nil {
 				impl = cfg.Preopens(fspreopens.Deps{
@@ -193,21 +198,21 @@ func NewWorld(ctx context.Context, e *wacogo.Engine, cfg *Config) (*World, error
 					WallClock: w.WallClock,
 				})
 			}
-			return fspreopens.NewInstance(ctx, e, w.Error, w.Poll, w.Streams, w.FilesystemTypes, w.WallClock, impl)
+			return fspreopens.NewInstance(ctx, e, w.Error, w.Poll, w.Streams, w.FilesystemTypes, w.WallClock, impl, opts...)
 		}, func(i *host.ComponentInstance) { w.FilesystemPreopens = i }},
-		{"sockets.tcp-create-socket", func() (*host.ComponentInstance, error) {
-			return socketstcpcreate.NewInstance(ctx, e, w.Error, w.Network, w.Poll, w.Streams, w.TCP)
+		{"sockets.tcp-create-socket", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return socketstcpcreate.NewInstance(ctx, e, w.Error, w.Network, w.Poll, w.Streams, w.TCP, opts...)
 		}, func(i *host.ComponentInstance) { w.TCPCreateSocket = i }},
-		{"sockets.udp-create-socket", func() (*host.ComponentInstance, error) {
-			return socketsudpcreate.NewInstance(ctx, e, w.Network, w.Poll, w.UDP)
+		{"sockets.udp-create-socket", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return socketsudpcreate.NewInstance(ctx, e, w.Network, w.Poll, w.UDP, opts...)
 		}, func(i *host.ComponentInstance) { w.UDPCreateSocket = i }},
-		{"http.outgoing-handler", func() (*host.ComponentInstance, error) {
-			return httpoutgoing.NewInstance(ctx, e, w.HttpTypes, w.Error, w.Poll, w.Streams, httpClient)
+		{"http.outgoing-handler", func(opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
+			return httpoutgoing.NewInstance(ctx, e, w.HttpTypes, w.Error, w.Poll, w.Streams, httpClient, opts...)
 		}, func(i *host.ComponentInstance) { w.HttpOutgoing = i }},
 	}
 
 	for _, s := range steps {
-		inst, err := s.run()
+		inst, err := s.run(commonOpts...)
 		if err != nil {
 			_ = w.Close(ctx)
 			return nil, fmt.Errorf("wasi: instantiate %s: %w", s.name, err)

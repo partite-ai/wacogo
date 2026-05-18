@@ -169,6 +169,7 @@ func NewInstance(
 	networkInst *host.ComponentInstance,
 	pollInst *host.ComponentInstance,
 	streamsInst *host.ComponentInstance,
+	opts ...host.InstantiateOption,
 ) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
@@ -179,5 +180,5 @@ func NewInstance(
 		Network: networkInst.Core(),
 		Poll:    pollInst.Core(),
 		Streams: streamsInst.Core(),
-	})
+	}, opts...)
 }

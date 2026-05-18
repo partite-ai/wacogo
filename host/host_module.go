@@ -36,13 +36,10 @@ func buildPerInstanceHostMod(
 		paramTypes := valueTypesFromCoreBytes(fr.flatParams)
 		resultTypes := valueTypesFromCoreBytes(fr.flatResults)
 		fn := api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
-			cc := core.NewCallContext(h.core, nil, mod.Memory(), wrapRealloc(mod.ExportedFunction("realloc")))
-			if err := fr.userFn(ctx, cc, h, stack); err != nil {
-				// wazero converts a panic from a host function into a wasm
-				// trap on the calling instance. Panicking with the error
-				// surfaces it to the caller verbatim.
-				panic(err)
-			}
+			instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
+				cc := core.NewCallContext(h.core, nil, mod.Memory(), wrapRealloc(mod.ExportedFunction("realloc")))
+				return fr.userFn(ctx, cc, h, stack)
+			})
 		})
 		hmb.NewFunctionBuilder().
 			WithGoModuleFunction(fn, paramTypes, resultTypes).
@@ -55,11 +52,14 @@ func buildPerInstanceHostMod(
 			continue
 		}
 		fn := api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
-			rep := uint32(stack[0])
-			obj, _ := h.releaseResource(ExternHandle(rep))
-			if rr.userDtor != nil {
-				_ = rr.userDtor(ctx, h, obj)
-			}
+			instrumentCall(ctx, h, CallKindDestructor, rr.exportName, stack, false, func() error {
+				rep := uint32(stack[0])
+				obj, _ := h.releaseResource(ExternHandle(rep))
+				if rr.userDtor != nil {
+					return rr.userDtor(ctx, h, obj)
+				}
+				return nil
+			})
 		})
 		hmb.NewFunctionBuilder().
 			WithGoModuleFunction(fn,
@@ -83,6 +83,57 @@ func buildPerInstanceHostMod(
 		return nil, fmt.Errorf("wacogo/host: instantiate per-instance hostMod: %w", err)
 	}
 	return mod, nil
+}
+
+// instrumentCall runs fn under any CallListener attached to h. When the
+// listener is nil it takes a direct fast path: no defer, panics
+// propagate as-is, and a returned error is converted to a panic only
+// when panicOnErr is true (the regular wasm-trap semantics for host
+// function calls; destructors pass panicOnErr=false to preserve their
+// historical fire-and-forget behavior).
+//
+// When the listener is set, fn is wrapped so BeforeCall fires once
+// before invocation and AfterCall fires exactly once afterward — on
+// success, on returned error, and on panic. Recovered panics are
+// re-thrown verbatim so wazero's trap conversion sees the original
+// value.
+func instrumentCall(
+	ctx context.Context,
+	h *ComponentInstance,
+	kind CallKind,
+	name string,
+	stack []uint64,
+	panicOnErr bool,
+	fn func() error,
+) {
+	l := h.callListener
+	if l == nil {
+		err := fn()
+		if panicOnErr && err != nil {
+			panic(err)
+		}
+		return
+	}
+	l.BeforeCall(ctx, h, kind, name, stack)
+	var callErr error
+	defer func() {
+		r := recover()
+		if r != nil {
+			if e, ok := r.(error); ok {
+				callErr = e
+			} else {
+				callErr = fmt.Errorf("panic: %v", r)
+			}
+		}
+		l.AfterCall(ctx, h, kind, name, stack, callErr)
+		if r != nil {
+			panic(r)
+		}
+		if panicOnErr && callErr != nil {
+			panic(callErr)
+		}
+	}()
+	callErr = fn()
 }
 
 // wrapRealloc adapts a wazero realloc export into a core.ReallocFunc.

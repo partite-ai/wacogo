@@ -66,6 +66,7 @@ func NewInstance(
 	engine *wacogo.Engine,
 	networkInst *host.ComponentInstance,
 	pollInst *host.ComponentInstance,
+	opts ...host.InstantiateOption,
 ) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
@@ -74,5 +75,5 @@ func NewInstance(
 	return fac.NewInstance(ctx, impl{}, &gen.Deps{
 		Network: networkInst.Core(),
 		Poll:    pollInst.Core(),
-	})
+	}, opts...)
 }

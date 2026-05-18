@@ -36,10 +36,10 @@ var (
 	_ gen.TerminalInputResource = terminalInputResourceImpl{}
 )
 
-func NewInstance(ctx context.Context, engine *wacogo.Engine) (*host.ComponentInstance, error) {
+func NewInstance(ctx context.Context, engine *wacogo.Engine, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err
 	}
-	return fac.NewInstance(ctx, impl{}, nil)
+	return fac.NewInstance(ctx, impl{}, nil, opts...)
 }

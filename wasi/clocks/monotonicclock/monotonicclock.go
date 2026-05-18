@@ -108,10 +108,10 @@ var _ gen.MonotonicClock = (*clock)(nil)
 // NewInstance creates a monotonic-clock host component instance backed by
 // Go's time package. pollInst must be the wasi:io/poll instance that owns
 // the pollable resource type so subscribe-* results can be registered there.
-func NewInstance(ctx context.Context, engine *wacogo.Engine, pollInst *host.ComponentInstance) (*host.ComponentInstance, error) {
+func NewInstance(ctx context.Context, engine *wacogo.Engine, pollInst *host.ComponentInstance, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err
 	}
-	return fac.NewInstance(ctx, newClock(pollInst), &gen.Deps{Poll: pollInst.Core()})
+	return fac.NewInstance(ctx, newClock(pollInst), &gen.Deps{Poll: pollInst.Core()}, opts...)
 }

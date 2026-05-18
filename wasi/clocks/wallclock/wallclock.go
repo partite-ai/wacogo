@@ -49,10 +49,10 @@ var _ gen.WallClock = (*clock)(nil)
 
 // NewInstance creates a wall-clock host component instance backed by
 // Go's time.Now.
-func NewInstance(ctx context.Context, engine *wacogo.Engine) (*host.ComponentInstance, error) {
+func NewInstance(ctx context.Context, engine *wacogo.Engine, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err
 	}
-	return fac.NewInstance(ctx, newClock(), nil)
+	return fac.NewInstance(ctx, newClock(), nil, opts...)
 }

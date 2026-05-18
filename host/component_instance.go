@@ -20,6 +20,7 @@ type ComponentInstance struct {
 	core           *core.ComponentInstance
 	extTable       *externTable
 	userState      any
+	callListener   CallListener
 	cleanups       []func()
 	preCloseChecks []func() error
 }

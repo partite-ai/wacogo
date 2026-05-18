@@ -45,7 +45,7 @@ func (i *impl) InitialCwd(_ context.Context) (OptionString, error) {
 
 var _ gen.Environment = &impl{}
 
-func NewInstance(ctx context.Context, engine *wacogo.Engine, args []string, env [][2]string, initialCwd string) (*host.ComponentInstance, error) {
+func NewInstance(ctx context.Context, engine *wacogo.Engine, args []string, env [][2]string, initialCwd string, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err

@@ -38,6 +38,7 @@ func NewInstance(
 	typesInst *host.ComponentInstance,
 	wallClockInst *host.ComponentInstance,
 	impl Preopens,
+	opts ...host.InstantiateOption,
 ) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
@@ -49,5 +50,5 @@ func NewInstance(
 		Streams:   streamsInst.Core(),
 		Types:     typesInst.Core(),
 		WallClock: wallClockInst.Core(),
-	})
+	}, opts...)
 }

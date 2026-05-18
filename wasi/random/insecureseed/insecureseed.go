@@ -44,10 +44,10 @@ func (s *seeder) InsecureSeed(_ context.Context) (TupleU64U64, error) {
 
 var _ gen.InsecureSeed = (*seeder)(nil)
 
-func NewInstance(ctx context.Context, engine *wacogo.Engine) (*host.ComponentInstance, error) {
+func NewInstance(ctx context.Context, engine *wacogo.Engine, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err
 	}
-	return fac.NewInstance(ctx, newSeeder(), nil)
+	return fac.NewInstance(ctx, newSeeder(), nil, opts...)
 }

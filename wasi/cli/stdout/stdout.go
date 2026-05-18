@@ -30,7 +30,7 @@ func (i *impl) GetStdout(_ context.Context) (*streams.OutputStreamHandle, error)
 
 var _ gen.Stdout = (*impl)(nil)
 
-func NewInstance(ctx context.Context, engine *wacogo.Engine, streamsInst, errorInst, pollInst *host.ComponentInstance, stdout io.Writer) (*host.ComponentInstance, error) {
+func NewInstance(ctx context.Context, engine *wacogo.Engine, streamsInst, errorInst, pollInst *host.ComponentInstance, stdout io.Writer, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err
@@ -40,5 +40,5 @@ func NewInstance(ctx context.Context, engine *wacogo.Engine, streamsInst, errorI
 		Error:   errorInst.Core(),
 		Poll:    pollInst.Core(),
 		Streams: streamsInst.Core(),
-	})
+	}, opts...)
 }

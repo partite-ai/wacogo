@@ -3,6 +3,7 @@ package wasi
 import (
 	"io"
 
+	"github.com/partite-ai/wacogo/host"
 	"github.com/partite-ai/wacogo/wasi/filesystem/preopens"
 	"github.com/partite-ai/wacogo/wasi/http/types"
 )
@@ -38,4 +39,8 @@ type Config struct {
 	// mapped via the existing translation, falling back to
 	// ErrorCodeInternalError.
 	HttpClient HTTPDoer
+
+	// CallListener, if non-nil, is attached to every host component
+	// instance that NewWorld creates. See host.CallListener.
+	CallListener host.CallListener
 }

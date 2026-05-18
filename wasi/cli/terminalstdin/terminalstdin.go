@@ -26,10 +26,10 @@ func (impl) GetTerminalStdin(_ context.Context) (OptionTerminalInputResource, er
 
 var _ gen.TerminalStdin = impl{}
 
-func NewInstance(ctx context.Context, engine *wacogo.Engine, terminalInputInst *host.ComponentInstance) (*host.ComponentInstance, error) {
+func NewInstance(ctx context.Context, engine *wacogo.Engine, terminalInputInst *host.ComponentInstance, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err
 	}
-	return fac.NewInstance(ctx, impl{}, &gen.Deps{TerminalInput: terminalInputInst.Core()})
+	return fac.NewInstance(ctx, impl{}, &gen.Deps{TerminalInput: terminalInputInst.Core()}, opts...)
 }

@@ -41,6 +41,7 @@ func NewInstance(
 	networkInst *host.ComponentInstance,
 	pollInst *host.ComponentInstance,
 	udpInst *host.ComponentInstance,
+	opts ...host.InstantiateOption,
 ) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
@@ -50,5 +51,5 @@ func NewInstance(
 		Network: networkInst.Core(),
 		Poll:    pollInst.Core(),
 		Udp:     udpInst.Core(),
-	})
+	}, opts...)
 }

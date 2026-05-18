@@ -82,6 +82,7 @@ func NewInstance(
 	pollInst *host.ComponentInstance,
 	streamsInst *host.ComponentInstance,
 	httpClient types.HTTPDoer,
+	opts ...host.InstantiateOption,
 ) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
@@ -98,5 +99,5 @@ func NewInstance(
 		Poll:    pollInst.Core(),
 		Streams: streamsInst.Core(),
 		Types:   typesInst.Core(),
-	})
+	}, opts...)
 }

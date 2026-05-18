@@ -35,10 +35,11 @@ func NewInstance(
 	ctx context.Context,
 	engine *wacogo.Engine,
 	networkInst *host.ComponentInstance,
+	opts ...host.InstantiateOption,
 ) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err
 	}
-	return fac.NewInstance(ctx, impl{}, &gen.Deps{Network: networkInst.Core()})
+	return fac.NewInstance(ctx, impl{}, &gen.Deps{Network: networkInst.Core()}, opts...)
 }

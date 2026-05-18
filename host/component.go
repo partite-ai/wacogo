@@ -103,8 +103,9 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	//    closures and per-resource dtor closures capture h directly; no
 	//    closure fires before construction completes.
 	h := &ComponentInstance{
-		extTable:  &externTable{},
-		userState: iopts.userState,
+		extTable:     &externTable{},
+		userState:    iopts.userState,
+		callListener: iopts.callListener,
 	}
 
 	// 2. Per-instance host module + stub instantiation; closures capture h.

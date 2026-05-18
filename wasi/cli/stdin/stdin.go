@@ -28,7 +28,7 @@ func (i *impl) GetStdin(_ context.Context) (*streams.InputStreamHandle, error) {
 
 var _ gen.Stdin = (*impl)(nil)
 
-func NewInstance(ctx context.Context, engine *wacogo.Engine, streamsInst, errorInst, pollInst *host.ComponentInstance, stdin io.Reader) (*host.ComponentInstance, error) {
+func NewInstance(ctx context.Context, engine *wacogo.Engine, streamsInst, errorInst, pollInst *host.ComponentInstance, stdin io.Reader, opts ...host.InstantiateOption) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
 		return nil, err
@@ -42,5 +42,5 @@ func NewInstance(ctx context.Context, engine *wacogo.Engine, streamsInst, errorI
 		Error:   errorInst.Core(),
 		Poll:    pollInst.Core(),
 		Streams: streamsInst.Core(),
-	})
+	}, opts...)
 }

@@ -366,6 +366,7 @@ func NewInstance(
 	errorInst *host.ComponentInstance,
 	pollInst *host.ComponentInstance,
 	streamsInst *host.ComponentInstance,
+	opts ...host.InstantiateOption,
 ) (*host.ComponentInstance, error) {
 	fac, err := gen.NewFactory(ctx, engine)
 	if err != nil {
@@ -379,5 +380,5 @@ func NewInstance(
 		Error:   errorInst.Core(),
 		Poll:    pollInst.Core(),
 		Streams: streamsInst.Core(),
-	})
+	}, opts...)
 }
