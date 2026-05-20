@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	"github.com/partite-ai/wacogo/host"
-	wasierr "github.com/partite-ai/wacogo/wasi/internal/wasierr"
 	"github.com/partite-ai/wacogo/internal/wasi/gen/wasi/http/types"
 	"github.com/partite-ai/wacogo/internal/wasi/gen/wasi/io/wioerror"
+	wasierr "github.com/partite-ai/wacogo/wasi/internal/wasierr"
 )
 
 // impl is the top-level Types implementation
@@ -56,8 +56,21 @@ func (i *impl) ResponseOutparamSet(_ context.Context, _ *ResponseOutparamHandle,
 	return fmt.Errorf("wasi:http/types.response-outparam.set: %w", wasierr.ErrNotImplemented)
 }
 
-func (i *impl) IncomingBodyFinish(_ context.Context, _ *IncomingBodyHandle) (*FutureTrailersHandle, error) {
-	return nil, fmt.Errorf("wasi:http/types.incoming-body.finish: %w", wasierr.ErrNotImplemented)
+func (i *impl) IncomingBodyFinish(ctx context.Context, bodyHandle *IncomingBodyHandle) (*FutureTrailersHandle, error) {
+	impl, ok := bodyHandle.LocalImpl()
+	if !ok {
+		return nil, fmt.Errorf("wasi:http/types.incoming-body.finish: unknown incoming body handle")
+	}
+	bImpl, ok := impl.(*incomingBodyImpl)
+	if !ok {
+		return nil, fmt.Errorf("wasi:http/types.incoming-body.finish: invalid incoming body handle")
+	}
+	bodyHandle.Drop(ctx)
+
+	return NewFutureTrailersHandle(&futureTrailersImpl{
+		headers:  bImpl.resp.Trailer,
+		pollInst: i.pollInst,
+	}), nil
 }
 
 func (i *impl) NewOutgoingResponse(_ context.Context, _ *FieldsHandle) (*OutgoingResponseHandle, error) {

@@ -9,8 +9,8 @@ import (
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
-	wasierr "github.com/partite-ai/wacogo/wasi/internal/wasierr"
 	gen "github.com/partite-ai/wacogo/internal/wasi/gen/wasi/http/types"
+	wasierr "github.com/partite-ai/wacogo/wasi/internal/wasierr"
 	"github.com/partite-ai/wacogo/wasi/io/poll"
 )
 
@@ -308,16 +308,6 @@ func (responseOutparamImpl) SendInformational(_ context.Context, _ uint16, _ *Fi
 	return nil, fmt.Errorf("wasi:http/types.response-outparam.send-informational: %w", wasierr.ErrNotImplemented)
 }
 
-// futureTrailersImpl is the FutureTrailers resource implementation returning ErrNotImplemented.
-type futureTrailersImpl struct{}
-
-func (futureTrailersImpl) Get(_ context.Context) (OptionResultResultOptionFieldsErrorCode_, error) {
-	return OptionResultResultOptionFieldsErrorCode_{}, fmt.Errorf("wasi:http/types.future-trailers.get: %w", wasierr.ErrNotImplemented)
-}
-func (futureTrailersImpl) Subscribe(_ context.Context) (*poll.PollableHandle, error) {
-	return nil, fmt.Errorf("wasi:http/types.future-trailers.subscribe: %w", wasierr.ErrNotImplemented)
-}
-
 // outgoingResponseImpl is the OutgoingResponse resource implementation returning ErrNotImplemented.
 type outgoingResponseImpl struct{}
 
@@ -353,7 +343,7 @@ var (
 	_ gen.ResponseOutparam       = responseOutparamImpl{}
 	_ gen.IncomingResponse       = &incomingResponseImpl{}
 	_ gen.IncomingBody           = &incomingBodyImpl{}
-	_ gen.FutureTrailers         = futureTrailersImpl{}
+	_ gen.FutureTrailers         = &futureTrailersImpl{}
 	_ gen.OutgoingResponse       = outgoingResponseImpl{}
 	_ gen.OutgoingBody           = &outgoingBodyImpl{}
 	_ gen.FutureIncomingResponse = futureIncomingResponseImpl{}
