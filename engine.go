@@ -14,6 +14,7 @@ import (
 
 	"github.com/partite-ai/wacogo/host"
 	"github.com/partite-ai/wacogo/internal/core"
+	"github.com/tetratelabs/wazero"
 )
 
 // Engine owns the wazero runtime and is the entry point for loading
@@ -42,6 +43,21 @@ func (e *Engine) Close(ctx context.Context) error {
 // for concurrent Instantiate calls.
 func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, error) {
 	return e.core.LoadComponent(ctx, r)
+}
+
+// WazeroRuntime returns the underlying wazero runtime. Use it to
+// register host modules or compile raw core modules that sit alongside
+// the component-model machinery; the runtime is shared with all
+// components loaded through this engine.
+func (e *Engine) WazeroRuntime() wazero.Runtime {
+	return core.WazeroRuntime(e.core)
+}
+
+// WrapCompiledModule lifts a wazero.CompiledModule into a *CompiledModule
+// suitable for use as a core-module import (see WithModuleImport). The
+// caller retains ownership of the underlying compiled module.
+func WrapCompiledModule(cm wazero.CompiledModule) *CompiledModule {
+	return core.WrapCompiledModule(cm)
 }
 
 // NewHostBuilder returns a fresh host.Builder bound to this engine.
