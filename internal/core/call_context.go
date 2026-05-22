@@ -28,17 +28,25 @@ type Task = canon.Task
 type CallContext struct {
 	inst    *ComponentInstance
 	task    *canon.Task
+	module  api.Module
 	memory  api.Memory
 	realloc ReallocFunc
 }
 
 // NewCallContext returns a CallContext for the given instance, task,
-// memory, and realloc. memory and realloc may be nil for canon-only
-// contexts that touch neither (e.g., temporary CCs built solely to
-// manage resource handles).
-func NewCallContext(inst *ComponentInstance, task *canon.Task, memory api.Memory, realloc ReallocFunc) *CallContext {
-	return &CallContext{inst: inst, task: task, memory: memory, realloc: realloc}
+// module, memory, and realloc. module, memory, and realloc may be nil
+// for canon-only contexts that touch neither (e.g., temporary CCs built
+// solely to manage resource handles). module is the caller core module
+// when one is in scope (host-function entry); it is nil on canon paths
+// that hold only an api.Memory.
+func NewCallContext(inst *ComponentInstance, task *canon.Task, module api.Module, memory api.Memory, realloc ReallocFunc) *CallContext {
+	return &CallContext{inst: inst, task: task, module: module, memory: memory, realloc: realloc}
 }
+
+// Module returns the core module in scope for this call, or nil when no
+// module is bound (canon-only contexts, or contexts constructed from a
+// raw api.Memory without an enclosing module).
+func (cc *CallContext) Module() api.Module { return cc.module }
 
 // Memory returns the memory in scope for arg lift/lower at this point
 // in the call, or nil for canon-only contexts.

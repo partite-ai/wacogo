@@ -70,10 +70,11 @@ func (f *Func) CallRaw(
 
 	callee := f.binding.Callee()
 	task := &canon.Task{}
-	callerCC := NewCallContext(caller, task, nil, nil)
+	callerCC := NewCallContext(caller, task, nil, nil, nil)
 	calleeCC := NewCallContext(
 		instanceFromCanon(callee.Instance),
 		task,
+		nil,
 		callee.Memory,
 		wrapAPIRealloc(callee.Realloc),
 	)

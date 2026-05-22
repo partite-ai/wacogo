@@ -37,7 +37,7 @@ func buildPerInstanceHostMod(
 		resultTypes := valueTypesFromCoreBytes(fr.flatResults)
 		fn := api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
 			instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
-				cc := core.NewCallContext(h.core, nil, mod.Memory(), wrapRealloc(mod.ExportedFunction("realloc")))
+				cc := core.NewCallContext(h.core, nil, mod, mod.Memory(), wrapRealloc(mod.ExportedFunction("realloc")))
 				return fr.userFn(ctx, cc, h, stack)
 			})
 		})
