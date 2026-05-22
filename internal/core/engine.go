@@ -13,8 +13,15 @@ import (
 // EngineOption configures an Engine at construction time.
 type EngineOption func(*engineConfig)
 
+// CoreModuleReplacer inspects a freshly-compiled inline core module
+// during LoadComponent and optionally returns a replacement. Returning
+// nil keeps the original. The replacement must be compiled against the
+// same wazero runtime as the engine.
+type CoreModuleReplacer func(wazero.CompiledModule) wazero.CompiledModule
+
 type engineConfig struct {
 	runtimeConfig wazero.RuntimeConfig
+	replacer      CoreModuleReplacer
 }
 
 // WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
@@ -24,11 +31,22 @@ func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
 	return func(c *engineConfig) { c.runtimeConfig = cfg }
 }
 
+// WithCoreModuleReplacer registers a hook called for every inline core
+// module compiled during LoadComponent, including modules declared in
+// nested subcomponents. Returning a non-nil module substitutes it for
+// the engine's freshly-compiled one; the original is then closed.
+// Returning nil keeps the original. Passing this option twice replaces
+// the previous hook.
+func WithCoreModuleReplacer(r CoreModuleReplacer) EngineOption {
+	return func(c *engineConfig) { c.replacer = r }
+}
+
 // Engine owns the wazero runtime and is the entry point for loading components.
 type Engine struct {
 	runtime   wazero.Runtime
 	canonHost *canon.Host
 	validator *wasmparser.Validator
+	replacer  CoreModuleReplacer
 }
 
 // NewEngine creates a new Engine with the given options.
@@ -46,6 +64,7 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 		runtime:   rt,
 		canonHost: canon.NewHost(rt),
 		validator: wasmparser.NewValidator(wasmparser.DefaultFeatures()),
+		replacer:  cfg.replacer,
 	}
 }
 

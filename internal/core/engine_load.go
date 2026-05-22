@@ -196,6 +196,12 @@ func (l *componentLoader) processModuleSection(ctx context.Context, sec *wasmpar
 	if err != nil {
 		return fmt.Errorf("wacogo: compile module: %w", err)
 	}
+	if l.engine.replacer != nil {
+		if replacement := l.engine.replacer(compiled); replacement != nil && replacement != compiled {
+			_ = compiled.Close(ctx)
+			compiled = replacement
+		}
+	}
 	l.scope.compiledModules = append(l.scope.compiledModules, CompiledModule{
 		module:        compiled,
 		syntheticName: syntheticName,

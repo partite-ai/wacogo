@@ -6,6 +6,10 @@ import "github.com/partite-ai/wacogo/internal/core"
 // to NewEngine.
 type EngineOption = core.EngineOption
 
+// CoreModuleReplacer inspects a freshly-compiled inline core module and
+// optionally returns a replacement. See WithCoreModuleReplacer.
+type CoreModuleReplacer = core.CoreModuleReplacer
+
 // Component is an immutable, compiled component-model component ready
 // for instantiation. Obtain one from (*Engine).LoadComponent.
 type Component = core.Component
