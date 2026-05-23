@@ -131,16 +131,23 @@ func instantiateStubModule(
 // emitReallocBody emits the realloc function body.
 // Signature: (old_ptr, old_size, align, new_size) -> new_ptr.
 // Semantics: bump allocator, per-call reset. Returns an aligned
-// pointer of new_size bytes; if old_size > 0, copies
-// min(old_size, new_size) bytes from old_ptr.
+// pointer of new_size bytes; grows the linear memory as needed via
+// memory.grow when the new bump would otherwise overflow current size.
+// On grow failure returns 0 (null) so the canonical ABI traps. If
+// old_size > 0, copies min(old_size, new_size) bytes from old_ptr.
 //
-// Locals: one i32 to hold the aligned result pointer.
+// Locals: two i32s — the aligned result pointer and the new bump.
 func emitReallocBody(bumpGlobalIdx uint32) ([]byte, []wasm.LocalEntry) {
 	var cb wasm.CodeBuilder
 
 	// Params: 0=old_ptr, 1=old_size, 2=align, 3=new_size
-	// Local: 4=result (uint32 aligned pointer)
-	const localResult = 4
+	// Locals: 4=result, 5=new_bump
+	const (
+		localResult  = 4
+		localNewBump = 5
+		pageShift    = 16 // 1 << 16 = 65536 bytes/page
+		pageMask     = (1 << 16) - 1
+	)
 
 	// result = (bump + align - 1) & ~(align - 1)
 	cb.GlobalGet(bumpGlobalIdx) // bump
@@ -152,18 +159,49 @@ func emitReallocBody(bumpGlobalIdx uint32) ([]byte, []wasm.LocalEntry) {
 	cb.LocalGet(2)              // align
 	cb.I32Sub()                 // -align
 	cb.I32And()                 // (bump + align - 1) & ~(align - 1) when align power of 2
-	cb.LocalTee(localResult)    // result = ...; leave result on stack
+	cb.LocalSet(localResult)    // result = ...
 
 	// new_bump = result + new_size
-	cb.LocalGet(3)              // new_size
-	cb.I32Add()                 // result + new_size
-	cb.GlobalSet(bumpGlobalIdx) // bump = result + new_size
+	cb.LocalGet(localResult)
+	cb.LocalGet(3) // new_size
+	cb.I32Add()
+	cb.LocalSet(localNewBump)
+
+	// Grow memory if new_bump > memory.size * 64KiB.
+	cb.LocalGet(localNewBump)
+	cb.MemorySize(0)
+	cb.I32Const(pageShift)
+	cb.I32Shl() // current_bytes = pages << 16
+	cb.I32GtU()
+	cb.If(wasm.BlockTypeEmpty)
+	// pages_to_grow = ((new_bump - current_bytes) + pageMask) >> pageShift
+	cb.LocalGet(localNewBump)
+	cb.MemorySize(0)
+	cb.I32Const(pageShift)
+	cb.I32Shl() // current_bytes
+	cb.I32Sub() // deficit bytes
+	cb.I32Const(pageMask)
+	cb.I32Add()
+	cb.I32Const(pageShift)
+	cb.I32ShrU()    // pages, rounded up
+	cb.MemoryGrow(0)
+	cb.I32Const(-1)
+	cb.I32Eq()
+	cb.If(wasm.BlockTypeEmpty)
+	cb.I32Const(0) // signal failure to canon ABI (traps on null)
+	cb.Return()
+	cb.End()
+	cb.End()
+
+	// Commit bump = new_bump.
+	cb.LocalGet(localNewBump)
+	cb.GlobalSet(bumpGlobalIdx)
 
 	// If old_size > 0: memory.copy(result, old_ptr, min(old_size, new_size))
 	cb.LocalGet(1) // old_size
 	cb.I32Const(0)
 	cb.I32Ne()
-	cb.If(0x40 /*void*/)
+	cb.If(wasm.BlockTypeEmpty)
 	cb.LocalGet(localResult) // dst
 	cb.LocalGet(0)           // src (old_ptr)
 	// compute min(old_size, new_size) via select: if (new < old) new else old
@@ -180,7 +218,7 @@ func emitReallocBody(bumpGlobalIdx uint32) ([]byte, []wasm.LocalEntry) {
 	cb.LocalGet(localResult)
 	cb.End()
 
-	locals := []wasm.LocalEntry{wasm.NewLocalEntry(1, wasm.ValI32)}
+	locals := []wasm.LocalEntry{wasm.NewLocalEntry(2, wasm.ValI32)}
 	return cb.Bytes(), locals
 }
 
