@@ -26,19 +26,27 @@ type Task = canon.Task
 // Constructed via NewCallContext from inside the host package; never
 // constructed by user code.
 type CallContext struct {
-	inst    *ComponentInstance
-	task    *canon.Task
-	memory  api.Memory
-	realloc ReallocFunc
+	inst       *ComponentInstance
+	task       *canon.Task
+	coreModule api.Module
+	memory     api.Memory
+	realloc    ReallocFunc
 }
 
 // NewCallContext returns a CallContext for the given instance, task,
-// memory, and realloc. memory and realloc may be nil for canon-only
-// contexts that touch neither (e.g., temporary CCs built solely to
-// manage resource handles).
-func NewCallContext(inst *ComponentInstance, task *canon.Task, memory api.Memory, realloc ReallocFunc) *CallContext {
-	return &CallContext{inst: inst, task: task, memory: memory, realloc: realloc}
+// caller core module, memory, and realloc. coreModule, memory, and
+// realloc may be nil for canon-only contexts that touch none of them
+// (e.g., temporary CCs built solely to manage resource handles).
+// coreModule is the wasm module instance that originated the call into
+// the host — set only on host-function entry paths.
+func NewCallContext(inst *ComponentInstance, task *canon.Task, coreModule api.Module, memory api.Memory, realloc ReallocFunc) *CallContext {
+	return &CallContext{inst: inst, task: task, coreModule: coreModule, memory: memory, realloc: realloc}
 }
+
+// CoreModule returns the wazero core module that called into the host
+// function, or nil when no caller module is bound (canon-only contexts,
+// or contexts built directly from an api.Memory).
+func (cc *CallContext) CoreModule() api.Module { return cc.coreModule }
 
 // Memory returns the memory in scope for arg lift/lower at this point
 // in the call, or nil for canon-only contexts.
