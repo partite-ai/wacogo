@@ -152,5 +152,5 @@ func (a *adapterFunc) Call(ctx context.Context, mod api.Module, stack []uint64) 
 	tc := newTransferContext(callerSide, calleeSide, stack)
 
 	runTransferPlan(ctx, a.plan, tc, a.callee.CoreFunc,
-		wrapPostReturn(a.callee.PostReturn), a.nCallerFlatParams)
+		wrapPostReturn(a.callee.PostReturn), a.nCallerFlatParams, mod)
 }

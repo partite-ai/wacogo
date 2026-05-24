@@ -18,6 +18,10 @@ import (
 //   - postReturn: optional callee post-return hook.
 //   - nCallerFlatParams: caller-side flat slot count for params (used to
 //     locate the canon-lower retptr in flat-params mode).
+//   - callerCoreModule: the wasm module that originated the call. Attached
+//     to ctx via WithCallerCoreModule so host-function callbacks reached
+//     through the callee can recover the wasm caller. May be nil for
+//     test contexts.
 //
 // nCallerFlatParams is derived at construction time by adapterFunc from
 // the function's FuncType (flat count) and passed in here.
@@ -28,7 +32,11 @@ func runTransferPlan(
 	calleeFn api.Function,
 	postReturn PostReturnFunc,
 	nCallerFlatParams uint32,
+	callerCoreModule api.Module,
 ) {
+	if callerCoreModule != nil {
+		ctx = WithCallerCoreModule(ctx, callerCoreModule)
+	}
 	// 1. Enter callee (reentrance lock). The exit closure is captured
 	// here, before the later side swap, so we always release the lock
 	// on the original callee even after we swap sides for the result

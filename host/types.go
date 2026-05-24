@@ -1,6 +1,15 @@
 package host
 
-import "github.com/partite-ai/wacogo/internal/core"
+import (
+	"github.com/partite-ai/wacogo/internal/canon"
+	"github.com/partite-ai/wacogo/internal/core"
+)
+
+// CallerCoreModule returns the wazero core module of the wasm caller
+// for an in-flight cross-component call, or nil when no such caller is
+// attached to ctx. Host functions reached through a canon cross-component
+// adapter receive a ctx carrying the caller's module; pass that ctx here.
+var CallerCoreModule = canon.CallerCoreModule
 
 // CallContext is the per-call value passed to every host Func. It
 // exposes the caller memory and resource-table operations needed to

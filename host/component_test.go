@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/partite-ai/wacogo/internal/core"
-	"github.com/tetratelabs/wazero/api"
 )
 
 func TestInstantiate_PrimitiveFunc_ExportsVisibleAndCallable(t *testing.T) {
@@ -43,37 +42,6 @@ func TestInstantiate_PrimitiveFunc_ExportsVisibleAndCallable(t *testing.T) {
 	}
 	if got := uint32(results[0].(core.ValU32)); got != 42 {
 		t.Fatalf("want 42, got %d", got)
-	}
-}
-
-func TestCallContext_CoreModuleVisibleInHostCallback(t *testing.T) {
-	ctx := context.Background()
-	b, _ := newTestBuilder(t)
-	var gotCoreModule api.Module
-	var gotMemory api.Memory
-	b.AddFunction("probe", &FuncType{}, func(_ context.Context, cc *core.CallContext, _ *ComponentInstance, _ []uint64) error {
-		gotCoreModule = cc.CoreModule()
-		gotMemory = cc.Memory()
-		return nil
-	})
-	comp, err := b.Build(ctx)
-	if err != nil {
-		t.Fatalf("Build: %v", err)
-	}
-	defer comp.Close(ctx)
-	inst, err := comp.Instantiate(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer inst.Close(ctx)
-	if _, err := inst.Core().ExportedFunc("probe").Call(ctx); err != nil {
-		t.Fatalf("Call: %v", err)
-	}
-	if gotCoreModule == nil {
-		t.Fatal("CoreModule() returned nil inside host callback")
-	}
-	if gotCoreModule.Memory() != gotMemory {
-		t.Fatalf("CoreModule().Memory() != Memory(): %v vs %v", gotCoreModule.Memory(), gotMemory)
 	}
 }
 

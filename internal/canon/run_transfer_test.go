@@ -45,7 +45,7 @@ func TestRunTransferPlan_TrapInStepReleasesTask(t *testing.T) {
 			t.Errorf("TransferOwn after trap+task.End should succeed (numLends==0): %v", err)
 		}
 	}()
-	runTransferPlan(context.Background(), plan, tc, calleeFn, nil, 0)
+	runTransferPlan(context.Background(), plan, tc, calleeFn, nil, 0, nil)
 }
 
 func TestRunTransferPlan_TrapsOnUndroppedBorrow(t *testing.T) {
@@ -101,5 +101,5 @@ func TestRunTransferPlan_TrapsOnUndroppedBorrow(t *testing.T) {
 			t.Errorf("expected trap msg containing %q, got %q", "1 outstanding borrow", trap.msg)
 		}
 	}()
-	runTransferPlan(context.Background(), plan, tc, calleeFn, nil, 1)
+	runTransferPlan(context.Background(), plan, tc, calleeFn, nil, 1, nil)
 }
