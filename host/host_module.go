@@ -27,9 +27,17 @@ func buildPerInstanceHostMod(
 	rt wazero.Runtime,
 	comp *Component,
 	h *ComponentInstance,
-) (api.Module, error) {
+) (api.Module, func(api.Memory, core.ReallocFunc), error) {
 	modName := fmt.Sprintf("%s_host_%d", comp.name, hostCounter.Add(1))
 	hmb := rt.NewHostModuleBuilder(modName)
+
+	var realloc core.ReallocFunc
+	var mem api.Memory
+
+	setup := func(m api.Memory, r core.ReallocFunc) {
+		mem = m
+		realloc = r
+	}
 
 	for i := range comp.allFuncs {
 		fr := comp.allFuncs[i] // capture pointer for closure (stable across iterations)
@@ -37,7 +45,7 @@ func buildPerInstanceHostMod(
 		resultTypes := valueTypesFromCoreBytes(fr.flatResults)
 		fn := api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
 			instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
-				cc := core.NewCallContext(h.core, nil, mod.Memory(), wrapRealloc(mod.ExportedFunction("realloc")))
+				cc := core.NewCallContext(h.core, nil, mem, realloc)
 				return fr.userFn(ctx, cc, h, stack)
 			})
 		})
@@ -76,13 +84,13 @@ func buildPerInstanceHostMod(
 	// method would panic on that assertion.
 	compiled, err := hmb.Compile(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("wacogo/host: compile per-instance hostMod: %w", err)
+		return nil, nil, fmt.Errorf("wacogo/host: compile per-instance hostMod: %w", err)
 	}
 	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(modName))
 	if err != nil {
-		return nil, fmt.Errorf("wacogo/host: instantiate per-instance hostMod: %w", err)
+		return nil, nil, fmt.Errorf("wacogo/host: instantiate per-instance hostMod: %w", err)
 	}
-	return mod, nil
+	return mod, setup, nil
 }
 
 // instrumentCall runs fn under any CallListener attached to h. When the

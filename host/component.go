@@ -109,7 +109,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	}
 
 	// 2. Per-instance host module + stub instantiation; closures capture h.
-	hostMod, err := buildPerInstanceHostMod(ctx, core.WazeroRuntime(c.engine), c, h)
+	hostMod, setupHostMod, err := buildPerInstanceHostMod(ctx, core.WazeroRuntime(c.engine), c, h)
 	if err != nil {
 		return nil, err
 	}
@@ -124,6 +124,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	//    memory/realloc fresh per call, not from the wrapper.
 	stubMemory := stubMod.Memory()
 	reallocAPI := stubMod.ExportedFunction("realloc")
+	setupHostMod(stubMemory, wrapRealloc(reallocAPI))
 
 	// 4. Per-instance TypeResources, one per entry in comp.allResources.
 	//    Per-resource dtor closures capture h directly — no UserData type
