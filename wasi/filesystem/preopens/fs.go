@@ -80,23 +80,40 @@ var errUnsupported = errors.New("preopens: capability not supported")
 // this package.
 func NewFSPreopens(fsys fs.FS) func(Deps) Preopens {
 	return func(deps Deps) Preopens {
-		return &fsPreopens{fsys: fsys, deps: deps}
+		entries := []*PreopenEntry{{Path: "/", Root: ".", FS: fsys}}
+		return &fsPreopens{entries: entries, deps: deps}
 	}
+}
+
+func NewMultiFSPreopens(entries []*PreopenEntry) func(Deps) Preopens {
+	return func(deps Deps) Preopens {
+		return &fsPreopens{entries: entries, deps: deps}
+	}
+}
+
+type PreopenEntry struct {
+	Path string
+	Root string
+	FS   fs.FS
 }
 
 type fsPreopens struct {
-	fsys fs.FS
-	deps Deps
+	entries []*PreopenEntry
+	deps    Deps
 }
 
 func (p *fsPreopens) GetDirectories(_ context.Context) ([]TupleDescriptorString, error) {
-	root, err := p.fsys.Open(".")
-	if err != nil {
-		return nil, err
+	result := make([]TupleDescriptorString, len(p.entries))
+	for i, e := range p.entries {
+		root, err := e.FS.Open(e.Root)
+		if err != nil {
+			return nil, err
+		}
+		desc := &fsDescriptor{file: root, deps: p.deps}
+		h := types.NewDescriptorHandleIn(p.deps.Types, desc)
+		result[i] = TupleDescriptorString{F0: h, F1: e.Path}
 	}
-	desc := &fsDescriptor{file: root, deps: p.deps}
-	h := types.NewDescriptorHandleIn(p.deps.Types, desc)
-	return []TupleDescriptorString{{F0: h, F1: "/"}}, nil
+	return result, nil
 }
 
 // fsDescriptor adapts an fs.File to wasi:filesystem/types.Descriptor.
