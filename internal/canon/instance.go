@@ -36,5 +36,9 @@ type Instance interface {
 
 	// ResourceTable returns the per-instance resource handle table.
 	ResourceTable() ResourceTable
+
+	// Poison marks the instance as unusable due to a trap. Subsequent
+	// Enter calls must fail with the captured reason. Idempotent.
+	Poison(reason error)
 }
 

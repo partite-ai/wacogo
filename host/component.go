@@ -319,16 +319,6 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	}
 	h.core = coreInst
 
-	// 8. Finish populating the wrapper.
-	h.preCloseChecks = []func() error{
-		func() error {
-			if n := h.extTable.liveCount(); n > 0 {
-				return fmt.Errorf("wacogo/host: Close: %d outstanding resource handle(s); drop all owns before Close", n)
-			}
-			return nil
-		},
-	}
-
 	return h, nil
 }
 

@@ -23,8 +23,9 @@ type canonInstanceView struct{ i *ComponentInstance }
 func (v canonInstanceView) Enter(ctx context.Context) (func(context.Context), error) {
 	return v.i.Enter(ctx)
 }
-func (v canonInstanceView) CanLeave() bool      { return v.i.CanLeave() }
+func (v canonInstanceView) CanLeave() bool       { return v.i.CanLeave() }
 func (v canonInstanceView) SuspendLeave() func() { return v.i.SuspendLeave() }
+func (v canonInstanceView) Poison(reason error)  { v.i.Poison(reason) }
 func (v canonInstanceView) ResourceTable() canon.ResourceTable {
 	if v.i == nil || v.i.resources == nil {
 		return nil

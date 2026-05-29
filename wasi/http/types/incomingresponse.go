@@ -60,13 +60,19 @@ type incomingBodyImpl struct {
 	streamsInst *host.ComponentInstance
 }
 
+// Drop matches the Drop(ctx) error shape that the witgen-emitted
+// resourceDtor type-asserts on guest-driven resource.drop, and that
+// the host-extern-table drain calls at close. The spec requires the
+// body's input-stream child to be dropped first; violating that
+// returns an error. When no stream was opened, drain the response
+// body and close it so the underlying connection can be reused.
 func (b *incomingBodyImpl) Drop(_ context.Context) error {
 	if b.stream != nil && !b.stream.closed {
 		return fmt.Errorf("wasi:http/types.incoming-body.drop: body stream not closed")
 	}
 	if b.stream == nil {
-		io.Copy(io.Discard, b.resp.Body) // ensure the body is fully consumed so that the connection can be reused
-		b.resp.Body.Close()              // ensure the body is closed even if the stream was never consumed
+		io.Copy(io.Discard, b.resp.Body)
+		return b.resp.Body.Close()
 	}
 	return nil
 }

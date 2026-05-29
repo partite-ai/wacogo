@@ -347,7 +347,7 @@ func TestNewStreamCheckWriteReturnsCapacity(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest, WithBufferSize(128))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		if got := okCheckWrite(t, s); got != 128 {
 			t.Fatalf("CheckWrite = %d, want 128", got)
 		}
@@ -358,7 +358,7 @@ func TestDefaultBufferSize(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		if got := okCheckWrite(t, s); got != defaultIOWriterBufferSize {
 			t.Fatalf("CheckWrite = %d, want %d", got, defaultIOWriterBufferSize)
 		}
@@ -369,7 +369,7 @@ func TestZeroOrNegativeBufferSizeFallsBack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest, WithBufferSize(0))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		if got := okCheckWrite(t, s); got != defaultIOWriterBufferSize {
 			t.Fatalf("CheckWrite = %d, want %d", got, defaultIOWriterBufferSize)
 		}
@@ -380,7 +380,7 @@ func TestWriteIsDrainedToUnderlying(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okWrite(t, s, []byte("hello"))
 		synctest.Wait()
 		if dest.String() != "hello" {
@@ -393,7 +393,7 @@ func TestMultipleWritesPreserveOrder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest, WithBufferSize(64))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		for _, c := range []string{"alpha-", "beta-", "gamma"} {
 			okWrite(t, s, []byte(c))
 		}
@@ -408,7 +408,7 @@ func TestWriteOverPermitTraps(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest, WithBufferSize(4))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		_, err := s.Write(bgCtx, []byte("hello"))
 		if err == nil {
 			t.Fatal("expected trap error from over-permit Write")
@@ -420,7 +420,7 @@ func TestWriteZeroesOverPermitTraps(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest, WithBufferSize(4))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		_, err := s.WriteZeroes(bgCtx, 5)
 		if err == nil {
 			t.Fatal("expected trap error from over-permit WriteZeroes")
@@ -434,7 +434,7 @@ func TestCheckWriteShrinksWhileDrainerBlocked(t *testing.T) {
 		s := NewIOWriterOutputStream(nil, nil, bw, WithBufferSize(16))
 		defer func() {
 			bw.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		okWrite(t, s, []byte("hello"))
 		synctest.Wait() // drainer is blocked inside bw.Write
@@ -453,7 +453,7 @@ func TestCheckWriteReturnsZeroWhileFlushPending(t *testing.T) {
 		s := NewIOWriterOutputStream(nil, nil, bw, WithBufferSize(16))
 		defer func() {
 			bw.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		okWrite(t, s, []byte("hi"))
 		okFlush(t, s)
@@ -468,7 +468,7 @@ func TestFlushInvokesUnderlyingFlusher(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fw := &flushyWriter{}
 		s := NewIOWriterOutputStream(nil, nil, fw)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okWrite(t, s, []byte("data"))
 		okFlush(t, s)
 		synctest.Wait()
@@ -485,7 +485,7 @@ func TestFlushNoopOnPlainWriter(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okWrite(t, s, []byte("x"))
 		okFlush(t, s)
 		synctest.Wait()
@@ -502,7 +502,7 @@ func TestBlockingFlushWaitsForDrainAndFlush(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fw := &flushyWriter{}
 		s := NewIOWriterOutputStream(nil, nil, fw)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okWrite(t, s, []byte("payload"))
 		okBlockingFlush(t, s)
 		// On return the buffer must be drained and Flush called once.
@@ -522,7 +522,7 @@ func TestBlockingWriteAndFlushSmallBufferChunks(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fw := &flushyWriter{}
 		s := NewIOWriterOutputStream(nil, nil, fw, WithBufferSize(8))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		payload := []byte("hello world this is a test payload")
 		okBlockingWriteAndFlush(t, s, payload)
 		if fw.String() != string(payload) {
@@ -538,7 +538,7 @@ func TestBlockingWriteAndFlushOver4096Traps(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest, WithBufferSize(8192))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		_, err := s.BlockingWriteAndFlush(bgCtx, make([]byte, 4097))
 		if err == nil {
 			t.Fatal("expected trap for >4096 bytes")
@@ -550,7 +550,7 @@ func TestBlockingWriteZeroesAndFlush(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fw := &flushyWriter{}
 		s := NewIOWriterOutputStream(nil, nil, fw, WithBufferSize(8))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okBlockingWriteZeroesAndFlush(t, s, 20)
 		got := []byte(fw.String())
 		if len(got) != 20 {
@@ -571,7 +571,7 @@ func TestBlockingWriteZeroesAndFlushOver4096Traps(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest, WithBufferSize(8192))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		_, err := s.BlockingWriteZeroesAndFlush(bgCtx, 4097)
 		if err == nil {
 			t.Fatal("expected trap for >4096 zeroes")
@@ -583,7 +583,7 @@ func TestRingWrapWritesAreContiguousAtSink(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fw := &flushyWriter{}
 		s := NewIOWriterOutputStream(nil, nil, fw, WithBufferSize(8))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okBlockingWriteAndFlush(t, s, []byte("AAAABBBB")) // 8 bytes, exact fill
 		okBlockingWriteAndFlush(t, s, []byte("CCCCDDDD")) // wraps
 		okBlockingWriteAndFlush(t, s, []byte("EE"))       // partial slot
@@ -598,7 +598,7 @@ func TestWriteErrorClosesStreamAndReportsOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ew := &errorWriter{err: errors.New("boom")}
 		s := NewIOWriterOutputStream(nil, nil, ew)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okWrite(t, s, []byte("hi"))
 		synctest.Wait()
 
@@ -626,7 +626,7 @@ func TestWriteErrorClosesStreamAndReportsOnce(t *testing.T) {
 func TestShortWriteIsTreatedAsError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOWriterOutputStream(nil, nil, &shortWriter{short: 1})
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okWrite(t, s, []byte("ab"))
 		synctest.Wait()
 		first := errWrite(t, s, []byte("z"))
@@ -645,7 +645,7 @@ func TestFlushErrorClosesStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		fw := &flushyWriter{flushErr: errors.New("flushfail")}
 		s := NewIOWriterOutputStream(nil, nil, fw)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okFlush(t, s)
 		synctest.Wait()
 		first := errCheckWrite(t, s)
@@ -663,7 +663,7 @@ func TestBlockingFlushReturnsErrorWhenWriteFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ew := &errorWriter{err: errors.New("nope")}
 		s := NewIOWriterOutputStream(nil, nil, ew)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okWrite(t, s, []byte("x"))
 		first := errBlockingFlush(t, s)
 		if _, ok := first.(StreamErrorLastOperationFailed); !ok {
@@ -676,7 +676,7 @@ func TestSpliceCopiesBytes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		in := NewInputStreamHandle(&sliceInputStream{data: []byte("payload")})
 		if got := okSplice(t, s, in, 7); got != 7 {
 			t.Fatalf("splice returned %d, want 7", got)
@@ -694,7 +694,7 @@ func TestSpliceLengthCappedByFreeSpace(t *testing.T) {
 		s := NewIOWriterOutputStream(nil, nil, bw, WithBufferSize(4))
 		defer func() {
 			bw.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		in := NewInputStreamHandle(&sliceInputStream{data: []byte("abcdefghij")})
 		if got := okSplice(t, s, in, 100); got != 4 {
@@ -709,7 +709,7 @@ func TestSpliceReturnsZeroWhenNoFreeSpace(t *testing.T) {
 		s := NewIOWriterOutputStream(nil, nil, bw, WithBufferSize(4))
 		defer func() {
 			bw.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		// Fill the ring; drainer is blocked, so head won't advance.
 		okWrite(t, s, []byte("xxxx"))
@@ -725,7 +725,7 @@ func TestSpliceForwardsClosedFromInput(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		in := NewInputStreamHandle(closedInputStream{})
 		err := errSplice(t, s, in, 4)
 		if _, ok := err.(StreamErrorClosed); !ok {
@@ -738,7 +738,7 @@ func TestBlockingSpliceCopiesBytes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		in := NewInputStreamHandle(&sliceInputStream{data: []byte("payload")})
 		if got := okBlockingSplice(t, s, in, 7); got != 7 {
 			t.Fatalf("blocking splice returned %d, want 7", got)
@@ -784,7 +784,7 @@ func TestBlockingSpliceWaitsForRoom(t *testing.T) {
 		if got == 0 || got > 5 {
 			t.Fatalf("BlockingSplice returned %d, want 1..5", got)
 		}
-		s.Drop()
+		s.Drop(context.Background())
 	})
 }
 
@@ -793,7 +793,7 @@ func TestDropClosesIOCloser(t *testing.T) {
 		cw := &closingWriter{}
 		s := NewIOWriterOutputStream(nil, nil, cw)
 		okWrite(t, s, []byte("z"))
-		s.Drop()
+		s.Drop(context.Background())
 		if cw.Closes() != 1 {
 			t.Fatalf("Close calls = %d, want 1", cw.Closes())
 		}
@@ -804,7 +804,7 @@ func TestDropOnPlainWriterDoesNotPanic(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		s.Drop()
+		s.Drop(context.Background())
 	})
 }
 
@@ -812,7 +812,7 @@ func TestDropStopsDrainer(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		s.Drop()
+		s.Drop(context.Background())
 		// If the drainer hadn't exited, the synctest bubble would panic
 		// when this function returns.
 	})
@@ -847,7 +847,7 @@ func TestSubscribeReadyOnFreshStream(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest, WithBufferSize(8))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		ph := subscribe(t, s)
 		defer ph.Drop(t.Context())
 		if !pollableReady(t, ph) {
@@ -860,7 +860,7 @@ func TestSubscribeNotReadyWhenBufferFull(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bw := newBlockingWriter()
 		s := NewIOWriterOutputStream(nil, nil, bw, WithBufferSize(4))
-		defer func() { bw.Release(); s.Drop() }()
+		defer func() { bw.Release(); s.Drop(context.Background()) }()
 		okWrite(t, s, []byte("xxxx"))
 		synctest.Wait()
 		ph := subscribe(t, s)
@@ -875,7 +875,7 @@ func TestSubscribeNotReadyWhileFlushPending(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bw := newBlockingWriter()
 		s := NewIOWriterOutputStream(nil, nil, bw, WithBufferSize(8))
-		defer func() { bw.Release(); s.Drop() }()
+		defer func() { bw.Release(); s.Drop(context.Background()) }()
 		okWrite(t, s, []byte("hi"))
 		okFlush(t, s)
 		synctest.Wait()
@@ -891,7 +891,7 @@ func TestSubscribeReadyWhenStreamClosedByError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ew := &errorWriter{err: errors.New("boom")}
 		s := NewIOWriterOutputStream(nil, nil, ew)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		ph := subscribe(t, s)
 		defer ph.Drop(t.Context())
 		okWrite(t, s, []byte("x"))
@@ -906,7 +906,7 @@ func TestSubscribeAfterStreamClosedReturnsReadyPollable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ew := &errorWriter{err: errors.New("boom")}
 		s := NewIOWriterOutputStream(nil, nil, ew)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		okWrite(t, s, []byte("x"))
 		synctest.Wait()
 		// Stream is now closed. A new Subscribe should still succeed and
@@ -923,7 +923,7 @@ func TestPollableBlockReturnsImmediatelyWhenReady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		ph := subscribe(t, s)
 		defer ph.Drop(t.Context())
 		if err := ph.Block(bgCtx); err != nil {
@@ -957,7 +957,7 @@ func TestPollableBlockWaitsForFreeSpace(t *testing.T) {
 		bw.Release()
 		<-blocked
 		ph.Drop(t.Context())
-		s.Drop()
+		s.Drop(context.Background())
 	})
 }
 
@@ -984,7 +984,7 @@ func TestPollableBlockWaitsForFlushCompletion(t *testing.T) {
 		bw.Release()
 		<-blocked
 		ph.Drop(t.Context())
-		s.Drop()
+		s.Drop(context.Background())
 	})
 }
 
@@ -992,7 +992,7 @@ func TestSubscribeReturnsIndependentPollables(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		bw := newBlockingWriter()
 		s := NewIOWriterOutputStream(nil, nil, bw, WithBufferSize(4))
-		defer func() { bw.Release(); s.Drop() }()
+		defer func() { bw.Release(); s.Drop(context.Background()) }()
 		ph1 := subscribe(t, s)
 		ph2 := subscribe(t, s)
 		defer ph1.Drop(t.Context())
@@ -1017,7 +1017,7 @@ func TestPollableDropRemovesFromTracking(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var dest bytes.Buffer
 		s := NewIOWriterOutputStream(nil, nil, &dest)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		ph := subscribe(t, s)
 
 		got := s.activePollables.Load()

@@ -26,9 +26,10 @@ func (*testResourceType) Destructor() func(context.Context, uint32) error   { re
 func (*testInstance) Enter(ctx context.Context) (func(context.Context), error) {
 	return func(context.Context) {}, nil
 }
-func (*testInstance) CanLeave() bool                { return true }
-func (*testInstance) SuspendLeave() func()          { return func() {} }
-func (*testInstance) ResourceTable() ResourceTable  { return nil }
+func (*testInstance) CanLeave() bool               { return true }
+func (*testInstance) SuspendLeave() func()         { return func() {} }
+func (*testInstance) ResourceTable() ResourceTable { return nil }
+func (*testInstance) Poison(error)                 {}
 
 // newStubCoreFunc returns an api.Function backed by a real wazero module.
 // paramTypes and resultTypes are slices of wasm value-type bytes (e.g.

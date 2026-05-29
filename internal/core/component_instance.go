@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/partite-ai/wacogo/internal/canon"
@@ -26,6 +27,9 @@ type ComponentInstance struct {
 	resources *ResourceTable
 	entered   bool
 	canLeave  bool
+	// poisoned is set by Poison when a trap leaves the instance in an
+	// unreliable state. Non-nil makes Enter fail; nil means usable.
+	poisoned error
 	// types is the resolved type index space for this instance, populated by
 	// planResolveType steps during instantiation.
 	types []Type
@@ -139,7 +143,8 @@ func (i *ComponentInstance) ExportedType(name string) Type {
 // invoke exactly once (typically via defer) to release the lock; failure
 // to do so leaves the instance permanently inaccessible. If the instance
 // is already entered, Enter returns a "reentrance trap" error per the
-// component-model spec.
+// component-model spec. If the instance was previously poisoned by a
+// trap, Enter returns an error wrapping the original trap reason.
 //
 // Most users should never call this directly: the runtime invokes Enter
 // around every cross-component call. Misuse — calling without a matching
@@ -151,11 +156,39 @@ func (i *ComponentInstance) Enter(ctx context.Context) (func(context.Context), e
 	if i == nil {
 		return func(context.Context) {}, nil
 	}
+	if i.poisoned != nil {
+		return nil, fmt.Errorf("component instance unusable: %w", i.poisoned)
+	}
 	if i.entered {
 		return nil, fmt.Errorf("cannot enter component instance (reentrance trap)")
 	}
 	i.entered = true
 	return func(context.Context) { i.entered = false }, nil
+}
+
+// Poison marks the instance as unusable due to a trap. Subsequent Enter
+// calls return an error wrapping reason. Idempotent — only the first
+// reason is retained. The canonical-ABI runners call this from their
+// outermost recover-on-trap defer; user code can also call it directly
+// when an external failure (e.g. a Go-side resource error) makes the
+// instance's state unreliable.
+func (i *ComponentInstance) Poison(reason error) {
+	if i == nil || i.poisoned != nil {
+		return
+	}
+	if reason == nil {
+		reason = fmt.Errorf("trap")
+	}
+	i.poisoned = reason
+}
+
+// Poisoned returns the trap reason that poisoned this instance, or nil
+// when the instance is still usable.
+func (i *ComponentInstance) Poisoned() error {
+	if i == nil {
+		return nil
+	}
+	return i.poisoned
 }
 
 // CanLeave reports whether the instance is currently in a state that
@@ -200,18 +233,33 @@ func (i *ComponentInstance) RunInComponent(ctx context.Context, fn func() error)
 }
 
 // Close releases all resources held by the component instance.
+// Outstanding own-kind canonical-ABI handles are dropped first (running
+// each registered destructor under recover so one bad dtor does not
+// strand the rest) while the wazero runtime is still alive. Then the
+// core wasm instances and any cross-component adapters are closed.
+// The instance is finally marked poisoned so any further Enter call
+// fails — Close is one-way. All errors are joined and returned;
+// teardown always completes.
 func (i *ComponentInstance) Close(ctx context.Context) error {
-	var firstErr error
+	var errs []error
+	if i != nil && i.resources != nil {
+		if err := i.resources.dropAllOwns(ctx, i); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	for _, m := range i.coreInstances {
-		if err := m.Close(ctx); err != nil && firstErr == nil {
-			firstErr = err
+		if err := m.Close(ctx); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	for _, a := range i.auxiliaryAdapters {
-		if err := a.Close(ctx); err != nil && firstErr == nil {
-			firstErr = err
+		if err := a.Close(ctx); err != nil {
+			errs = append(errs, err)
 		}
 	}
-	return firstErr
+	if i != nil {
+		i.Poison(fmt.Errorf("component instance closed"))
+	}
+	return errors.Join(errs...)
 }
 

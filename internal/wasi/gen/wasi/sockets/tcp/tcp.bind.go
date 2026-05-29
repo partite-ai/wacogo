@@ -300,10 +300,11 @@ func (f *Factory) Close(ctx context.Context) error { return f.comp.Close(ctx) }
 
 // resourceDtor is the generic destructor invoked when canon orchestrates
 // terminal-drop on a host-defined resource handle. Type-asserts the
-// underlying Go object for an optional Drop() method and calls it.
-func resourceDtor(_ context.Context, _ *host.ComponentInstance, obj any) error {
-	if d_, ok_ := obj.(interface{ Drop() }); ok_ {
-		d_.Drop()
+// underlying Go object for an optional Drop(ctx) error method and
+// calls it.
+func resourceDtor(ctx context.Context, _ *host.ComponentInstance, obj any) error {
+	if d_, ok_ := obj.(interface{ Drop(context.Context) error }); ok_ {
+		return d_.Drop(ctx)
 	}
 	return nil
 }

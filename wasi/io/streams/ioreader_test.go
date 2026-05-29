@@ -2,6 +2,7 @@ package streams
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"sync"
@@ -209,7 +210,7 @@ func drainAll(t *testing.T, s *IOReaderInputStream) ([]byte, StreamError) {
 func TestReaderEmptySourceHitsEOF(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader(nil))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		// No data, EOF observed → next Read returns Closed.
 		got := errRead(t, s, 4)
@@ -222,7 +223,7 @@ func TestReaderEmptySourceHitsEOF(t *testing.T) {
 func TestReaderDrainsAvailableData(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader([]byte("hello")))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		got := okRead(t, s, 5)
 		if string(got) != "hello" {
@@ -234,7 +235,7 @@ func TestReaderDrainsAvailableData(t *testing.T) {
 func TestReaderReadAfterDrainReportsClosed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader([]byte("data")))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		got := okRead(t, s, 4)
 		if string(got) != "data" {
@@ -254,7 +255,7 @@ func TestReaderReadOnEmptyOpenReturnsEmpty(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, br)
 		defer func() {
 			br.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		synctest.Wait() // pumper is parked inside br.Read
 		got := okRead(t, s, 4)
@@ -267,7 +268,7 @@ func TestReaderReadOnEmptyOpenReturnsEmpty(t *testing.T) {
 func TestReaderReadCappedByAvailableBytes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader([]byte("abcdef")))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		got := okRead(t, s, 1024)
 		if string(got) != "abcdef" {
@@ -280,7 +281,7 @@ func TestReaderBufferSizeBoundsBufferedBytes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		br := newBlockingReader(bytes.NewReader([]byte("0123456789")))
 		s := NewIOReaderInputStream(nil, nil, br, WithBufferSize(4))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		// Pumper is gated; release lets it pull only what fits in the
 		// buffer, then it parks waiting for free space.
 		br.Release()
@@ -296,7 +297,7 @@ func TestReaderBlockingReadWaitsForData(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		br := newBlockingReader(bytes.NewReader([]byte("payload")))
 		s := NewIOReaderInputStream(nil, nil, br)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 
 		done := make(chan []byte, 1)
 		go func() {
@@ -321,7 +322,7 @@ func TestReaderBlockingReadWakesOnClose(t *testing.T) {
 		br := newBlockingReader(bytes.NewReader(nil))
 		br.readErr = io.EOF
 		s := NewIOReaderInputStream(nil, nil, br)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 
 		done := make(chan StreamError, 1)
 		go func() {
@@ -345,7 +346,7 @@ func TestReaderRingWrapPreservesByteOrder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		payload := []byte("AAAABBBBCCCCDDDDEE")
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader(payload), WithBufferSize(8))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		got, e := drainAll(t, s)
 		if !bytes.Equal(got, payload) {
 			t.Fatalf("got %q, want %q", got, payload)
@@ -360,7 +361,7 @@ func TestReaderErrorClosesStreamAndReportsOnce(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		er := &errorReader{err: errors.New("boom")}
 		s := NewIOReaderInputStream(nil, nil, er)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 
 		first := errRead(t, s, 4)
@@ -384,7 +385,7 @@ func TestReaderPartialDataBeforeError(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		dr := &dataThenErrorReader{data: []byte("ok"), err: errors.New("boom")}
 		s := NewIOReaderInputStream(nil, nil, dr)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 
 		// Buffered bytes drain first.
@@ -413,7 +414,7 @@ func TestReaderPartialDataBeforeError(t *testing.T) {
 func TestReaderSkipAdvancesHead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader([]byte("abcdef")))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		if got := okSkip(t, s, 3); got != 3 {
 			t.Fatalf("Skip = %d, want 3", got)
@@ -431,7 +432,7 @@ func TestReaderSkipOnEmptyOpenReturnsZero(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, br)
 		defer func() {
 			br.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		synctest.Wait()
 		if got := okSkip(t, s, 4); got != 0 {
@@ -443,7 +444,7 @@ func TestReaderSkipOnEmptyOpenReturnsZero(t *testing.T) {
 func TestReaderSkipReportsClosedAfterEOF(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader(nil))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		got := errSkip(t, s, 4)
 		if _, ok := got.(StreamErrorClosed); !ok {
@@ -456,7 +457,7 @@ func TestReaderBlockingSkipWaitsForData(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		br := newBlockingReader(bytes.NewReader([]byte("payload")))
 		s := NewIOReaderInputStream(nil, nil, br)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 
 		done := make(chan uint64, 1)
 		go func() {
@@ -482,7 +483,7 @@ func TestReaderBlockingReadZeroReturnsEmpty(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, br)
 		defer func() {
 			br.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		got := okBlockingRead(t, s, 0)
 		if len(got) != 0 {
@@ -496,7 +497,7 @@ func TestReaderDropClosesIOCloser(t *testing.T) {
 		cr := &closingReader{inner: bytes.NewReader([]byte("z"))}
 		s := NewIOReaderInputStream(nil, nil, cr)
 		synctest.Wait()
-		s.Drop()
+		s.Drop(context.Background())
 		if cr.Closes() != 1 {
 			t.Fatalf("Close calls = %d, want 1", cr.Closes())
 		}
@@ -506,7 +507,7 @@ func TestReaderDropClosesIOCloser(t *testing.T) {
 func TestReaderDropOnPlainReaderDoesNotPanic(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader([]byte("x")))
-		s.Drop()
+		s.Drop(context.Background())
 	})
 }
 
@@ -517,14 +518,14 @@ func TestReaderDropStopsPumper(t *testing.T) {
 		// Release the source first so the pumper isn't parked inside
 		// br.Read when Drop tries to wait on it.
 		br.Release()
-		s.Drop()
+		s.Drop(context.Background())
 	})
 }
 
 func TestReaderZeroOrNegativeBufferSizeFallsBack(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader(nil), WithBufferSize(0))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		if int(s.bufCap) != defaultIOReaderBufferSize {
 			t.Fatalf("bufCap = %d, want %d", s.bufCap, defaultIOReaderBufferSize)
 		}
@@ -548,7 +549,7 @@ func subscribeReader(t *testing.T, s *IOReaderInputStream) *poll.PollableHandle 
 func TestReaderSubscribeReadyWhenDataBuffered(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader([]byte("data")))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		ph := subscribeReader(t, s)
 		defer ph.Drop(t.Context())
@@ -564,7 +565,7 @@ func TestReaderSubscribeNotReadyWhenEmpty(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, br)
 		defer func() {
 			br.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		synctest.Wait()
 		ph := subscribeReader(t, s)
@@ -578,7 +579,7 @@ func TestReaderSubscribeNotReadyWhenEmpty(t *testing.T) {
 func TestReaderSubscribeReadyWhenStreamClosedByEOF(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader(nil))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		ph := subscribeReader(t, s)
 		defer ph.Drop(t.Context())
@@ -592,7 +593,7 @@ func TestReaderSubscribeAfterStreamClosedReturnsReadyPollable(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		er := &errorReader{err: errors.New("boom")}
 		s := NewIOReaderInputStream(nil, nil, er)
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		ph := subscribeReader(t, s)
 		defer ph.Drop(t.Context())
@@ -605,7 +606,7 @@ func TestReaderSubscribeAfterStreamClosedReturnsReadyPollable(t *testing.T) {
 func TestReaderPollableBlockReturnsImmediatelyWhenReady(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, bytes.NewReader([]byte("x")))
-		defer s.Drop()
+		defer s.Drop(context.Background())
 		synctest.Wait()
 		ph := subscribeReader(t, s)
 		defer ph.Drop(t.Context())
@@ -636,7 +637,7 @@ func TestReaderPollableBlockWaitsForData(t *testing.T) {
 		br.Release()
 		<-blocked
 		ph.Drop(t.Context())
-		s.Drop()
+		s.Drop(context.Background())
 	})
 }
 
@@ -646,7 +647,7 @@ func TestReaderSubscribeReturnsIndependentPollables(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, br)
 		defer func() {
 			br.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		synctest.Wait()
 		ph1 := subscribeReader(t, s)
@@ -673,7 +674,7 @@ func TestReaderPollableDropRemovesFromTracking(t *testing.T) {
 		s := NewIOReaderInputStream(nil, nil, br)
 		defer func() {
 			br.Release()
-			s.Drop()
+			s.Drop(context.Background())
 		}()
 		ph := subscribeReader(t, s)
 

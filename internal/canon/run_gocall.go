@@ -76,10 +76,13 @@ func runGocallPlan(
 		return nil, err
 	}
 
-	// 4. Invoke the callee core function.
+	// 4. Invoke the callee core function. If wasm traps here, the
+	// callee instance's state is unreliable: poison it before returning
+	// so subsequent Enter calls see the trap reason.
 	var coreResults []uint64
 	coreResults, err = calleeFn.Call(ctx, coreArgs...)
 	if err != nil {
+		gcc.callee.Instance.Poison(err)
 		return nil, err
 	}
 

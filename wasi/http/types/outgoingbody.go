@@ -2,6 +2,7 @@ package types
 
 import (
 	"context"
+	"fmt"
 	"io"
 
 	"github.com/partite-ai/wacogo/internal/wasi/gen/wasi/http/types"
@@ -38,10 +39,28 @@ func (b *outgoingBodyImpl) Write(_ context.Context) (ResultOutputStream_, error)
 	return types.ResultOutputStream_Ok{Value: handle}, nil
 }
 
-func (b *outgoingBodyImpl) Drop() {
+// Drop releases the body. Per spec, if an output stream was opened
+// from this body it must be dropped first; calling Drop while the
+// stream is still live returns an error and does not tear the body
+// down. Use DestroyOrphan for orphan-time cleanup that bypasses this
+// check.
+func (b *outgoingBodyImpl) Drop(_ context.Context) error {
 	if b.writeOpened && !b.streamDropped {
-		panic("wasi:http/types.outgoing-body: body dropped without finishing")
+		return fmt.Errorf("wasi:http/types.outgoing-body: body dropped without finishing")
 	}
+	b.destroy()
+	return nil
+}
+
+// DestroyOrphan tears the body down regardless of the stream's drop
+// status. Invoked from instance close drain when the guest never
+// followed the drop protocol.
+func (b *outgoingBodyImpl) DestroyOrphan(_ context.Context) error {
+	b.destroy()
+	return nil
+}
+
+func (b *outgoingBodyImpl) destroy() {
 	if b.selfDropped {
 		return
 	}

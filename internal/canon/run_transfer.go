@@ -105,9 +105,12 @@ func runTransferPlan(
 		}
 	}()
 
-	// 5. Invoke the callee core function.
+	// 5. Invoke the callee core function. If wasm traps here, the
+	// callee instance's state is unreliable: poison it before
+	// re-raising so subsequent calls see the trap reason.
 	calleeResults, err := calleeFn.Call(ctx, calleeCoreArgs...)
 	if err != nil {
+		tc.callee.Instance.Poison(err)
 		panic(&Trap{msg: err.Error()})
 	}
 

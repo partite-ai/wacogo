@@ -539,8 +539,8 @@ func (s *unregisteredHandleState) bind(cc *host.CallContext, owner *host.Compone
 }
 
 func (s *unregisteredHandleState) drop(ctx context.Context) error {
-	if d_, ok_ := s.impl.(interface{ Drop() }); ok_ {
-		d_.Drop()
+	if d_, ok_ := s.impl.(interface{ Drop(context.Context) error }); ok_ {
+		return d_.Drop(ctx)
 	}
 	return nil
 }

@@ -116,19 +116,33 @@ func NewIOWriterOutputStream(errorInst, pollInst *host.ComponentInstance, w io.W
 // Drop stops the drainer, invalidates every pollable derived from the
 // stream, and, if the underlying writer is an io.Closer, closes it. The
 // spec permits losing in-flight data on drop, so we do not implicitly
-// flush.
-func (s *IOWriterOutputStream) Drop() {
+// flush. Per spec, every derived pollable must be dropped first;
+// calling Drop while any remain returns an error and leaves the stream
+// untouched. Use DestroyOrphan for orphan-time cleanup that bypasses
+// this check.
+func (s *IOWriterOutputStream) Drop(_ context.Context) error {
 	if s.activePollables.Load() > 0 {
-		panic("wasi:io/streams: dropping input stream with active pollables")
+		return fmt.Errorf("wasi:io/streams: dropping output stream with active pollables")
 	}
+	return s.destroy()
+}
+
+// DestroyOrphan tears down the stream regardless of any outstanding
+// pollables. Invoked from instance close drain when the guest never
+// followed the drop protocol.
+func (s *IOWriterOutputStream) DestroyOrphan(_ context.Context) error {
+	return s.destroy()
+}
+
+func (s *IOWriterOutputStream) destroy() error {
 	s.stopReq.Store(true)
 	s.closed.Store(true)
-
 	s.signal(s.wake)
 	s.drainerWG.Wait()
 	if c, ok := s.w.(io.Closer); ok {
-		_ = c.Close()
+		return c.Close()
 	}
+	return nil
 }
 
 func (s *IOWriterOutputStream) signal(ch chan struct{}) {
@@ -447,12 +461,13 @@ func (p *outputPollable) Block(_ context.Context) error {
 // Drop is invoked by the poll resource destructor when the wasm side
 // drops the handle. It is also safe to call from the stream's Drop;
 // double-drop is a no-op.
-func (p *outputPollable) Drop() {
+func (p *outputPollable) Drop(_ context.Context) error {
 	if p.dropped {
-		return
+		return nil
 	}
 	p.dropped = true
 	p.stream.activePollables.Add(-1)
+	return nil
 }
 
 // errorString satisfies wioerror.ErrorResource by returning a captured

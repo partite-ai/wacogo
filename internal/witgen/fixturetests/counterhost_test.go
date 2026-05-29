@@ -23,9 +23,10 @@ var (
 	lastDropped *counterhostCounter
 )
 
-func (c *counterhostCounter) Drop() {
+func (c *counterhostCounter) Drop(_ context.Context) error {
 	dropCount++
 	lastDropped = c
+	return nil
 }
 
 // myCounterhost implements the generated Counterhost interface, minting

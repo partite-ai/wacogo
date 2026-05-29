@@ -151,8 +151,8 @@ type fsDescriptor struct {
 	deps Deps
 }
 
-func (d *fsDescriptor) Drop() {
-	_ = d.file.Close()
+func (d *fsDescriptor) Drop(_ context.Context) error {
+	return d.file.Close()
 }
 
 func (d *fsDescriptor) GetType(_ context.Context) (types.ResultDescriptorTypeErrorCode, error) {
