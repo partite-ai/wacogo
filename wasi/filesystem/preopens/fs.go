@@ -66,6 +66,24 @@ type SymlinkAter interface {
 	SymlinkAt(target, linkName string) error
 }
 
+type Unwrapper[T any] interface {
+	Unwrap() T
+}
+
+func as[T, U any](x U) (T, bool) {
+	for {
+		if v, ok := any(x).(T); ok {
+			return v, true
+		}
+		if u, ok := any(x).(Unwrapper[U]); ok {
+			x = u.Unwrap()
+			continue
+		}
+		var zero T
+		return zero, false
+	}
+}
+
 // errEscape signals an attempt by an ImmutableFS-wrapped path to
 // navigate above its root. fsErr maps it to ErrorCodeNotPermitted.
 var errEscape = errors.New("preopens: path escapes root")
@@ -137,9 +155,9 @@ func (d *fsDescriptor) GetType(_ context.Context) (types.ResultDescriptorTypeErr
 
 func (d *fsDescriptor) GetFlags(_ context.Context) (types.ResultDescriptorFlagsErrorCode, error) {
 	flags := types.DescriptorFlagsRead
-	if _, ok := d.file.(io.Writer); ok {
+	if _, ok := as[io.Writer](d.file); ok {
 		flags |= types.DescriptorFlagsWrite
-	} else if _, ok := d.file.(io.WriterAt); ok {
+	} else if _, ok := as[io.WriterAt](d.file); ok {
 		flags |= types.DescriptorFlagsWrite
 	}
 	return types.ResultDescriptorFlagsErrorCodeOk{Value: flags}, nil
@@ -154,7 +172,7 @@ func (d *fsDescriptor) Stat(_ context.Context) (types.ResultDescriptorStatErrorC
 }
 
 func (d *fsDescriptor) StatAt(_ context.Context, _ types.PathFlags, p string) (types.ResultDescriptorStatErrorCode, error) {
-	sa, ok := d.file.(StatAter)
+	sa, ok := as[StatAter](d.file)
 	if !ok {
 		return types.ResultDescriptorStatErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -166,7 +184,7 @@ func (d *fsDescriptor) StatAt(_ context.Context, _ types.PathFlags, p string) (t
 }
 
 func (d *fsDescriptor) OpenAt(_ context.Context, _ types.PathFlags, p string, of types.OpenFlags, df types.DescriptorFlags) (types.ResultDescriptorErrorCode, error) {
-	oa, ok := d.file.(OpenAter)
+	oa, ok := as[OpenAter](d.file)
 	if !ok {
 		return types.ResultDescriptorErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -225,10 +243,10 @@ func (d *fsDescriptor) Read(_ context.Context, length uint64, offset uint64) (ty
 }
 
 func readAt(f fs.File, buf []byte, off int64) (int, error) {
-	if ra, ok := f.(io.ReaderAt); ok {
+	if ra, ok := as[io.ReaderAt](f); ok {
 		return ra.ReadAt(buf, off)
 	}
-	if s, ok := f.(io.Seeker); ok {
+	if s, ok := as[io.Seeker](f); ok {
 		if _, err := s.Seek(off, io.SeekStart); err != nil {
 			return 0, err
 		}
@@ -249,7 +267,7 @@ func (d *fsDescriptor) ReadViaStream(_ context.Context, offset uint64) (types.Re
 		return types.ResultInputStreamErrorCodeErr{Value: types.ErrorCodeIsDirectory}, nil
 	}
 	if offset > 0 {
-		s, ok := d.file.(io.Seeker)
+		s, ok := as[io.Seeker](d.file)
 		if !ok {
 			return types.ResultInputStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 		}
@@ -263,7 +281,7 @@ func (d *fsDescriptor) ReadViaStream(_ context.Context, offset uint64) (types.Re
 }
 
 func (d *fsDescriptor) ReadDirectory(_ context.Context) (types.ResultDirectoryEntryStreamErrorCode, error) {
-	rd, ok := d.file.(fs.ReadDirFile)
+	rd, ok := as[fs.ReadDirFile](d.file)
 	if !ok {
 		return types.ResultDirectoryEntryStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -285,7 +303,7 @@ func (d *fsDescriptor) MetadataHash(_ context.Context) (types.ResultMetadataHash
 }
 
 func (d *fsDescriptor) MetadataHashAt(_ context.Context, _ types.PathFlags, p string) (types.ResultMetadataHashValueErrorCode, error) {
-	sa, ok := d.file.(StatAter)
+	sa, ok := as[StatAter](d.file)
 	if !ok {
 		return types.ResultMetadataHashValueErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -301,7 +319,7 @@ func (d *fsDescriptor) IsSameObject(_ context.Context, _ *types.DescriptorHandle
 }
 
 func (d *fsDescriptor) ReadlinkAt(_ context.Context, p string) (types.ResultStringErrorCode, error) {
-	rl, ok := d.file.(ReadlinkAter)
+	rl, ok := as[ReadlinkAter](d.file)
 	if !ok {
 		return types.ResultStringErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -313,7 +331,7 @@ func (d *fsDescriptor) ReadlinkAt(_ context.Context, p string) (types.ResultStri
 }
 
 func (d *fsDescriptor) Sync(_ context.Context) (types.Result_ErrorCode, error) {
-	s, ok := d.file.(Syncer)
+	s, ok := as[Syncer](d.file)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -332,15 +350,15 @@ func (d *fsDescriptor) Advise(_ context.Context, _ uint64, _ uint64, _ types.Adv
 }
 
 func (d *fsDescriptor) Write(_ context.Context, data []uint8, offset uint64) (types.ResultU64ErrorCode, error) {
-	if wa, ok := d.file.(io.WriterAt); ok {
+	if wa, ok := as[io.WriterAt](d.file); ok {
 		n, err := wa.WriteAt(data, int64(offset))
 		if err != nil {
 			return types.ResultU64ErrorCodeErr{Value: fsErr(err)}, nil
 		}
 		return types.ResultU64ErrorCodeOk{Value: uint64(n)}, nil
 	}
-	if s, ok := d.file.(io.Seeker); ok {
-		if w, ok := d.file.(io.Writer); ok {
+	if s, ok := as[io.Seeker](d.file); ok {
+		if w, ok := as[io.Writer](d.file); ok {
 			if _, err := s.Seek(int64(offset), io.SeekStart); err != nil {
 				return types.ResultU64ErrorCodeErr{Value: fsErr(err)}, nil
 			}
@@ -355,12 +373,12 @@ func (d *fsDescriptor) Write(_ context.Context, data []uint8, offset uint64) (ty
 }
 
 func (d *fsDescriptor) WriteViaStream(_ context.Context, offset uint64) (types.ResultOutputStreamErrorCode, error) {
-	w, ok := d.file.(io.Writer)
+	w, ok := as[io.Writer](d.file)
 	if !ok {
 		return types.ResultOutputStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
 	if offset > 0 {
-		s, ok := d.file.(io.Seeker)
+		s, ok := as[io.Seeker](d.file)
 		if !ok {
 			return types.ResultOutputStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 		}
@@ -374,11 +392,11 @@ func (d *fsDescriptor) WriteViaStream(_ context.Context, offset uint64) (types.R
 }
 
 func (d *fsDescriptor) AppendViaStream(_ context.Context) (types.ResultOutputStreamErrorCode, error) {
-	w, ok := d.file.(io.Writer)
+	w, ok := as[io.Writer](d.file)
 	if !ok {
 		return types.ResultOutputStreamErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
-	if s, ok := d.file.(io.Seeker); ok {
+	if s, ok := as[io.Seeker](d.file); ok {
 		if _, err := s.Seek(0, io.SeekEnd); err != nil {
 			return types.ResultOutputStreamErrorCodeErr{Value: fsErr(err)}, nil
 		}
@@ -389,7 +407,7 @@ func (d *fsDescriptor) AppendViaStream(_ context.Context) (types.ResultOutputStr
 }
 
 func (d *fsDescriptor) SetSize(_ context.Context, size uint64) (types.Result_ErrorCode, error) {
-	t, ok := d.file.(Truncater)
+	t, ok := as[Truncater](d.file)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -400,7 +418,7 @@ func (d *fsDescriptor) SetSize(_ context.Context, size uint64) (types.Result_Err
 }
 
 func (d *fsDescriptor) SetTimes(_ context.Context, atim types.NewTimestamp, mtim types.NewTimestamp) (types.Result_ErrorCode, error) {
-	c, ok := d.file.(Chtimeser)
+	c, ok := as[Chtimeser](d.file)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -412,7 +430,7 @@ func (d *fsDescriptor) SetTimes(_ context.Context, atim types.NewTimestamp, mtim
 }
 
 func (d *fsDescriptor) SetTimesAt(_ context.Context, _ types.PathFlags, p string, atim types.NewTimestamp, mtim types.NewTimestamp) (types.Result_ErrorCode, error) {
-	c, ok := d.file.(ChtimesAter)
+	c, ok := as[ChtimesAter](d.file)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -438,7 +456,7 @@ func resolveTimestamp(t types.NewTimestamp) time.Time {
 }
 
 func (d *fsDescriptor) CreateDirectoryAt(_ context.Context, p string) (types.Result_ErrorCode, error) {
-	m, ok := d.file.(MkdirAter)
+	m, ok := as[MkdirAter](d.file)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -449,7 +467,7 @@ func (d *fsDescriptor) CreateDirectoryAt(_ context.Context, p string) (types.Res
 }
 
 func (d *fsDescriptor) RemoveDirectoryAt(_ context.Context, p string) (types.Result_ErrorCode, error) {
-	r, ok := d.file.(RmdirAter)
+	r, ok := as[RmdirAter](d.file)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -460,7 +478,7 @@ func (d *fsDescriptor) RemoveDirectoryAt(_ context.Context, p string) (types.Res
 }
 
 func (d *fsDescriptor) UnlinkFileAt(_ context.Context, p string) (types.Result_ErrorCode, error) {
-	u, ok := d.file.(UnlinkAter)
+	u, ok := as[UnlinkAter](d.file)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
@@ -518,7 +536,7 @@ type fdFile interface {
 }
 
 func (d *fsDescriptor) SymlinkAt(_ context.Context, target string, p string) (types.Result_ErrorCode, error) {
-	s, ok := d.file.(SymlinkAter)
+	s, ok := as[SymlinkAter](d.file)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}

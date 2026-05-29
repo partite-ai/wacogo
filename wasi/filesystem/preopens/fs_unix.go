@@ -11,11 +11,11 @@ import (
 // linkAt invokes linkat(2) when both files expose unix file descriptors,
 // using AT_SYMLINK_FOLLOW to match POSIX hard-link semantics.
 func linkAt(srcFile fs.File, srcPath string, dstFile fs.File, dstPath string) error {
-	src, ok := srcFile.(fdFile)
+	src, ok := as[fdFile](srcFile)
 	if !ok {
 		return errUnsupported
 	}
-	dst, ok := dstFile.(fdFile)
+	dst, ok := as[fdFile](dstFile)
 	if !ok {
 		return errUnsupported
 	}
@@ -25,11 +25,11 @@ func linkAt(srcFile fs.File, srcPath string, dstFile fs.File, dstPath string) er
 // renameAt invokes renameat(2) when both files expose unix file
 // descriptors.
 func renameAt(srcFile fs.File, srcPath string, dstFile fs.File, dstPath string) error {
-	src, ok := srcFile.(fdFile)
+	src, ok := as[fdFile](srcFile)
 	if !ok {
 		return errUnsupported
 	}
-	dst, ok := dstFile.(fdFile)
+	dst, ok := as[fdFile](dstFile)
 	if !ok {
 		return errUnsupported
 	}

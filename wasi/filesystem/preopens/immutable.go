@@ -93,6 +93,10 @@ func (d *immutableDir) ReadlinkAt(name string) (string, error) {
 	return fs.ReadLink(d.fsys, full)
 }
 
+func (d *immutableDir) Unwrap() fs.File {
+	return d.file
+}
+
 // joinPath resolves p relative to base inside an fs.FS rooted at "."
 // and rejects results that escape the root or use absolute paths.
 func joinPath(base, p string) (string, bool) {
