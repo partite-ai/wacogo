@@ -285,7 +285,7 @@ func (d *fsDescriptor) ReadViaStream(_ context.Context, offset uint64) (types.Re
 			return types.ResultInputStreamErrorCodeErr{Value: fsErr(err)}, nil
 		}
 	}
-	st := streams.NewIOReaderInputStream(d.deps.Error, d.deps.Poll, d.file)
+	st := streams.NewIOReaderInputStream(d.deps.Error, d.deps.Poll, io.NopCloser(d.file))
 	h := streams.NewInputStreamHandleIn(d.deps.Streams, st)
 	return types.ResultInputStreamErrorCodeOk{Value: h}, nil
 }
@@ -396,7 +396,7 @@ func (d *fsDescriptor) WriteViaStream(_ context.Context, offset uint64) (types.R
 			return types.ResultOutputStreamErrorCodeErr{Value: fsErr(err)}, nil
 		}
 	}
-	st := streams.NewIOWriterOutputStream(d.deps.Error, d.deps.Poll, w)
+	st := streams.NewIOWriterOutputStream(d.deps.Error, d.deps.Poll, struct{ io.Writer }{w})
 	h := streams.NewOutputStreamHandleIn(d.deps.Streams, st)
 	return types.ResultOutputStreamErrorCodeOk{Value: h}, nil
 }
@@ -411,7 +411,7 @@ func (d *fsDescriptor) AppendViaStream(_ context.Context) (types.ResultOutputStr
 			return types.ResultOutputStreamErrorCodeErr{Value: fsErr(err)}, nil
 		}
 	}
-	st := streams.NewIOWriterOutputStream(d.deps.Error, d.deps.Poll, w)
+	st := streams.NewIOWriterOutputStream(d.deps.Error, d.deps.Poll, struct{ io.Writer }{w})
 	h := streams.NewOutputStreamHandleIn(d.deps.Streams, st)
 	return types.ResultOutputStreamErrorCodeOk{Value: h}, nil
 }
