@@ -14,15 +14,27 @@ import (
 // the callee side comes from fn.Callee().
 func (s *instantiationState) execLowerWithGoAdapter(ctx context.Context, step planLower, fn *ExportedFunc) error {
 	var callerMem api.Memory
-	if step.options.hasMemory && int(step.options.memory) < len(s.coreMemories) {
+	if step.options.hasMemory {
+		if int(step.options.memory) >= len(s.coreMemories) {
+			return fmt.Errorf("wacogo: lower: memory option index %d out of range", step.options.memory)
+		}
 		cm := s.coreMemories[step.options.memory]
 		callerMem = cm.instance.ExportedMemory(cm.name)
+		if callerMem == nil {
+			return fmt.Errorf("wacogo: lower: memory %q not exported by module", cm.name)
+		}
 	}
 
 	var callerRealloc api.Function
-	if step.options.hasRealloc && int(step.options.realloc) < len(s.coreFuncs) {
+	if step.options.hasRealloc {
+		if int(step.options.realloc) >= len(s.coreFuncs) {
+			return fmt.Errorf("wacogo: lower: realloc option index %d out of range", step.options.realloc)
+		}
 		rf := s.coreFuncs[step.options.realloc]
 		callerRealloc = rf.instance.ExportedFunction(rf.name)
+		if callerRealloc == nil {
+			return fmt.Errorf("wacogo: lower: realloc %q not exported by module", rf.name)
+		}
 	}
 
 	caller := canon.CallSide{

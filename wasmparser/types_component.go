@@ -175,6 +175,11 @@ type InstanceTypeDecl struct {
 func (*InstanceTypeDecl) componentTypeDef() {}
 
 func (it *InstanceTypeDecl) unmarshalBinary(r *BinaryReader) error {
+	r.nesting++
+	defer func() { r.nesting-- }()
+	if r.nesting > MaxNestingDepth {
+		return errfAt(r.Offset(), "instance type declaration nesting depth %d exceeds maximum %d", r.nesting, MaxNestingDepth)
+	}
 	count, err := r.ReadU32()
 	if err != nil {
 		return err
@@ -267,6 +272,11 @@ type ComponentTypeDecl struct {
 func (*ComponentTypeDecl) componentTypeDef() {}
 
 func (ct *ComponentTypeDecl) unmarshalBinary(r *BinaryReader) error {
+	r.nesting++
+	defer func() { r.nesting-- }()
+	if r.nesting > MaxNestingDepth {
+		return errfAt(r.Offset(), "component type declaration nesting depth %d exceeds maximum %d", r.nesting, MaxNestingDepth)
+	}
 	count, err := r.ReadU32()
 	if err != nil {
 		return err

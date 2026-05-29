@@ -371,7 +371,7 @@ func (v *valToFlatVisitor) VisitVariant(cases []VariantCase) {
 			return fmt.Errorf("expected *ValVariant, got %T", val)
 		}
 		disc := variant.Discriminant()
-		if int(disc) >= len(entries) {
+		if disc >= uint32(len(entries)) {
 			return fmt.Errorf("variant: out-of-range case %d", disc)
 		}
 		gcc.registers[discSlot] = uint64(disc)

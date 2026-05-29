@@ -173,12 +173,25 @@ func (h *detachedResourceHandle) Drop(context.Context) error {
 	panic("wacogo/core: Drop on detached handle (carrier)")
 }
 
+// dtorDepthKey is the context key for tracking nested dtor invocations.
+type dtorDepthKey struct{}
+
+// maxDtorDepth caps the depth of cross-instance dtor chains. Without this
+// cap, two instances whose dtors reference each other's resources could
+// deadlock during teardown (or recurse without bound in pathological host
+// wiring).
+const maxDtorDepth = 32
+
 // runDtor invokes tr's destructor with the spec-required gating:
 //   - nil tr or nil dtor: no-op.
 //   - caller == defining: same-component shortcut; defining instance
 //     is already entered, so invoke directly (Enter would deadlock).
 //   - defining == nil: test stub fallback; invoke directly.
 //   - else: Enter the defining instance, run dtor, defer Exit.
+//
+// A cumulative dtor-call depth carried on ctx caps recursion at
+// maxDtorDepth; exceeding the cap returns an error rather than risking
+// deadlock or stack overflow.
 func runDtor(ctx context.Context, tr *TypeResource, rep uint32, caller *ComponentInstance) error {
 	if tr == nil {
 		return nil
@@ -187,6 +200,11 @@ func runDtor(ctx context.Context, tr *TypeResource, rep uint32, caller *Componen
 	if dtor == nil {
 		return nil
 	}
+	depth, _ := ctx.Value(dtorDepthKey{}).(int)
+	if depth >= maxDtorDepth {
+		return fmt.Errorf("dtor recursion depth %d exceeds maximum %d", depth, maxDtorDepth)
+	}
+	ctx = context.WithValue(ctx, dtorDepthKey{}, depth+1)
 	defining := tr.instance
 	if caller == defining {
 		return dtor(ctx, rep)

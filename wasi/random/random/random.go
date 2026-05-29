@@ -29,9 +29,16 @@ func newRNG() *rng {
 	return &rng{src: cryptorand.Reader}
 }
 
+// MaxRandomBytesPerCall caps a single get-random-bytes request so a
+// malicious guest cannot OOM the host with a billion-byte request.
+const MaxRandomBytesPerCall = 64 * 1024 * 1024 // 64 MiB
+
 func (r *rng) GetRandomBytes(_ context.Context, n uint64) ([]uint8, error) {
 	if n == 0 {
 		return []uint8{}, nil
+	}
+	if n > MaxRandomBytesPerCall {
+		return nil, fmt.Errorf("wasi:random/random.get-random-bytes: requested %d bytes exceeds per-call cap %d", n, MaxRandomBytesPerCall)
 	}
 	buf := make([]byte, n)
 	if _, err := io.ReadFull(r.src, buf); err != nil {

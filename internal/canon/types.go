@@ -42,8 +42,15 @@ type Task struct {
 // BorrowIssued increments the borrow count.
 func (t *Task) BorrowIssued() { t.NumBorrows++ }
 
-// BorrowDropped decrements the borrow count.
-func (t *Task) BorrowDropped() { t.NumBorrows-- }
+// BorrowDropped decrements the borrow count. Underflow is treated as a bug
+// — silently clamped at zero so a stale drop after an error-path teardown
+// cannot wrap to 0xFFFFFFFF and poison later accounting.
+func (t *Task) BorrowDropped() {
+	if t.NumBorrows == 0 {
+		return
+	}
+	t.NumBorrows--
+}
 
 // AddRelease registers fn to fire on End. Used by LendTo to attach the
 // matching unlend for a lifted borrow.
@@ -70,9 +77,14 @@ func (t *Task) End() error {
 const MaxListByteLength uint32 = (1 << 28) - 1
 
 // alignUp rounds v up to the next multiple of a. a==0 is a no-op.
+// Traps if v + a - 1 would wrap uint32 — adversarial layouts cannot collide
+// fields by overflowing the running offset.
 func alignUp(v, a uint32) uint32 {
 	if a == 0 {
 		return v
+	}
+	if v > 0xFFFFFFFF-(a-1) {
+		trapf("type layout overflow: alignUp(%d, %d)", v, a)
 	}
 	return (v + a - 1) & ^(a - 1)
 }

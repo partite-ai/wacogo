@@ -58,8 +58,14 @@ func runTransferPlan(
 	// LIFO ordering: this defer registers AFTER the Exit defer above, so
 	// it fires FIRST (releases run, then reentrance lock).
 	defer func() {
-		if err := tc.Task.End(); err != nil {
-			trapf("%s", err.Error())
+		endErr := tc.Task.End()
+		if r := recover(); r != nil {
+			// An in-flight panic preserves its original cause; the
+			// borrow-leak message is informative only at that point.
+			panic(r)
+		}
+		if endErr != nil {
+			trapf("%s", endErr.Error())
 		}
 	}()
 

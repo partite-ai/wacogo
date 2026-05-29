@@ -93,18 +93,19 @@ func buildPerInstanceHostMod(
 	return mod, setup, nil
 }
 
-// instrumentCall runs fn under any CallListener attached to h. When the
-// listener is nil it takes a direct fast path: no defer, panics
-// propagate as-is, and a returned error is converted to a panic only
-// when panicOnErr is true (the regular wasm-trap semantics for host
-// function calls; destructors pass panicOnErr=false to preserve their
-// historical fire-and-forget behavior).
+// instrumentCall runs fn under any CallListener attached to h. With or
+// without a listener, the observable result to wazero is identical:
+//   - fn returns nil: no panic.
+//   - fn returns err and panicOnErr: panic(err).
+//   - fn returns err and !panicOnErr: silent (dtor-style fire-and-forget).
+//   - fn panics: original panic value propagates unchanged so wazero's
+//     trap conversion sees the original.
 //
-// When the listener is set, fn is wrapped so BeforeCall fires once
-// before invocation and AfterCall fires exactly once afterward — on
-// success, on returned error, and on panic. Recovered panics are
-// re-thrown verbatim so wazero's trap conversion sees the original
-// value.
+// When a listener is attached, BeforeCall fires once before invocation
+// and AfterCall fires exactly once after — on success, on returned
+// error, and on panic — receiving a normalized error value (a non-error
+// panic value gets wrapped as `fmt.Errorf("panic: %v", r)` for the
+// listener's convenience; the re-thrown panic carries the original).
 func instrumentCall(
 	ctx context.Context,
 	h *ComponentInstance,

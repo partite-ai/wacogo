@@ -24,9 +24,12 @@ func validateChar(r rune) error {
 }
 
 // checkListLen returns an error if length*elemSize overflows or exceeds
-// MaxListByteLength. length=0 always succeeds.
+// MaxListByteLength. length=0 always succeeds. elemSize=0 (empty record /
+// tuple element types) is treated as having zero in-memory footprint
+// regardless of length — the canonical ABI does not require allocation
+// for such lists.
 func checkListLen(length, elemSize uint32) error {
-	if length == 0 {
+	if length == 0 || elemSize == 0 {
 		return nil
 	}
 	byteLen := length * elemSize

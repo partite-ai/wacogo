@@ -53,7 +53,11 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 			return modType, err
 		}
 		sectionStart := r.Offset()
-		sectionData, err := r.ReadBytes(int(sectionLen))
+		safeLen, err := checkSectionLength(sectionStart, sectionLen, "inner core module section")
+		if err != nil {
+			return modType, err
+		}
+		sectionData, err := r.ReadBytes(safeLen)
 		if err != nil {
 			return modType, err
 		}
@@ -67,6 +71,9 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 			if err != nil {
 				return modType, err
 			}
+			if err := checkCount(sr.Offset(), count, MaxTypes, "inner module type"); err != nil {
+				return modType, err
+			}
 			for range count {
 				ft, err := readInlineFuncType(sr)
 				if err != nil {
@@ -78,6 +85,9 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 		case coreImportSection:
 			count, err := sr.ReadU32()
 			if err != nil {
+				return modType, err
+			}
+			if err := checkCount(sr.Offset(), count, MaxImports, "inner module import"); err != nil {
 				return modType, err
 			}
 			for range count {
@@ -147,6 +157,9 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 			if err != nil {
 				return modType, err
 			}
+			if err := checkCount(sr.Offset(), count, MaxFunctions, "inner module func"); err != nil {
+				return modType, err
+			}
 			for range count {
 				typeIdx, err := sr.ReadU32()
 				if err != nil {
@@ -158,6 +171,9 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 		case coreTableSection:
 			count, err := sr.ReadU32()
 			if err != nil {
+				return modType, err
+			}
+			if err := checkCount(sr.Offset(), count, MaxTables, "inner module table"); err != nil {
 				return modType, err
 			}
 			for range count {
@@ -173,6 +189,9 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 			if err != nil {
 				return modType, err
 			}
+			if err := checkCount(sr.Offset(), count, MaxMemories, "inner module memory"); err != nil {
+				return modType, err
+			}
 			for range count {
 				mem, err := readInlineMemoryType(sr)
 				if err != nil {
@@ -184,6 +203,9 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 		case coreGlobalSection:
 			count, err := sr.ReadU32()
 			if err != nil {
+				return modType, err
+			}
+			if err := checkCount(sr.Offset(), count, MaxGlobals, "inner module global"); err != nil {
 				return modType, err
 			}
 			for range count {
@@ -200,6 +222,9 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 		case coreExportSection:
 			count, err := sr.ReadU32()
 			if err != nil {
+				return modType, err
+			}
+			if err := checkCount(sr.Offset(), count, MaxExports, "inner module export"); err != nil {
 				return modType, err
 			}
 			for range count {
@@ -258,10 +283,16 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 			if err != nil {
 				return modType, err
 			}
+			if err := checkCount(sr.Offset(), count, MaxFunctions, "inner module code"); err != nil {
+				return modType, err
+			}
 			for i := range count {
 				bodySize, err := sr.ReadU32()
 				if err != nil {
 					return modType, err
+				}
+				if uint64(bodySize) > MaxFunctionBodySize {
+					return modType, errfAt(sr.Offset(), "function body size %d exceeds maximum %d", bodySize, MaxFunctionBodySize)
 				}
 				bodyData, err := sr.ReadBytes(int(bodySize))
 				if err != nil {
@@ -302,8 +333,14 @@ func validateFuncBody(ft CoreFuncTypeDesc, body []byte, baseOffset int) error {
 	if err != nil {
 		return err
 	}
+	if err := checkCount(br.Offset(), localCount, MaxFunctions, "function locals groups"); err != nil {
+		return err
+	}
 	var localTypes []CoreValType
 	localTypes = append(localTypes, ft.Params...)
+	// Track total locals against a flat cap so an attacker can't drive 4 GB
+	// of slice growth via many small groups either.
+	var totalLocals uint64
 	for range localCount {
 		count, err := br.ReadU32()
 		if err != nil {
@@ -312,6 +349,10 @@ func validateFuncBody(ft CoreFuncTypeDesc, body []byte, baseOffset int) error {
 		vt, err := br.ReadByte()
 		if err != nil {
 			return err
+		}
+		totalLocals += uint64(count)
+		if totalLocals > MaxFunctions {
+			return errfAt(br.Offset(), "function local count %d exceeds maximum %d", totalLocals, uint64(MaxFunctions))
 		}
 		cvt := CoreValType(vt)
 		for range count {
@@ -446,6 +487,9 @@ func readInlineFuncType(r *BinaryReader) (CoreFuncTypeDesc, error) {
 	if err != nil {
 		return CoreFuncTypeDesc{}, err
 	}
+	if err := checkCount(r.Offset(), paramCount, MaxFunctionParams, "function param"); err != nil {
+		return CoreFuncTypeDesc{}, err
+	}
 	params := make([]CoreValType, paramCount)
 	for i := range params {
 		b, err := r.ReadByte()
@@ -460,6 +504,9 @@ func readInlineFuncType(r *BinaryReader) (CoreFuncTypeDesc, error) {
 	}
 	resultCount, err := r.ReadU32()
 	if err != nil {
+		return CoreFuncTypeDesc{}, err
+	}
+	if err := checkCount(r.Offset(), resultCount, MaxFunctionResults, "function result"); err != nil {
 		return CoreFuncTypeDesc{}, err
 	}
 	results := make([]CoreValType, resultCount)

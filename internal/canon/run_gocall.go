@@ -93,6 +93,11 @@ func runGocallPlan(
 	if len(coreResults) > 0 {
 		resultBase = uint32(coreResults[0])
 	}
+	if plan.returnMem {
+		if err := checkAlignment(resultBase, plan.resultMaxAlign); err != nil {
+			return nil, err
+		}
+	}
 	results = make([]Val, len(plan.resultSteps))
 	for i, step := range plan.resultSteps {
 		v, err := step(ctx, gcc, resultBase)

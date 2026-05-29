@@ -77,6 +77,7 @@ func (t *ResourceTable) dropAllOwns(ctx context.Context, caller *ComponentInstan
 		return nil
 	}
 	var errs []error
+	dtorPanicked := false
 	for slot := len(t.entries) - 1; slot >= 0; slot-- {
 		e := &t.entries[slot]
 		if !e.occupied || e.kind != kindOwn {
@@ -86,6 +87,7 @@ func (t *ResourceTable) dropAllOwns(ctx context.Context, caller *ComponentInstan
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
+					dtorPanicked = true
 					errs = append(errs, fmt.Errorf("dtor(slot=%d): %v", slot+1, r))
 				}
 			}()
@@ -93,6 +95,12 @@ func (t *ResourceTable) dropAllOwns(ctx context.Context, caller *ComponentInstan
 				errs = append(errs, fmt.Errorf("dtor(slot=%d): %w", slot+1, err))
 			}
 		}()
+	}
+	if dtorPanicked && caller != nil {
+		// A panicking dtor leaves the resource graph in an indeterminate
+		// state — poison the instance so any leftover handles cannot be
+		// reused via Enter once Close finishes.
+		caller.Poison(fmt.Errorf("dtor panicked during Close"))
 	}
 	return errors.Join(errs...)
 }
@@ -164,6 +172,8 @@ func (t *ResourceTable) free(idx uint32) {
 	t.entries[idx].occupied = false
 	t.entries[idx].tr = nil
 	t.entries[idx].kind = 0
+	t.entries[idx].numLends = 0
+	t.entries[idx].borrowScope = nil
 	t.entries[idx].rep = uint32(t.freeList)
 	t.freeList = int32(idx)
 }

@@ -102,6 +102,9 @@ func (l *componentLoader) allocType(r typeResolver) uint32 {
 // LoadComponent parses and compiles a component binary into a Component
 // ready for instantiation.
 func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, error) {
+	if e.closed.Load() {
+		return nil, ErrEngineClosed
+	}
 	vp := e.validator.NewValidatingParser(r)
 	comp, err := e.loadComponentFromParser(ctx, vp, nil)
 	if err != nil {

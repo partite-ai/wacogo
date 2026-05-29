@@ -165,7 +165,7 @@ func (ft *FlagsType) unmarshalBinary(r *BinaryReader) error {
 		return err
 	}
 	if count > MaxFlagNames {
-		return errfAt(r.Offset(), "flags count %d exceeds maximum %d", count, MaxFlagNames)
+		return errfAt(r.Offset(), "cannot have more than %d flags", MaxFlagNames)
 	}
 	ft.Labels = make([]string, 0, count)
 	for range count {

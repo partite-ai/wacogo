@@ -527,11 +527,15 @@ func (p *Parser) readSection() (Payload, error) {
 	}
 
 	dataStart := p.reader.Offset()
+	safeLen, err := checkSectionLength(start, length, "section")
+	if err != nil {
+		return nil, err
+	}
 	dataEnd := dataStart + uint64(length)
 	rng := Range{Start: start, End: dataEnd}
 
 	if p.encoding == EncodingComponent {
-		return p.dispatchComponentSection(id, int64(length), dataStart, rng)
+		return p.dispatchComponentSection(id, safeLen, dataStart, rng)
 	}
 
 	// Core module sections must appear in canonical order, with custom
@@ -548,7 +552,7 @@ func (p *Parser) readSection() (Payload, error) {
 	}
 
 	// Core module sections
-	sectionData, err := p.reader.ReadBytes(int(length))
+	sectionData, err := p.reader.ReadBytes(safeLen)
 	if err != nil {
 		return nil, errfAt(dataStart, "section data truncated: %v", err)
 	}
@@ -556,17 +560,21 @@ func (p *Parser) readSection() (Payload, error) {
 	return p.dispatchModuleSection(id, sectionData, dataStart, rng)
 }
 
-func (p *Parser) dispatchComponentSection(id byte, length int64, dataOffset uint64, rng Range) (Payload, error) {
+func (p *Parser) dispatchComponentSection(id byte, length int, dataOffset uint64, rng Range) (Payload, error) {
 	switch id {
 	case sectionCoreModule, sectionComponent:
 		// Nested module/component: read all section bytes, then create a sub-parser
 		// from those bytes. The top-level read is still incremental (one section at
 		// a time), but each nested section's content is fully read before parsing.
-		sectionData, err := p.reader.ReadBytes(int(length))
+		sectionData, err := p.reader.ReadBytes(length)
 		if err != nil {
 			return nil, errfAt(dataOffset, "section data truncated: %v", err)
 		}
 		sub := newParserFromBytes(sectionData, dataOffset)
+		sub.reader.nesting = p.reader.nesting + 1
+		if sub.reader.nesting > MaxNestingDepth {
+			return nil, errfAt(dataOffset, "nested component/module depth %d exceeds maximum %d", sub.reader.nesting, MaxNestingDepth)
+		}
 
 		if id == sectionCoreModule {
 			return &ModuleSectionPayload{
@@ -583,7 +591,7 @@ func (p *Parser) dispatchComponentSection(id byte, length int64, dataOffset uint
 	default:
 		// For all other sections, read the section data fully into a byte slice,
 		// then create a byte-slice BinaryReader for Items() iteration.
-		sectionData, err := p.reader.ReadBytes(int(length))
+		sectionData, err := p.reader.ReadBytes(length)
 		if err != nil {
 			return nil, errfAt(dataOffset, "section data truncated: %v", err)
 		}

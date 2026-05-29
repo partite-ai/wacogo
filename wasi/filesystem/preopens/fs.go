@@ -235,6 +235,12 @@ func openFlagsToOSFlag(of types.OpenFlags, df types.DescriptorFlags) int {
 	return flag
 }
 
+// maxReadPerCall caps a single Read request so adversarial guest input
+// (length=0xFFFFFFFFFFFFFFFF) cannot OOM the host. The cap is applied as
+// an allocation ceiling — the guest can still iterate through a large
+// file by issuing multiple Read calls.
+const maxReadPerCall = 64 * 1024 * 1024 // 64 MiB
+
 func (d *fsDescriptor) Read(_ context.Context, length uint64, offset uint64) (types.ResultTupleListU8BoolErrorCode, error) {
 	info, err := d.file.Stat()
 	if err != nil {
@@ -242,6 +248,9 @@ func (d *fsDescriptor) Read(_ context.Context, length uint64, offset uint64) (ty
 	}
 	if info.IsDir() {
 		return types.ResultTupleListU8BoolErrorCodeErr{Value: types.ErrorCodeIsDirectory}, nil
+	}
+	if length > maxReadPerCall {
+		length = maxReadPerCall
 	}
 	buf := make([]byte, length)
 	n, err := readAt(d.file, buf, int64(offset))

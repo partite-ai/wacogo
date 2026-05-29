@@ -43,12 +43,14 @@ type transferPlan struct {
 // step per top-level result type; the runner collects each returned Val
 // into the output []Val.
 type gocallPlan struct {
-	paramMemSize  uint32
-	paramMaxAlign uint32
-	nParamRegs    int // core-args slice size: flat-slot count, or 1 for mem params
-	nResultRegs   int // flat-mode: sum of flat slots for all results (≤1 per maxFlatResults cap); mem-mode: 1 (the result-block pointer)
-	paramSteps    []gocallLowerStep
-	resultSteps   []gocallLiftStep
+	paramMemSize   uint32
+	paramMaxAlign  uint32
+	nParamRegs     int // core-args slice size: flat-slot count, or 1 for mem params
+	nResultRegs    int // flat-mode: sum of flat slots for all results (≤1 per maxFlatResults cap); mem-mode: 1 (the result-block pointer)
+	returnMem      bool
+	resultMaxAlign uint32
+	paramSteps     []gocallLowerStep
+	resultSteps    []gocallLiftStep
 }
 
 // maxFlatParams / maxFlatResults per canonical ABI spec.
@@ -158,6 +160,8 @@ func compileGocallPlan(params, results []Type) *gocallPlan {
 		}
 		plan.resultSteps = mv.out
 		plan.nResultRegs = 1 // callee returns a single i32 result-block pointer
+		plan.returnMem = true
+		plan.resultMaxAlign = mv.maxAlign
 	}
 
 	return plan

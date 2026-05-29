@@ -14,10 +14,7 @@ func transferStringContent(ctx context.Context, tc *transferContext, srcPtr, src
 	srcEnc := tc.caller.StringEncoding
 	dstEnc := tc.callee.StringEncoding
 
-	byteLen := srcCoded * unitSize(srcEnc)
-	if srcCoded != 0 && byteLen/unitSize(srcEnc) != srcCoded {
-		panic(&Trap{msg: "string byte length overflow"})
-	}
+	byteLen := stringByteLen(srcCoded, srcEnc)
 	if byteLen > maxStringByteLength {
 		panic(&Trap{msg: "string byte length exceeds max"})
 	}
@@ -36,10 +33,21 @@ func transferStringContent(ctx context.Context, tc *transferContext, srcPtr, src
 			if msg := classifyUTF8(srcBytes); msg != "" {
 				panic(&Trap{msg: msg})
 			}
+			outBytes, outCoded = srcBytes, srcCoded
 		case EncUTF16:
 			validateUTF16Bytes(srcBytes)
+			outBytes, outCoded = srcBytes, srcCoded
+		case EncLatin1UTF16:
+			// Per spec, the Latin-1 sub-encoding has no validation work to
+			// do (every byte is a valid code point); the UTF-16 sub-encoding
+			// validates surrogate pairing.
+			if _, isUTF16 := latin1UTF16Decode(srcCoded); isUTF16 {
+				validateUTF16Bytes(srcBytes)
+			}
+			outBytes, outCoded = srcBytes, srcCoded
+		default:
+			outBytes, outCoded = srcBytes, srcCoded
 		}
-		outBytes, outCoded = srcBytes, srcCoded
 	} else {
 		s := decodeString(memShim{tc.caller.Memory}, srcPtr, srcCoded, srcEnc)
 		outBytes, outCoded = encodeString(s, dstEnc)

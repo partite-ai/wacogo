@@ -376,6 +376,9 @@ func readModuleDeclFuncType(r *BinaryReader) (*ModuleDeclType, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkCount(r.Offset(), paramCount, MaxFunctionParams, "module type function param"); err != nil {
+		return nil, err
+	}
 	params := make([]CoreValParam, paramCount)
 	for i := range paramCount {
 		p, err := readCoreValParam(r)
@@ -386,6 +389,9 @@ func readModuleDeclFuncType(r *BinaryReader) (*ModuleDeclType, error) {
 	}
 	resultCount, err := r.ReadU32()
 	if err != nil {
+		return nil, err
+	}
+	if err := checkCount(r.Offset(), resultCount, MaxFunctionResults, "module type function result"); err != nil {
 		return nil, err
 	}
 	results := make([]CoreValParam, resultCount)

@@ -13,6 +13,9 @@ import (
 type BinaryReader struct {
 	r      *bufio.Reader
 	offset uint64 // current position in the original stream (for error reporting)
+	// nesting tracks recursive parsing depth (nested components/modules,
+	// recursive type declarations). Bounded by MaxNestingDepth.
+	nesting int
 }
 
 // NewBinaryReader creates a BinaryReader that reads from r.

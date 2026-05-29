@@ -247,8 +247,11 @@ func (i *ComponentInstance) Close(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
-	for _, m := range i.coreInstances {
-		if err := m.Close(ctx); err != nil {
+	// Close core instances in reverse declaration order. wazero modules
+	// often depend on memory/funcs exported by earlier modules, so LIFO
+	// teardown avoids closing a provider before its consumers.
+	for idx := len(i.coreInstances) - 1; idx >= 0; idx-- {
+		if err := i.coreInstances[idx].Close(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}

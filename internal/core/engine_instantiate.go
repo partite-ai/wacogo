@@ -95,6 +95,9 @@ type coreGlobal struct {
 }
 
 func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...InstantiateOption) (*ComponentInstance, error) {
+	if e.closed.Load() {
+		return nil, ErrEngineClosed
+	}
 	cfg := &instantiateConfig{}
 	for _, opt := range opts {
 		opt(cfg)
@@ -706,6 +709,9 @@ func (s *instantiationState) buildLiftedFunc(
 		}
 		cm := s.coreMemories[options.memory]
 		mem = cm.instance.ExportedMemory(cm.name)
+		if mem == nil {
+			return nil, fmt.Errorf("wacogo: lift: memory %q not exported by module", cm.name)
+		}
 	}
 	var reallocFn api.Function
 	if options.hasRealloc {
@@ -714,6 +720,9 @@ func (s *instantiationState) buildLiftedFunc(
 		}
 		rf := s.coreFuncs[options.realloc]
 		reallocFn = rf.instance.ExportedFunction(rf.name)
+		if reallocFn == nil {
+			return nil, fmt.Errorf("wacogo: lift: realloc %q not exported by module", rf.name)
+		}
 	}
 	var postReturnFn api.Function
 	if options.hasPostReturn {
@@ -722,6 +731,9 @@ func (s *instantiationState) buildLiftedFunc(
 		}
 		pf := s.coreFuncs[options.postReturn]
 		postReturnFn = pf.instance.ExportedFunction(pf.name)
+		if postReturnFn == nil {
+			return nil, fmt.Errorf("wacogo: lift: post-return %q not exported by module", pf.name)
+		}
 	}
 	callee := canon.Callee{
 		CallSide: canon.CallSide{

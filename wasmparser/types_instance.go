@@ -71,6 +71,9 @@ func readComponentInstance(r *BinaryReader) (ComponentInstance, error) {
 		if err != nil {
 			return nil, err
 		}
+		if err := checkCount(r.Offset(), count, MaxComponentExternNames, "component instance export"); err != nil {
+			return nil, err
+		}
 		exports := make([]ComponentExport, 0, count)
 		for range count {
 			exp, err := readComponentExportNoType(r)
@@ -161,6 +164,9 @@ func readInstance(r *BinaryReader) (Instance, error) {
 		// From exports: count, exports...
 		count, err := r.ReadU32()
 		if err != nil {
+			return nil, err
+		}
+		if err := checkCount(r.Offset(), count, MaxExports, "core instance export"); err != nil {
 			return nil, err
 		}
 		exports := make([]CoreExportItem, 0, count)

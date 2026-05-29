@@ -4,9 +4,32 @@ import (
 	"context"
 	"maps"
 	"net/http"
+	"strings"
 
 	"github.com/partite-ai/wacogo/internal/wasi/gen/wasi/http/types"
 )
+
+// forbiddenHeaders are request/response header names a guest is not allowed
+// to set or override — they would let the guest impersonate transport-level
+// state (Host header), violate framing (Content-Length), or hijack
+// connection semantics (Connection, Upgrade, Trailer, Transfer-Encoding).
+// Comparison is case-insensitive.
+var forbiddenHeaders = map[string]struct{}{
+	"host":              {},
+	"content-length":    {},
+	"connection":        {},
+	"transfer-encoding": {},
+	"upgrade":           {},
+	"trailer":           {},
+	"te":                {},
+	"keep-alive":        {},
+	"proxy-connection":  {},
+}
+
+func isForbiddenHeader(name string) bool {
+	_, ok := forbiddenHeaders[strings.ToLower(name)]
+	return ok
+}
 
 type fieldsImpl struct {
 	h         http.Header
@@ -22,6 +45,11 @@ func (hf *fieldsImpl) Append(ctx context.Context, name string, value []uint8) (R
 		return Result_HeaderErrorErr{
 			Value: types.HeaderErrorImmutable{},
 		}, nil
+	}
+	if isForbiddenHeader(name) {
+		// Silently drop — preserves the spec's success response shape while
+		// preventing the guest from setting forbidden transport headers.
+		return types.Result_HeaderErrorOk{}, nil
 	}
 	hf.h.Add(name, string(value))
 	return types.Result_HeaderErrorOk{}, nil
@@ -71,6 +99,9 @@ func (hf *fieldsImpl) Set(ctx context.Context, name string, value [][]uint8) (Re
 		return Result_HeaderErrorErr{
 			Value: types.HeaderErrorImmutable{},
 		}, nil
+	}
+	if isForbiddenHeader(name) {
+		return types.Result_HeaderErrorOk{}, nil
 	}
 	hf.h.Del(name)
 	for _, v := range value {

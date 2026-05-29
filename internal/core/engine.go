@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 
 	"github.com/partite-ai/wacogo/internal/canon"
 	"github.com/partite-ai/wacogo/wasmparser"
@@ -9,6 +11,9 @@ import (
 	"github.com/tetratelabs/wazero/api"
 	"github.com/tetratelabs/wazero/experimental"
 )
+
+// ErrEngineClosed is returned by Engine operations attempted after Close.
+var ErrEngineClosed = errors.New("engine is closed")
 
 // EngineOption configures an Engine at construction time.
 type EngineOption func(*engineConfig)
@@ -29,6 +34,7 @@ type Engine struct {
 	runtime   wazero.Runtime
 	canonHost *canon.Host
 	validator *wasmparser.Validator
+	closed    atomic.Bool
 }
 
 // NewEngine creates a new Engine with the given options.
@@ -49,8 +55,18 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 	}
 }
 
-// Close releases all resources held by the engine.
-func (e *Engine) Close(ctx context.Context) error { return e.runtime.Close(ctx) }
+// Close releases all resources held by the engine. Idempotent: subsequent
+// calls are no-ops returning nil. Once closed, the engine will not accept
+// further LoadComponent / Instantiate calls.
+func (e *Engine) Close(ctx context.Context) error {
+	if !e.closed.CompareAndSwap(false, true) {
+		return nil
+	}
+	return e.runtime.Close(ctx)
+}
+
+// IsClosed reports whether the engine has been closed.
+func (e *Engine) IsClosed() bool { return e.closed.Load() }
 
 // WazeroRuntime returns the engine's wazero runtime. A package-level
 // function (not a method) so the host-internal accessor doesn't promote

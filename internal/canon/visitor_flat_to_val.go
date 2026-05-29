@@ -320,7 +320,7 @@ func (v *flatToValVisitor) VisitVariant(cases []VariantCase) {
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, base uint32) (Val, error) {
 		disc := uint32(gcc.registers[discSlot])
-		if int(disc) >= len(steps) {
+		if disc >= uint32(len(steps)) {
 			return nil, fmt.Errorf("variant: out-of-range discriminant %d", disc)
 		}
 		var payload Val

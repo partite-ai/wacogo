@@ -390,6 +390,9 @@ func (v *Validator) addResourceType(cs *ComponentState, rt *ResourceType) error 
 }
 
 func (v *Validator) addComponentTypeDecl(cs *ComponentState, ctd *ComponentTypeDecl) error {
+	if len(v.components) >= MaxNestingDepth {
+		return fmt.Errorf("component nesting depth %d exceeds maximum %d", len(v.components), MaxNestingDepth)
+	}
 	// Create a sub-state for the component type declarations
 	subCS := newComponentState(v.features, v.arena, ComponentKindComponentType)
 
@@ -441,6 +444,9 @@ func (v *Validator) processComponentTypeDecl(subCS *ComponentState, decl Compone
 }
 
 func (v *Validator) addInstanceTypeDecl(cs *ComponentState, itd *InstanceTypeDecl) error {
+	if len(v.components) >= MaxNestingDepth {
+		return fmt.Errorf("instance nesting depth %d exceeds maximum %d", len(v.components), MaxNestingDepth)
+	}
 	// Create a sub-state for the instance type declarations
 	subCS := newComponentState(v.features, v.arena, ComponentKindInstanceType)
 

@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+
 	"github.com/partite-ai/wacogo/wasmparser"
 	"github.com/tetratelabs/wazero/api"
 )
@@ -99,6 +101,13 @@ func NewInstance(e *Engine, spec *InstanceSpec) (*ComponentInstance, error) {
 	if spec.BuildExports != nil {
 		types, exports, err := spec.BuildExports(inst)
 		if err != nil {
+			// Close already-attached modules in reverse declaration order so
+			// the failed instance does not leak wazero state. Errors from
+			// the close are dropped — the BuildExports error is the cause.
+			closeCtx := context.Background()
+			for i := len(inst.coreInstances) - 1; i >= 0; i-- {
+				_ = inst.coreInstances[i].Close(closeCtx)
+			}
 			return nil, err
 		}
 		inst.initExports(types, exports)

@@ -22,7 +22,7 @@ const (
 	MaxRecordFields              = 10_000
 	MaxVariantCases              = 10_000
 	MaxTupleTypes                = 10_000
-	MaxFlagNames                 = 1_000
+	MaxFlagNames                 = 32
 	MaxEnumCases                 = 10_000
 	MaxInstantiationArgs         = 100_000
 	MaxCanonicalOptions          = 10
@@ -33,4 +33,32 @@ const (
 	MaxValues                    = 1_000
 	MaxComponentExternNames      = 100_000
 	MaxEffectiveTypeSize         = 1_000_000
+
+	// MaxNestingDepth bounds recursive parsing of component/instance type
+	// declarations and nested component sections to prevent stack overflow
+	// from adversarial input.
+	MaxNestingDepth = 100
+
+	// MaxFunctionBodySize bounds a single core function body so adversarial
+	// size fields cannot drive multi-GB allocations.
+	MaxFunctionBodySize = 16 * 1024 * 1024 // 16 MiB
 )
+
+// checkSectionLength returns length as int after verifying it fits within
+// MaxModuleSize. This is the canonical guard for adversarial u32 lengths
+// before they reach `make([]byte, n)`. It is also 32-bit-Go safe: any value
+// large enough to wrap int's signed range trips the cap first.
+func checkSectionLength(offset uint64, length uint32, what string) (int, error) {
+	if uint64(length) > MaxModuleSize {
+		return 0, errfAt(offset, "%s length %d exceeds maximum %d", what, length, MaxModuleSize)
+	}
+	return int(length), nil
+}
+
+// checkCount verifies count ≤ max.
+func checkCount(offset uint64, count, max uint32, what string) error {
+	if count > max {
+		return errfAt(offset, "%s count %d exceeds maximum %d", what, count, max)
+	}
+	return nil
+}

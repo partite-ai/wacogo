@@ -257,7 +257,7 @@ func (v *flatTransferVisitor) VisitVariant(cases []VariantCase) {
 
 	v.emit(func(ctx context.Context, tc *transferContext, _, _ uint32) {
 		disc := uint32(tc.registers[discSlot])
-		if int(disc) >= len(entries) {
+		if disc >= uint32(len(entries)) {
 			panic(&Trap{msg: fmt.Sprintf("invalid variant discriminant %d", disc)})
 		}
 		for _, step := range entries[disc].steps {
