@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"syscall"
 	"time"
 
 	wallclock "github.com/partite-ai/wacogo/wasi/clocks/wallclock"
@@ -627,6 +628,10 @@ func fsErr(err error) types.ErrorCode {
 		return types.ErrorCodeInvalid
 	case errors.Is(err, fs.ErrExist):
 		return types.ErrorCodeExist
+	case errors.Is(err, syscall.ENOSPC):
+		return types.ErrorCodeInsufficientSpace
+	case errors.Is(err, syscall.EDQUOT):
+		return types.ErrorCodeInsufficientSpace
 	}
 	return types.ErrorCodeIo
 }
