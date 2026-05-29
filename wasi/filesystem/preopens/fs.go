@@ -70,6 +70,10 @@ type Unwrapper[T any] interface {
 	Unwrap() T
 }
 
+type Aser interface {
+	As(target any) bool
+}
+
 func as[T, U any](x U) (T, bool) {
 	for {
 		if v, ok := any(x).(T); ok {
@@ -78,6 +82,12 @@ func as[T, U any](x U) (T, bool) {
 		if u, ok := any(x).(Unwrapper[U]); ok {
 			x = u.Unwrap()
 			continue
+		}
+		if a, ok := any(x).(Aser); ok {
+			var target T
+			if a.As(&target) {
+				return target, true
+			}
 		}
 		var zero T
 		return zero, false
