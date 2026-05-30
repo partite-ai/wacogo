@@ -84,7 +84,7 @@ func (ib *InstanceBuilder) AddCoreModule(name string, wasmBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("wacogo/host: AddCoreModule %q: %w", name, err)
 	}
-	td, err := core.Validator(ib.parent.engine).CoreModuleTypeFromBytes(wasmBytes)
+	td, err := ib.parent.arena.CoreModuleTypeFromBytes(wasmBytes)
 	if err != nil {
 		return fmt.Errorf("wacogo/host: AddCoreModule %q: extract type: %w", name, err)
 	}

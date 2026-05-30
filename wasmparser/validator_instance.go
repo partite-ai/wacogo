@@ -221,7 +221,7 @@ func (v *Validator) coreInstantiate(cs *ComponentState, inst CoreInstantiate) er
 			if !ok {
 				return fmt.Errorf("module instantiation argument `%s` does not export an item named `%s`", modName, key.Name)
 			}
-			if err := v.arena.checkCoreEntityTypeMatch(expectedImport, actualExport); err != nil {
+			if err := checkCoreEntityTypeMatch(v.arena, v.arena, expectedImport, actualExport); err != nil {
 				return fmt.Errorf("type mismatch for module import `%s::%s`: %w", modName, key.Name, err)
 			}
 		}
@@ -233,13 +233,15 @@ func (v *Validator) coreInstantiate(cs *ComponentState, inst CoreInstantiate) er
 }
 
 // checkCoreEntityTypeMatch checks that an actual core entity type is compatible
-// with an expected import type. The returned error describes the mismatch
-// without naming the entity; callers add a "X has the wrong type" wrapper.
+// with an expected import type. The expected/actual sides may live in different
+// arenas (e.g. cross-component subtype checks); expArena holds expected's
+// referenced types, actArena holds actual's. Pass the same arena for both
+// when the two sides come from one arena.
 //
 // Kind-mismatch messages embed both `expected K, found K2` (wasm-tools style)
 // and `expected K found K2` (wasmtime style) so substring assertions in either
 // upstream spec suite are satisfied by the same error.
-func (a *TypeArena) checkCoreEntityTypeMatch(expected, actual CoreEntityType) error {
+func checkCoreEntityTypeMatch(expArena, actArena *TypeArena, expected, actual CoreEntityType) error {
 	if expected.Kind != actual.Kind {
 		exp := coreEntityKindName(expected.Kind)
 		act := coreEntityKindName(actual.Kind)
@@ -247,7 +249,7 @@ func (a *TypeArena) checkCoreEntityTypeMatch(expected, actual CoreEntityType) er
 	}
 	switch expected.Kind {
 	case CoreEntityFunc:
-		return a.checkCoreFuncTypeMatch(expected.Func, actual.Func)
+		return checkCoreFuncTypeMatch(expArena, actArena, expected.Func, actual.Func)
 	case CoreEntityTable:
 		return checkCoreTableTypeMatch(expected.Table, actual.Table)
 	case CoreEntityMemory:
@@ -272,9 +274,9 @@ func coreEntityKindName(k CoreEntityKind) string {
 	return "unknown"
 }
 
-func (a *TypeArena) checkCoreFuncTypeMatch(expectedID, actualID CoreFuncTypeID) error {
-	expected := a.CoreFuncTypes[expectedID]
-	actual := a.CoreFuncTypes[actualID]
+func checkCoreFuncTypeMatch(expArena, actArena *TypeArena, expectedID, actualID CoreFuncTypeID) error {
+	expected := expArena.CoreFuncTypes[expectedID]
+	actual := actArena.CoreFuncTypes[actualID]
 	if coreFuncTypesEqual(expected, actual) {
 		return nil
 	}

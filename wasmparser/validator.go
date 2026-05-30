@@ -59,7 +59,7 @@ func NewValidator(features FeatureSet) *Validator {
 	return &Validator{
 		state:    validatorStateUnparsed,
 		features: features,
-		arena:    newTypeArena(),
+		arena:    newTypeArena(features),
 	}
 }
 
@@ -201,7 +201,7 @@ func (v *Validator) validateModuleSection(p *ModuleSectionPayload) error {
 	}
 
 	// Parse the inner core module to extract its type information.
-	modType, err := v.parseInnerCoreModule(p.Parser)
+	modType, err := v.arena.parseInnerCoreModule(p.Parser)
 	if err != nil {
 		return fmt.Errorf("in inline core module: %w", err)
 	}

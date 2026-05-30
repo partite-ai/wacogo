@@ -14,9 +14,9 @@ type HostTypeBuilder struct {
 	arena *TypeArena
 }
 
-// HostTypeBuilder returns a builder over the validator's shared arena.
-func (v *Validator) HostTypeBuilder() *HostTypeBuilder {
-	return &HostTypeBuilder{arena: v.arena}
+// HostTypeBuilder returns a builder that writes directly into this arena.
+func (a *TypeArena) HostTypeBuilder() *HostTypeBuilder {
+	return &HostTypeBuilder{arena: a}
 }
 
 // AllocResourceID allocates and returns a fresh ResourceID in the arena.
@@ -43,13 +43,12 @@ func (b *HostTypeBuilder) PushCoreModuleType(t CoreModuleTypeDesc) CoreModuleTyp
 	return b.arena.pushCoreModuleType(t)
 }
 
-// CoreModuleTypeFromBytes extracts the imports and exports of a core
-// wasm module by parsing its binary. The returned CoreModuleTypeDesc
-// can be passed to PushCoreModuleType. Returns an error for malformed
-// input.
-func (v *Validator) CoreModuleTypeFromBytes(wasmBytes []byte) (CoreModuleTypeDesc, error) {
+// CoreModuleTypeFromBytes parses a core wasm module binary and returns
+// its CoreModuleTypeDesc. Pushes any referenced core func types into
+// this arena.
+func (a *TypeArena) CoreModuleTypeFromBytes(wasmBytes []byte) (CoreModuleTypeDesc, error) {
 	p := NewParser(bytes.NewReader(wasmBytes))
-	return v.parseInnerCoreModule(p)
+	return a.parseInnerCoreModule(p)
 }
 
 // PushComponentType appends t to the arena's component-type table and

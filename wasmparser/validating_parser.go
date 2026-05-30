@@ -19,37 +19,15 @@ type ValidatingParser struct {
 }
 
 // NewValidatingParser creates a ValidatingParser that parses from r and
-// validates with the given feature set. Types produced by this parser are
-// isolated — they share no identity with types from other NewValidatingParser
-// calls. To share identity (e.g. so an InstanceType from one parse can be
-// passed as an instance-import arg in another), use
-// (*Validator).NewValidatingParser instead.
+// validates with the given feature set. Each call allocates an independent
+// *TypeArena; types produced by this parser do not share identity with
+// types from other NewValidatingParser calls. Cross-parse handles (e.g.
+// supplying one component's *InstanceType as an instance-import arg to
+// another) are wired by the cross-arena resolver in CheckInstantiation.
 func NewValidatingParser(r io.Reader, features FeatureSet) *ValidatingParser {
 	return &ValidatingParser{
 		parser:    NewParser(r),
 		validator: NewValidator(features),
-	}
-}
-
-// NewValidatingParser creates a fresh parser that validates against this
-// Validator's shared type arena. Each call spawns an independent per-parse
-// child Validator (its own component stack and end-of-parse state), but
-// the underlying arena — and therefore every ResourceID, ComponentTypeID,
-// and InstanceType minted during parsing — is shared across all parsers
-// spawned from the same parent Validator.
-//
-// Use this when loading multiple components that need to exchange
-// InstanceType handles (e.g. supplying one component's instance as an
-// import to another).
-func (v *Validator) NewValidatingParser(r io.Reader) *ValidatingParser {
-	child := &Validator{
-		state:    validatorStateUnparsed,
-		features: v.features,
-		arena:    v.arena,
-	}
-	return &ValidatingParser{
-		parser:    NewParser(r),
-		validator: child,
 	}
 }
 

@@ -33,7 +33,7 @@ func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
 type Engine struct {
 	runtime   wazero.Runtime
 	canonHost *canon.Host
-	validator *wasmparser.Validator
+	features  wasmparser.FeatureSet
 	closed    atomic.Bool
 }
 
@@ -51,7 +51,7 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 	return &Engine{
 		runtime:   rt,
 		canonHost: canon.NewHost(rt),
-		validator: wasmparser.NewValidator(wasmparser.DefaultFeatures()),
+		features:  wasmparser.DefaultFeatures(),
 	}
 }
 
@@ -73,7 +73,6 @@ func (e *Engine) IsClosed() bool { return e.closed.Load() }
 // onto the public wacogo.Engine wrapper via embedding.
 func WazeroRuntime(e *Engine) wazero.Runtime { return e.runtime }
 
-// Validator returns the engine's shared wasmparser validator. A
-// package-level function (not a method) for the same reason as
-// WazeroRuntime.
-func Validator(e *Engine) *wasmparser.Validator { return e.validator }
+// Features returns the engine's parser feature set. Package-level
+// function (not a method) for the same reason as WazeroRuntime.
+func Features(e *Engine) wasmparser.FeatureSet { return e.features }

@@ -390,16 +390,6 @@ func TestInstantiate_TwoComponentLinking_String(t *testing.T) {
 	}
 }
 
-func TestEngineOwnsSharedValidator(t *testing.T) {
-	ctx := context.Background()
-	e := NewEngine(ctx)
-	defer e.Close(ctx)
-
-	if e.validator == nil {
-		t.Fatal("engine should own a shared wasmparser.Validator")
-	}
-}
-
 func TestInstantiateMintsFreshInstanceType(t *testing.T) {
 	ctx := context.Background()
 	e := NewEngine(ctx)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/partite-ai/wacogo/internal/core"
+	"github.com/partite-ai/wacogo/wasmparser"
 )
 
 // Builder accumulates declarations for a host component. Register
@@ -16,6 +17,7 @@ import (
 type Builder struct {
 	engine *core.Engine
 	name   string
+	arena  *wasmparser.TypeArena
 
 	root *scope
 
@@ -43,8 +45,9 @@ type resourceDecl struct {
 }
 
 type resourceRefDecl struct {
-	name string
-	ref  *ResourceTypeRef
+	name           string
+	ref            *ResourceTypeRef
+	placeholderRID wasmparser.ResourceID
 }
 
 // NewBuilder returns a fresh Builder for declaring a host component
@@ -55,7 +58,12 @@ type resourceRefDecl struct {
 // (*wacogo.Engine).NewHostBuilder rather than calling NewBuilder
 // directly.
 func NewBuilder(e *core.Engine, name string) *Builder {
-	return &Builder{engine: e, name: name, root: &scope{}}
+	return &Builder{
+		engine: e,
+		name:   name,
+		arena:  wasmparser.NewArena(core.Features(e)),
+		root:   &scope{},
+	}
 }
 
 // AddFunction declares a function export named exportName with the
@@ -157,7 +165,7 @@ func (b *Builder) AddCoreModule(name string, wasmBytes []byte) error {
 	if err != nil {
 		return fmt.Errorf("wacogo/host: AddCoreModule %q: %w", name, err)
 	}
-	td, err := core.Validator(b.engine).CoreModuleTypeFromBytes(wasmBytes)
+	td, err := b.arena.CoreModuleTypeFromBytes(wasmBytes)
 	if err != nil {
 		return fmt.Errorf("wacogo/host: AddCoreModule %q: extract type: %w", name, err)
 	}
@@ -177,16 +185,46 @@ func (b *Builder) AddCoreModule(name string, wasmBytes []byte) error {
 // names, nominal compounds used inline, unresolved TypeRefs, or
 // invalid signatures.
 func (b *Builder) Build(ctx context.Context) (*Component, error) {
-	comp := &Component{engine: b.engine, name: b.name}
+	comp := &Component{engine: b.engine, name: b.name, arena: b.arena}
 	if err := buildScopeTree(b, comp, b.root); err != nil {
 		return nil, err
 	}
+	stampPlaceholderRIDs(comp, b.arena.HostTypeBuilder())
+	ct, wpFuncTypes, err := buildComponentWpType(comp)
+	if err != nil {
+		return nil, err
+	}
+	comp.wpComponentType = ct
+	comp.wpFuncTypes = wpFuncTypes
 	cm, err := compileStubModule(ctx, core.WazeroRuntime(b.engine), comp)
 	if err != nil {
 		return nil, err
 	}
 	comp.compiledStub = cm
 	return comp, nil
+}
+
+// stampPlaceholderRIDs allocates one placeholder ResourceID per
+// resourceRefDecl in the root and walks the scopeRuntime tree
+// updating every copy of that decl by ref-pointer match. Called
+// from Builder.Build after buildScopeTree has populated the tree.
+func stampPlaceholderRIDs(comp *Component, htb *wasmparser.HostTypeBuilder) {
+	byRef := make(map[*ResourceTypeRef]wasmparser.ResourceID, len(comp.resourceRefs))
+	for i := range comp.resourceRefs {
+		rid := htb.AllocResourceID()
+		comp.resourceRefs[i].placeholderRID = rid
+		byRef[comp.resourceRefs[i].ref] = rid
+	}
+	var visit func(sr *scopeRuntime)
+	visit = func(sr *scopeRuntime) {
+		for i := range sr.resourceRefs {
+			sr.resourceRefs[i].placeholderRID = byRef[sr.resourceRefs[i].ref]
+		}
+		for _, child := range sr.nested {
+			visit(child)
+		}
+	}
+	visit(comp.root)
 }
 
 // buildScopeTree validates names and assigns runtime IDs across the

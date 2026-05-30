@@ -344,6 +344,8 @@ type ComponentTypeDesc struct {
 
 // TypeArena stores all types across nesting levels.
 type TypeArena struct {
+	features FeatureSet
+
 	CoreFuncTypes     []CoreFuncTypeDesc
 	CoreModuleTypes   []CoreModuleTypeDesc
 	CoreInstanceTypes []CoreInstanceTypeDesc
@@ -375,10 +377,19 @@ type TypeArena struct {
 	resourceAliases map[ResourceID]ResourceID
 }
 
-func newTypeArena() *TypeArena {
+func newTypeArena(features FeatureSet) *TypeArena {
 	return &TypeArena{
+		features:        features,
 		resourceAliases: make(map[ResourceID]ResourceID),
 	}
+}
+
+// NewArena returns a standalone *TypeArena suitable for host code that
+// constructs component types outside the normal parse flow. The features
+// set governs validation of any core-module bytes parsed via
+// (*TypeArena).CoreModuleTypeFromBytes.
+func NewArena(features FeatureSet) *TypeArena {
+	return newTypeArena(features)
 }
 
 // resolveResourceAlias returns the defining ResourceID for rid if rid is the

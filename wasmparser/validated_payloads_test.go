@@ -7,7 +7,7 @@ import (
 )
 
 func TestValidatedComponentExportHandleAccessors(t *testing.T) {
-	arena := newTypeArena()
+	arena := newTypeArena(DefaultFeatures())
 	fid := arena.pushFuncType(FuncTypeDesc{})
 	v := ValidatedComponentExport{
 		Export: &ComponentExport{},
@@ -26,7 +26,7 @@ func TestValidatedComponentExportHandleAccessors(t *testing.T) {
 }
 
 func TestValidatedModuleSectionPayloadModuleType(t *testing.T) {
-	arena := newTypeArena()
+	arena := newTypeArena(DefaultFeatures())
 	mid := arena.pushCoreModuleType(CoreModuleTypeDesc{})
 	p := &ValidatedModuleSectionPayload{
 		raw:        &ModuleSectionPayload{},
@@ -39,7 +39,7 @@ func TestValidatedModuleSectionPayloadModuleType(t *testing.T) {
 }
 
 func TestValidatedComponentExportInstanceTypeReturnsNil(t *testing.T) {
-	arena := newTypeArena()
+	arena := newTypeArena(DefaultFeatures())
 	v := ValidatedComponentExport{
 		Export: &ComponentExport{},
 		et:     ComponentEntityType{Kind: EntityInstance},

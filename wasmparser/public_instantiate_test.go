@@ -45,27 +45,12 @@ func TestNewInstanceIsMemoryNeutral(t *testing.T) {
   (type $r (resource (rep i32)))
   (export "r" (type $r))
 )`
-	bin := wat2wasm(t, src)
-	v := NewValidator(DefaultFeatures())
-	vp := v.NewValidatingParser(bytes.NewReader(bin))
-	for {
-		_, err := vp.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	ct := vp.TopLevelComponentType()
-	if ct == nil {
-		t.Fatal("no top-level ComponentType")
-	}
-	before := arenaShape(v.arena)
+	ct := loadComponent(t, src)
+	before := arenaShape(ct.arena)
 	for range 1000 {
 		_ = ct.NewInstance()
 	}
-	after := arenaShape(v.arena)
+	after := arenaShape(ct.arena)
 	if before != after {
 		t.Fatalf("arena mutated across 1000 NewInstance calls: before=%+v after=%+v", before, after)
 	}
@@ -81,11 +66,11 @@ func TestCheckInstantiationIsMemoryNeutral(t *testing.T) {
   (type $r (resource (rep i32)))
   (export "r" (type $r))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t, provSrc)
+	cons := loadComponent(t, consSrc)
 
-	before := arenaShape(v.arena)
+	beforeProv := arenaShape(prov.arena)
+	beforeCons := arenaShape(cons.arena)
 	for range 100 {
 		shared := prov.NewInstance()
 		if err := cons.CheckInstantiation(map[string]any{
@@ -103,9 +88,11 @@ func TestCheckInstantiationIsMemoryNeutral(t *testing.T) {
 			t.Fatal("expected mismatch, got nil")
 		}
 	}
-	after := arenaShape(v.arena)
-	if before != after {
-		t.Fatalf("arena mutated across 100 positive+negative checks: before=%+v after=%+v", before, after)
+	if got := arenaShape(prov.arena); got != beforeProv {
+		t.Fatalf("provider arena mutated across 100 checks: before=%+v after=%+v", beforeProv, got)
+	}
+	if got := arenaShape(cons.arena); got != beforeCons {
+		t.Fatalf("consumer arena mutated across 100 checks: before=%+v after=%+v", beforeCons, got)
 	}
 }
 
@@ -129,12 +116,13 @@ func arenaShape(a *TypeArena) arenaSize {
 	}
 }
 
-// loadIntoValidator parses the given WAT source using v.NewValidatingParser
-// and returns the top-level ComponentType handle.
-func loadIntoValidator(t *testing.T, v *Validator, src string) *ComponentType {
+// loadComponent parses the given WAT source with a fresh ValidatingParser
+// and returns the top-level ComponentType handle. Each call allocates its
+// own *TypeArena.
+func loadComponent(t *testing.T, src string) *ComponentType {
 	t.Helper()
 	bin := wat2wasm(t, src)
-	vp := v.NewValidatingParser(bytes.NewReader(bin))
+	vp := NewValidatingParser(bytes.NewReader(bin), DefaultFeatures())
 	for {
 		_, err := vp.Next()
 		if err == io.EOF {
@@ -161,9 +149,8 @@ func TestCheckInstantiationAcceptsSharedResource(t *testing.T) {
   (type $r (resource (rep i32)))
   (export "r" (type $r))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 
 	shared := prov.NewInstance()
 
@@ -190,9 +177,8 @@ func TestCheckInstantiationConcurrentlySafe(t *testing.T) {
   (type $r (resource (rep i32)))
   (export "r" (type $r))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 
 	var wg sync.WaitGroup
 	for range 16 {
@@ -223,9 +209,8 @@ func TestCheckInstantiationRejectsMismatchedResources(t *testing.T) {
   (type $r (resource (rep i32)))
   (export "r" (type $r))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 
 	i1 := prov.NewInstance()
 	i2 := prov.NewInstance()
@@ -282,9 +267,8 @@ func TestCheckInstantiationAcceptsFuncArg(t *testing.T) {
   (func (export "f") (param "x" u32) (result u32)
     (canon lift (core func $i "f")))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 
 	fn := exportHandle(t, prov, "f")
 	if err := cons.CheckInstantiation(map[string]any{"f": fn}); err != nil {
@@ -305,9 +289,8 @@ func TestCheckInstantiationRejectsFuncSignatureMismatch(t *testing.T) {
   (func (export "f") (param "x" u32) (param "y" u32) (result u32)
     (canon lift (core func $i "f")))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 	fn := exportHandle(t, prov, "f")
 	err := cons.CheckInstantiation(map[string]any{"f": fn})
 	if err == nil {
@@ -324,9 +307,8 @@ func TestCheckInstantiationRejectsWrongKind(t *testing.T) {
   (type $r (resource (rep i32)))
   (export "r" (type $r))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 	err := cons.CheckInstantiation(map[string]any{"f": prov.NewInstance()})
 	if err == nil {
 		t.Fatal("expected kind-mismatch, got nil")
@@ -344,9 +326,8 @@ func TestCheckInstantiationAcceptsModuleArg(t *testing.T) {
   )
   (export "m" (core module $m))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 	mt := exportHandle(t, prov, "m")
 	if err := cons.CheckInstantiation(map[string]any{"m": mt}); err != nil {
 		t.Fatalf("want nil, got %v", err)
@@ -365,9 +346,8 @@ func TestCheckInstantiationAcceptsComponentArg(t *testing.T) {
   )
   (export "c" (component $c))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 	ct := exportHandle(t, prov, "c")
 	if err := cons.CheckInstantiation(map[string]any{"c": ct}); err != nil {
 		t.Fatalf("want nil, got %v", err)
@@ -379,8 +359,7 @@ func TestCheckInstantiationSkipsMissingArg(t *testing.T) {
   (type (func))
   (import "f" (func (type 0)))
 )`
-	v := NewValidator(DefaultFeatures())
-	cons := loadIntoValidator(t, v, consSrc)
+	cons := loadComponent(t,consSrc)
 	if err := cons.CheckInstantiation(map[string]any{}); err != nil {
 		t.Fatalf("want nil (missing args are skipped), got %v", err)
 	}
@@ -397,9 +376,8 @@ func TestCheckInstantiationRejectsModuleSignatureMismatch(t *testing.T) {
   (core module $m (func (export "g")))
   (export "m" (core module $m))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 	mt := exportHandle(t, prov, "m")
 	err := cons.CheckInstantiation(map[string]any{"m": mt})
 	if err == nil {
@@ -416,9 +394,8 @@ func TestCheckInstantiationRejectsModuleWrongKind(t *testing.T) {
   (type $r (resource (rep i32)))
   (export "r" (type $r))
 )`
-	v := NewValidator(DefaultFeatures())
-	prov := loadIntoValidator(t, v, provSrc)
-	cons := loadIntoValidator(t, v, consSrc)
+	prov := loadComponent(t,provSrc)
+	cons := loadComponent(t,consSrc)
 	// Supply an *InstanceType for a core-module import.
 	err := cons.CheckInstantiation(map[string]any{"m": prov.NewInstance()})
 	if err == nil {

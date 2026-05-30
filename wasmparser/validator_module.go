@@ -7,7 +7,7 @@ import (
 
 // parseInnerCoreModule consumes the sub-parser's binary reader to parse an
 // inline core wasm module and extract its type information (imports and exports).
-func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error) {
+func (a *TypeArena) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error) {
 	modType := CoreModuleTypeDesc{
 		Imports: make(map[importKey]CoreEntityType),
 		Exports: make(map[string]CoreEntityType),
@@ -113,7 +113,7 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 					if int(typeIdx) >= len(funcTypes) {
 						return modType, fmt.Errorf("import func type index out of bounds")
 					}
-					fid := v.arena.pushCoreFuncType(funcTypes[typeIdx])
+					fid := a.pushCoreFuncType(funcTypes[typeIdx])
 					et = CoreEntityType{Kind: CoreEntityFunc, Func: fid}
 					importedFuncIDs = append(importedFuncIDs, fid)
 					importedFuncs++
@@ -254,7 +254,7 @@ func (v *Validator) parseInnerCoreModule(sub *Parser) (CoreModuleTypeDesc, error
 						if int(typeIdx) >= len(funcTypes) {
 							return modType, fmt.Errorf("func type index out of bounds")
 						}
-						fid := v.arena.pushCoreFuncType(funcTypes[typeIdx])
+						fid := a.pushCoreFuncType(funcTypes[typeIdx])
 						et = CoreEntityType{Kind: CoreEntityFunc, Func: fid}
 					}
 				case 0x01: // table

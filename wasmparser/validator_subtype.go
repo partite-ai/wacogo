@@ -136,7 +136,7 @@ func (sc *SubtypeChecker) isModuleSubtype(a, b CoreModuleTypeID) error {
 			return fmt.Errorf("missing expected import `::%[2]s`: module import `%[1]s::%[2]s` not defined", key.Module, key.Name)
 		}
 		aImport := at.Imports[key]
-		if err := sc.aArena.checkCoreEntityTypeMatch(aImport, bImport); err != nil {
+		if err := checkCoreEntityTypeMatch(sc.aArena, sc.bArena, aImport, bImport); err != nil {
 			return fmt.Errorf("type mismatch in import `::%[2]s`: module import `%[1]s::%[2]s` has the wrong type: %w", key.Module, key.Name, err)
 		}
 	}
@@ -146,7 +146,7 @@ func (sc *SubtypeChecker) isModuleSubtype(a, b CoreModuleTypeID) error {
 		if !ok {
 			return fmt.Errorf("missing expected export `%[1]s`: module export `%[1]s` not defined", name)
 		}
-		if err := sc.aArena.checkCoreEntityTypeMatch(bExport, aExport); err != nil {
+		if err := checkCoreEntityTypeMatch(sc.bArena, sc.aArena, bExport, aExport); err != nil {
 			return fmt.Errorf("type mismatch in export `%[1]s`: export `%[1]s` has the wrong type: %w", name, err)
 		}
 	}
