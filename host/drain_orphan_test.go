@@ -13,10 +13,10 @@ import (
 
 // orphan implements host.DestroyOrphan and records when it was called.
 type orphan struct {
-	id            int
-	destroyedAt   atomic.Int32
-	destroySeqCh  chan int
-	destroyError  error
+	id           int
+	destroyedAt  atomic.Int32
+	destroySeqCh chan int
+	destroyError error
 }
 
 func (o *orphan) DestroyOrphan(_ context.Context) error {

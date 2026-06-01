@@ -12,10 +12,27 @@ import (
 // each closure at compile time relative to the enclosing memory region's
 // origin; at run time, the srcBase and dstBase closure args supply those
 // origins (caller-side read address and callee-side write address).
+//
+// byteEquivalent reports whether every step emitted by this visitor is a
+// pure byte pass-through (no validation, encoding change, range check, or
+// resource handle translation). Primitives u8..u64/s8..s64/f32/f64 are
+// byte-equivalent; composites (records, tuples) inherit by AND-ing across
+// children. Any non-byte-equivalent Visit sets the flag to false. VisitList
+// consults the element's child visitor: if byte-equivalent, it emits a
+// single bulk memcpy step instead of the per-element loop.
 type memTransferVisitor struct {
-	byteOff  uint32
-	maxAlign uint32
-	out      []transferPlanStep
+	byteOff        uint32
+	maxAlign       uint32
+	out            []transferPlanStep
+	byteEquivalent bool
+}
+
+// newMemTransferVisitor constructs a memTransferVisitor with
+// byteEquivalent=true (the AND-identity). Callers should always go through
+// this constructor rather than &memTransferVisitor{} so the flag is
+// initialised correctly.
+func newMemTransferVisitor() *memTransferVisitor {
+	return &memTransferVisitor{byteEquivalent: true}
 }
 
 func (v *memTransferVisitor) assignBytes(size, align uint32) uint32 {
@@ -28,7 +45,18 @@ func (v *memTransferVisitor) assignBytes(size, align uint32) uint32 {
 	return off
 }
 
-func (v *memTransferVisitor) emit(s transferPlanStep) { v.out = append(v.out, s) }
+// emit appends a no-allocation step. For steps that need to reserve
+// callee-side memory via cabi_realloc, use emitAlloc.
+func (v *memTransferVisitor) emit(transfer transferStep) {
+	v.out = append(v.out, transferPlanStep{transfer: transfer})
+}
+
+// emitAlloc appends a step paired with a discovery walk that reports
+// every (size, align) the transfer step will consume from its allocSource,
+// in order.
+func (v *memTransferVisitor) emitAlloc(sizes sizeStep, transfer transferStep) {
+	v.out = append(v.out, transferPlanStep{sizes: sizes, transfer: transfer})
+}
 
 // Primitives: each closure reads from tc.caller.Memory[srcBase+off] and
 // writes to tc.callee.Memory[dstBase+off]. Signed sub-word values use the
@@ -37,7 +65,7 @@ func (v *memTransferVisitor) emit(s transferPlanStep) { v.out = append(v.out, s)
 
 func (v *memTransferVisitor) VisitU8() {
 	off := v.assignBytes(1, 1)
-	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32, _ *allocSource) {
 		b, ok := tc.caller.Memory.ReadByte(srcBase + off)
 		if !ok {
 			panic(&Trap{msg: "oob u8 read"})
@@ -50,7 +78,7 @@ func (v *memTransferVisitor) VisitU8() {
 
 func (v *memTransferVisitor) VisitU16() {
 	off := v.assignBytes(2, 2)
-	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32, _ *allocSource) {
 		u, ok := tc.caller.Memory.ReadUint16Le(srcBase + off)
 		if !ok {
 			panic(&Trap{msg: "oob u16 read"})
@@ -63,7 +91,7 @@ func (v *memTransferVisitor) VisitU16() {
 
 func (v *memTransferVisitor) VisitU32() {
 	off := v.assignBytes(4, 4)
-	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32, _ *allocSource) {
 		u, ok := tc.caller.Memory.ReadUint32Le(srcBase + off)
 		if !ok {
 			panic(&Trap{msg: "oob u32 read"})
@@ -76,7 +104,7 @@ func (v *memTransferVisitor) VisitU32() {
 
 func (v *memTransferVisitor) VisitU64() {
 	off := v.assignBytes(8, 8)
-	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32, _ *allocSource) {
 		u, ok := tc.caller.Memory.ReadUint64Le(srcBase + off)
 		if !ok {
 			panic(&Trap{msg: "oob u64 read"})
@@ -99,7 +127,8 @@ func (v *memTransferVisitor) VisitF64() { v.VisitU64() }
 
 func (v *memTransferVisitor) VisitBool() {
 	off := v.assignBytes(1, 1)
-	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.byteEquivalent = false // non-zero gets normalised to 1
+	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32, _ *allocSource) {
 		b, ok := tc.caller.Memory.ReadByte(srcBase + off)
 		if !ok {
 			panic(&Trap{msg: "oob bool read"})
@@ -116,7 +145,8 @@ func (v *memTransferVisitor) VisitBool() {
 
 func (v *memTransferVisitor) VisitChar() {
 	off := v.assignBytes(4, 4)
-	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.byteEquivalent = false // code point validation
+	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32, _ *allocSource) {
 		u, ok := tc.caller.Memory.ReadUint32Le(srcBase + off)
 		if !ok {
 			panic(&Trap{msg: "oob char read"})
@@ -131,55 +161,110 @@ func (v *memTransferVisitor) VisitChar() {
 func (v *memTransferVisitor) VisitString() {
 	ptrOff := v.assignBytes(4, 4)
 	lenOff := v.assignBytes(4, 4)
-	v.emit(func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32) {
-		srcPtr, ok := tc.caller.Memory.ReadUint32Le(srcBase + ptrOff)
-		if !ok {
-			panic(&Trap{msg: "oob string ptr read"})
-		}
-		srcCoded, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
-		if !ok {
-			panic(&Trap{msg: "oob string len read"})
-		}
-		dstPtr, outCoded := transferStringContent(ctx, tc, srcPtr, srcCoded)
-		if !tc.callee.Memory.WriteUint32Le(dstBase+ptrOff, dstPtr) {
-			panic(&Trap{msg: "oob string ptr write"})
-		}
-		if !tc.callee.Memory.WriteUint32Le(dstBase+lenOff, outCoded) {
-			panic(&Trap{msg: "oob string len write"})
-		}
-	})
+	v.byteEquivalent = false // pointer translation + encoding validation
+	v.emitAlloc(
+		func(tc *transferContext, srcBase uint32, sink *allocSink) {
+			srcCoded, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
+			if !ok {
+				panic(&Trap{msg: "oob string len read"})
+			}
+			stringContentSizeStep(tc, srcCoded, sink)
+		},
+		func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32, src *allocSource) {
+			srcPtr, ok := tc.caller.Memory.ReadUint32Le(srcBase + ptrOff)
+			if !ok {
+				panic(&Trap{msg: "oob string ptr read"})
+			}
+			srcCoded, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
+			if !ok {
+				panic(&Trap{msg: "oob string len read"})
+			}
+			dstPtr, outCoded := transferStringContent(ctx, tc, srcPtr, srcCoded, src)
+			if !tc.callee.Memory.WriteUint32Le(dstBase+ptrOff, dstPtr) {
+				panic(&Trap{msg: "oob string ptr write"})
+			}
+			if !tc.callee.Memory.WriteUint32Le(dstBase+lenOff, outCoded) {
+				panic(&Trap{msg: "oob string len write"})
+			}
+		})
 }
 
 func (v *memTransferVisitor) VisitList(elem Type) {
 	ptrOff := v.assignBytes(4, 4)
 	lenOff := v.assignBytes(4, 4)
+	// A list itself is never byte-equivalent at the outer level: its bytes
+	// are a (ptr, len) pair, and the ptr is rewritten to point into callee
+	// memory. Its CONTENTS may be byte-equivalent though, which is what
+	// the bulk-memcpy fast path below exploits.
+	v.byteEquivalent = false
 
-	child := &memTransferVisitor{}
+	child := newMemTransferVisitor()
 	elem.Accept(child)
 	elemSize := alignUp(child.byteOff, child.maxAlign)
 	elemAlign := child.maxAlign
 	if elemAlign == 0 {
 		elemAlign = 1
 	}
-	subSteps := child.out
 
-	v.emit(func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32) {
-		srcPtr, ok := tc.caller.Memory.ReadUint32Le(srcBase + ptrOff)
-		if !ok {
-			panic(&Trap{msg: "oob list ptr read"})
-		}
-		n, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
-		if !ok {
-			panic(&Trap{msg: "oob list len read"})
-		}
-		dstPtr, outN := transferListContent(ctx, tc, srcPtr, n, elemSize, elemAlign, subSteps)
-		if !tc.callee.Memory.WriteUint32Le(dstBase+ptrOff, dstPtr) {
-			panic(&Trap{msg: "oob list ptr write"})
-		}
-		if !tc.callee.Memory.WriteUint32Le(dstBase+lenOff, outN) {
-			panic(&Trap{msg: "oob list len write"})
-		}
-	})
+	if child.byteEquivalent {
+		v.emitAlloc(
+			func(tc *transferContext, srcBase uint32, sink *allocSink) {
+				n, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
+				if !ok {
+					panic(&Trap{msg: "oob list len read"})
+				}
+				listBulkSizes(tc, n, elemSize, elemAlign, sink)
+			},
+			func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32, src *allocSource) {
+				srcPtr, ok := tc.caller.Memory.ReadUint32Le(srcBase + ptrOff)
+				if !ok {
+					panic(&Trap{msg: "oob list ptr read"})
+				}
+				n, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
+				if !ok {
+					panic(&Trap{msg: "oob list len read"})
+				}
+				dstPtr, outN := transferListBulk(ctx, tc, srcPtr, n, elemSize, elemAlign, src)
+				if !tc.callee.Memory.WriteUint32Le(dstBase+ptrOff, dstPtr) {
+					panic(&Trap{msg: "oob list ptr write"})
+				}
+				if !tc.callee.Memory.WriteUint32Le(dstBase+lenOff, outN) {
+					panic(&Trap{msg: "oob list len write"})
+				}
+			})
+		return
+	}
+
+	subSteps := child.out
+	v.emitAlloc(
+		func(tc *transferContext, srcBase uint32, sink *allocSink) {
+			srcPtr, ok := tc.caller.Memory.ReadUint32Le(srcBase + ptrOff)
+			if !ok {
+				panic(&Trap{msg: "oob list ptr read"})
+			}
+			n, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
+			if !ok {
+				panic(&Trap{msg: "oob list len read"})
+			}
+			listContentSizes(tc, srcPtr, n, elemSize, elemAlign, subSteps, sink)
+		},
+		func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32, src *allocSource) {
+			srcPtr, ok := tc.caller.Memory.ReadUint32Le(srcBase + ptrOff)
+			if !ok {
+				panic(&Trap{msg: "oob list ptr read"})
+			}
+			n, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
+			if !ok {
+				panic(&Trap{msg: "oob list len read"})
+			}
+			dstPtr, outN := transferListContent(ctx, tc, srcPtr, n, elemSize, elemAlign, subSteps, src)
+			if !tc.callee.Memory.WriteUint32Le(dstBase+ptrOff, dstPtr) {
+				panic(&Trap{msg: "oob list ptr write"})
+			}
+			if !tc.callee.Memory.WriteUint32Le(dstBase+lenOff, outN) {
+				panic(&Trap{msg: "oob list len write"})
+			}
+		})
 }
 
 func (v *memTransferVisitor) VisitRecord(fields []RecordField) {
@@ -202,7 +287,8 @@ func (v *memTransferVisitor) VisitFlags(names []string) {
 	mustTransfer(validateFlagsLabelCount(numLabels))
 	size := flagsByteSize(numLabels)
 	off := v.assignBytes(size, size)
-	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.byteEquivalent = false // unused high bits get masked
+	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32, _ *allocSource) {
 		bits, err := readFlagsBits(tc.caller.Memory, srcBase+off, size)
 		if err != nil {
 			panic(&Trap{msg: err.Error()})
@@ -218,7 +304,8 @@ func (v *memTransferVisitor) VisitFlags(names []string) {
 
 func (v *memTransferVisitor) VisitOwn(rt ResourceType) {
 	off := v.assignBytes(4, 4)
-	v.emit(func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.byteEquivalent = false // handle translation
+	v.emit(func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32, src *allocSource) {
 		h, ok := tc.caller.Memory.ReadUint32Le(srcBase + off)
 		if !ok {
 			panic(&Trap{msg: "oob own read"})
@@ -239,7 +326,8 @@ func (v *memTransferVisitor) VisitOwn(rt ResourceType) {
 
 func (v *memTransferVisitor) VisitBorrow(rt ResourceType) {
 	off := v.assignBytes(4, 4)
-	v.emit(func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.byteEquivalent = false // handle translation
+	v.emit(func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32, src *allocSource) {
 		h, ok := tc.caller.Memory.ReadUint32Le(srcBase + off)
 		if !ok {
 			panic(&Trap{msg: "oob borrow read"})
@@ -361,7 +449,8 @@ func writeFlagsBits(m api.Memory, off, size, bits uint32) error {
 func (v *memTransferVisitor) VisitEnum(numCases uint32) {
 	size := discByteSize(numCases)
 	off := v.assignBytes(size, size)
-	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32) {
+	v.byteEquivalent = false // discriminant range validation
+	v.emit(func(_ context.Context, tc *transferContext, srcBase, dstBase uint32, _ *allocSource) {
 		disc := readDisc(tc.caller.Memory, srcBase+off, size)
 		if disc >= numCases {
 			panic(&Trap{msg: "enum: out-of-range discriminant"})
@@ -373,6 +462,9 @@ func (v *memTransferVisitor) VisitEnum(numCases uint32) {
 func (v *memTransferVisitor) VisitVariant(cases []VariantCase) {
 	numCases := uint32(len(cases))
 	discSize := discByteSize(numCases)
+	// Variants need discriminant validation and per-case dispatch — not
+	// byte-equivalent even if every case's payload would be on its own.
+	v.byteEquivalent = false
 
 	// Compile per-case sub-plans, measure max payload size/align.
 	type caseEntry struct {
@@ -384,7 +476,7 @@ func (v *memTransferVisitor) VisitVariant(cases []VariantCase) {
 		if c.Payload == nil {
 			continue
 		}
-		child := &memTransferVisitor{}
+		child := newMemTransferVisitor()
 		c.Payload.Accept(child)
 		sz := alignUp(child.byteOff, child.maxAlign)
 		if sz > maxSize {
@@ -411,21 +503,34 @@ func (v *memTransferVisitor) VisitVariant(cases []VariantCase) {
 	memPayloadOffset := payloadOff - discOff
 	v.byteOff += maxSize
 
-	v.emit(func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32) {
-		disc := readDisc(tc.caller.Memory, srcBase+discOff, discSize)
-		if disc >= numCases {
-			panic(&Trap{msg: fmt.Sprintf("invalid variant discriminant %d", disc)})
-		}
-		writeDisc(tc.callee.Memory, dstBase+discOff, discSize, disc)
-		if entries[disc].steps == nil {
-			return
-		}
-		subSrc := srcBase + discOff + memPayloadOffset
-		subDst := dstBase + discOff + memPayloadOffset
-		for _, step := range entries[disc].steps {
-			step(ctx, tc, subSrc, subDst)
-		}
-	})
+	v.emitAlloc(
+		func(tc *transferContext, srcBase uint32, sink *allocSink) {
+			disc := readDisc(tc.caller.Memory, srcBase+discOff, discSize)
+			if disc >= numCases || entries[disc].steps == nil {
+				return
+			}
+			subSrc := srcBase + discOff + memPayloadOffset
+			for _, step := range entries[disc].steps {
+				if step.sizes != nil {
+					step.sizes(tc, subSrc, sink)
+				}
+			}
+		},
+		func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32, src *allocSource) {
+			disc := readDisc(tc.caller.Memory, srcBase+discOff, discSize)
+			if disc >= numCases {
+				panic(&Trap{msg: fmt.Sprintf("invalid variant discriminant %d", disc)})
+			}
+			writeDisc(tc.callee.Memory, dstBase+discOff, discSize, disc)
+			if entries[disc].steps == nil {
+				return
+			}
+			subSrc := srcBase + discOff + memPayloadOffset
+			subDst := dstBase + discOff + memPayloadOffset
+			for _, step := range entries[disc].steps {
+				step.transfer(ctx, tc, subSrc, subDst, src)
+			}
+		})
 }
 
 func (v *memTransferVisitor) VisitOption(inner Type) {

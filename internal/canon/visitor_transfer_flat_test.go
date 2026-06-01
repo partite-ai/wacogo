@@ -12,7 +12,7 @@ func TestFlatTransferU8(t *testing.T) {
 		t.Fatalf("expected 1 step, got %d", len(v.out))
 	}
 	tc := &transferContext{registers: []uint64{0x1FF}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xFF {
 		t.Fatalf("u8 mask failed: got %x", tc.registers[0])
 	}
@@ -22,7 +22,7 @@ func TestFlatTransferU16(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitU16()
 	tc := &transferContext{registers: []uint64{0x1FFFF}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xFFFF {
 		t.Fatalf("u16 mask failed: got %x", tc.registers[0])
 	}
@@ -37,7 +37,7 @@ func TestFlatTransferU32(t *testing.T) {
 	tc := &transferContext{
 		registers: []uint64{0xCAFEBABE, 0},
 	}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xCAFEBABE {
 		t.Fatalf("u32 transfer lost value: got %x", tc.registers[0])
 	}
@@ -47,7 +47,7 @@ func TestFlatTransferU32Masks(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitU32()
 	tc := &transferContext{registers: []uint64{0xFFFFFFFF_CAFEBABE}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xCAFEBABE {
 		t.Fatalf("u32 mask failed: got %x", tc.registers[0])
 	}
@@ -57,7 +57,7 @@ func TestFlatTransferU64(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitU64()
 	tc := &transferContext{registers: []uint64{0xDEADBEEFCAFEBABE}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xDEADBEEFCAFEBABE {
 		t.Fatalf("u64 passthrough failed: got %x", tc.registers[0])
 	}
@@ -67,7 +67,7 @@ func TestFlatTransferS8SignExtend(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitS8()
 	tc := &transferContext{registers: []uint64{0xFF}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xFFFFFFFF {
 		t.Fatalf("s8 sign-extend failed: got %x, want %x", tc.registers[0], uint64(0xFFFFFFFF))
 	}
@@ -77,7 +77,7 @@ func TestFlatTransferS8Positive(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitS8()
 	tc := &transferContext{registers: []uint64{0x7F}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0x7F {
 		t.Fatalf("s8 positive failed: got %x", tc.registers[0])
 	}
@@ -87,7 +87,7 @@ func TestFlatTransferS16SignExtend(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitS16()
 	tc := &transferContext{registers: []uint64{0xFFFF}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xFFFFFFFF {
 		t.Fatalf("s16 sign-extend failed: got %x", tc.registers[0])
 	}
@@ -97,7 +97,7 @@ func TestFlatTransferS16Positive(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitS16()
 	tc := &transferContext{registers: []uint64{0x1234}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0x1234 {
 		t.Fatalf("s16 positive failed: got %x", tc.registers[0])
 	}
@@ -107,7 +107,7 @@ func TestFlatTransferS32(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitS32()
 	tc := &transferContext{registers: []uint64{0xFFFFFFFF_DEADBEEF}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xDEADBEEF {
 		t.Fatalf("s32 mask failed: got %x", tc.registers[0])
 	}
@@ -117,7 +117,7 @@ func TestFlatTransferS64(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitS64()
 	tc := &transferContext{registers: []uint64{0xDEADBEEFCAFEBABE}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0xDEADBEEFCAFEBABE {
 		t.Fatalf("s64 passthrough failed: got %x", tc.registers[0])
 	}
@@ -127,7 +127,7 @@ func TestFlatTransferF32(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitF32()
 	tc := &transferContext{registers: []uint64{0xFFFFFFFF_40490FDB}} // upper bits should be dropped
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0x40490FDB {
 		t.Fatalf("f32 mask failed: got %x", tc.registers[0])
 	}
@@ -137,7 +137,7 @@ func TestFlatTransferF64(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitF64()
 	tc := &transferContext{registers: []uint64{0x400921FB54442D18}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0x400921FB54442D18 {
 		t.Fatalf("f64 passthrough failed: got %x", tc.registers[0])
 	}
@@ -147,7 +147,7 @@ func TestFlatTransferBoolFalse(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitBool()
 	tc := &transferContext{registers: []uint64{0}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 0 {
 		t.Fatalf("bool false canonicalize failed: got %x", tc.registers[0])
 	}
@@ -157,7 +157,7 @@ func TestFlatTransferBoolTrue(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitBool()
 	tc := &transferContext{registers: []uint64{42}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 1 {
 		t.Fatalf("bool true canonicalize failed: got %x", tc.registers[0])
 	}
@@ -167,7 +167,7 @@ func TestFlatTransferCharValid(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitChar()
 	tc := &transferContext{registers: []uint64{'A'}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 'A' {
 		t.Fatalf("char valid failed: got %x", tc.registers[0])
 	}
@@ -182,7 +182,7 @@ func TestFlatTransferCharInvalid(t *testing.T) {
 			t.Fatal("expected trap on surrogate code point")
 		}
 	}()
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 }
 
 func TestFlatTransferCharOutOfRange(t *testing.T) {
@@ -194,7 +194,7 @@ func TestFlatTransferCharOutOfRange(t *testing.T) {
 			t.Fatal("expected trap on out-of-range code point")
 		}
 	}()
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 }
 
 // testU32Type is a minimal Type for tests; real parent-package Types
@@ -226,7 +226,7 @@ func TestFlatTransferFlags(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitFlags([]string{"a", "b", "c", "d", "e"})
 	tc := &transferContext{registers: []uint64{0xFF}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	// low 5 bits of 0xFF = 0x1F
 	if tc.registers[0] != 0x1F {
 		t.Fatalf("flags mask failed: got %x", tc.registers[0])
@@ -242,14 +242,14 @@ func TestFlatTransferEnumOutOfRange(t *testing.T) {
 			t.Fatal("expected trap on out-of-range enum disc")
 		}
 	}()
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 }
 
 func TestFlatTransferEnumValid(t *testing.T) {
 	v := &flatTransferVisitor{}
 	v.VisitEnum(3)
 	tc := &transferContext{registers: []uint64{1}}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 	if tc.registers[0] != 1 {
 		t.Fatalf("enum valid: got %x", tc.registers[0])
 	}
@@ -291,9 +291,9 @@ type resTypeWithInst struct {
 	inst Instance
 }
 
-func (*resTypeWithInst) IsResourceType()                                    {}
-func (r *resTypeWithInst) DefiningInstance() Instance                       { return r.inst }
-func (*resTypeWithInst) Destructor() func(context.Context, uint32) error    { return nil }
+func (*resTypeWithInst) IsResourceType()                                 {}
+func (r *resTypeWithInst) DefiningInstance() Instance                    { return r.inst }
+func (*resTypeWithInst) Destructor() func(context.Context, uint32) error { return nil }
 
 func TestFlatTransferVisitor_VisitBorrow_AllocatesCalleeEntry(t *testing.T) {
 	// Use a callee table with a different owner than the defining instance,
@@ -315,7 +315,7 @@ func TestFlatTransferVisitor_VisitBorrow_AllocatesCalleeEntry(t *testing.T) {
 	if len(v.out) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(v.out))
 	}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 
 	calleeH := uint32(tc.registers[0])
 	if calleeH == 0 {
@@ -349,7 +349,7 @@ func TestFlatTransferVisitor_VisitBorrow_SameComponentShortcut(t *testing.T) {
 	}
 	v := &flatTransferVisitor{}
 	v.VisitBorrow(rt)
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 
 	if got := uint32(tc.registers[0]); got != 99 {
 		t.Errorf("expected rep 99 in slot 0 (shortcut), got %d", got)

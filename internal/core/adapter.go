@@ -26,6 +26,7 @@ func (s *instantiationState) execLowerWithGoAdapter(ctx context.Context, step pl
 	}
 
 	var callerRealloc api.Function
+	var callerReallocModName, callerReallocFnExport string
 	if step.options.hasRealloc {
 		if int(step.options.realloc) >= len(s.coreFuncs) {
 			return fmt.Errorf("wacogo: lower: realloc option index %d out of range", step.options.realloc)
@@ -35,13 +36,17 @@ func (s *instantiationState) execLowerWithGoAdapter(ctx context.Context, step pl
 		if callerRealloc == nil {
 			return fmt.Errorf("wacogo: lower: realloc %q not exported by module", rf.name)
 		}
+		callerReallocModName = rf.instance.Name()
+		callerReallocFnExport = rf.name
 	}
 
 	caller := canon.CallSide{
-		Instance:       canonInstanceView{i: s.inst},
-		Memory:         callerMem,
-		Realloc:        callerRealloc,
-		StringEncoding: step.options.stringEncoding,
+		Instance:        canonInstanceView{i: s.inst},
+		Memory:          callerMem,
+		Realloc:         callerRealloc,
+		StringEncoding:  step.options.stringEncoding,
+		ReallocModName:  callerReallocModName,
+		ReallocFnExport: callerReallocFnExport,
 	}
 
 	callee := fn.binding.Callee()

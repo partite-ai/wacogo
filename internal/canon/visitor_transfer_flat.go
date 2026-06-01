@@ -19,10 +19,16 @@ func (v *flatTransferVisitor) assignSlot() uint32 {
 	return s
 }
 
-// emit appends a step. Kept as a method so future instrumentation (metrics,
-// assertion frames) can hook here.
-func (v *flatTransferVisitor) emit(s transferPlanStep) {
-	v.out = append(v.out, s)
+// emit appends a no-allocation step.
+func (v *flatTransferVisitor) emit(transfer transferStep) {
+	v.out = append(v.out, transferPlanStep{transfer: transfer})
+}
+
+// emitAlloc appends a step paired with a discovery walk that reports
+// every (size, align) the transfer step will consume from its allocSource,
+// in order.
+func (v *flatTransferVisitor) emitAlloc(sizes sizeStep, transfer transferStep) {
+	v.out = append(v.out, transferPlanStep{sizes: sizes, transfer: transfer})
 }
 
 // In flat-mode transfer, src and dst registers are the same slice
@@ -32,28 +38,28 @@ func (v *flatTransferVisitor) emit(s transferPlanStep) {
 
 func (v *flatTransferVisitor) VisitU8() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		tc.registers[slot] = uint64(uint8(tc.registers[slot]))
 	})
 }
 
 func (v *flatTransferVisitor) VisitU16() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		tc.registers[slot] = uint64(uint16(tc.registers[slot]))
 	})
 }
 
 func (v *flatTransferVisitor) VisitU32() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		tc.registers[slot] = uint64(uint32(tc.registers[slot]))
 	})
 }
 
 func (v *flatTransferVisitor) VisitU64() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		// u64 fills the entire slot; nothing to mask.
 		_ = tc.registers[slot]
 	})
@@ -61,7 +67,7 @@ func (v *flatTransferVisitor) VisitU64() {
 
 func (v *flatTransferVisitor) VisitS8() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		// sign-extend s8 → i32 in the slot (low 32 bits hold sign-extended value)
 		tc.registers[slot] = uint64(uint32(int32(int8(tc.registers[slot]))))
 	})
@@ -69,28 +75,28 @@ func (v *flatTransferVisitor) VisitS8() {
 
 func (v *flatTransferVisitor) VisitS16() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		tc.registers[slot] = uint64(uint32(int32(int16(tc.registers[slot]))))
 	})
 }
 
 func (v *flatTransferVisitor) VisitS32() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		tc.registers[slot] = uint64(uint32(tc.registers[slot]))
 	})
 }
 
 func (v *flatTransferVisitor) VisitS64() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		_ = tc.registers[slot]
 	})
 }
 
 func (v *flatTransferVisitor) VisitF32() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		// f32 canonicalization: bit pattern preservation suffices; wazero
 		// already delivers canonical NaN-preserving values per wasm semantics.
 		tc.registers[slot] = uint64(uint32(tc.registers[slot]))
@@ -99,14 +105,14 @@ func (v *flatTransferVisitor) VisitF32() {
 
 func (v *flatTransferVisitor) VisitF64() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		_ = tc.registers[slot]
 	})
 }
 
 func (v *flatTransferVisitor) VisitBool() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		if tc.registers[slot] != 0 {
 			tc.registers[slot] = 1
 		}
@@ -115,7 +121,7 @@ func (v *flatTransferVisitor) VisitBool() {
 
 func (v *flatTransferVisitor) VisitChar() {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		cp := uint32(tc.registers[slot])
 		mustTransfer(validateChar(rune(cp)))
 		tc.registers[slot] = uint64(cp)
@@ -125,35 +131,60 @@ func (v *flatTransferVisitor) VisitChar() {
 func (v *flatTransferVisitor) VisitString() {
 	ptrSlot := v.assignSlot()
 	lenSlot := v.assignSlot()
-	v.emit(func(ctx context.Context, tc *transferContext, _, _ uint32) {
-		srcPtr := uint32(tc.registers[ptrSlot])
-		srcCoded := uint32(tc.registers[lenSlot])
-		dstPtr, outCoded := transferStringContent(ctx, tc, srcPtr, srcCoded)
-		tc.registers[ptrSlot] = uint64(dstPtr)
-		tc.registers[lenSlot] = uint64(outCoded)
-	})
+	v.emitAlloc(
+		func(tc *transferContext, _ uint32, sink *allocSink) {
+			srcCoded := uint32(tc.registers[lenSlot])
+			stringContentSizeStep(tc, srcCoded, sink)
+		},
+		func(ctx context.Context, tc *transferContext, _, _ uint32, src *allocSource) {
+			srcPtr := uint32(tc.registers[ptrSlot])
+			srcCoded := uint32(tc.registers[lenSlot])
+			dstPtr, outCoded := transferStringContent(ctx, tc, srcPtr, srcCoded, src)
+			tc.registers[ptrSlot] = uint64(dstPtr)
+			tc.registers[lenSlot] = uint64(outCoded)
+		})
 }
 
 func (v *flatTransferVisitor) VisitList(elem Type) {
 	ptrSlot := v.assignSlot()
 	lenSlot := v.assignSlot()
 
-	child := &memTransferVisitor{}
+	child := newMemTransferVisitor()
 	elem.Accept(child)
 	elemSize := alignUp(child.byteOff, child.maxAlign)
 	elemAlign := child.maxAlign
 	if elemAlign == 0 {
 		elemAlign = 1
 	}
+	if child.byteEquivalent {
+		v.emitAlloc(
+			func(tc *transferContext, _ uint32, sink *allocSink) {
+				n := uint32(tc.registers[lenSlot])
+				listBulkSizes(tc, n, elemSize, elemAlign, sink)
+			},
+			func(ctx context.Context, tc *transferContext, _, _ uint32, src *allocSource) {
+				srcPtr := uint32(tc.registers[ptrSlot])
+				n := uint32(tc.registers[lenSlot])
+				dstPtr, outN := transferListBulk(ctx, tc, srcPtr, n, elemSize, elemAlign, src)
+				tc.registers[ptrSlot] = uint64(dstPtr)
+				tc.registers[lenSlot] = uint64(outN)
+			})
+		return
+	}
 	subSteps := child.out
-
-	v.emit(func(ctx context.Context, tc *transferContext, _, _ uint32) {
-		srcPtr := uint32(tc.registers[ptrSlot])
-		n := uint32(tc.registers[lenSlot])
-		dstPtr, outN := transferListContent(ctx, tc, srcPtr, n, elemSize, elemAlign, subSteps)
-		tc.registers[ptrSlot] = uint64(dstPtr)
-		tc.registers[lenSlot] = uint64(outN)
-	})
+	v.emitAlloc(
+		func(tc *transferContext, _ uint32, sink *allocSink) {
+			srcPtr := uint32(tc.registers[ptrSlot])
+			n := uint32(tc.registers[lenSlot])
+			listContentSizes(tc, srcPtr, n, elemSize, elemAlign, subSteps, sink)
+		},
+		func(ctx context.Context, tc *transferContext, _, _ uint32, src *allocSource) {
+			srcPtr := uint32(tc.registers[ptrSlot])
+			n := uint32(tc.registers[lenSlot])
+			dstPtr, outN := transferListContent(ctx, tc, srcPtr, n, elemSize, elemAlign, subSteps, src)
+			tc.registers[ptrSlot] = uint64(dstPtr)
+			tc.registers[lenSlot] = uint64(outN)
+		})
 }
 
 func (v *flatTransferVisitor) VisitRecord(fields []RecordField) {
@@ -172,7 +203,7 @@ func (v *flatTransferVisitor) VisitFlags(names []string) {
 	numLabels := uint32(len(names))
 	mustTransfer(validateFlagsLabelCount(numLabels))
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		bits := uint32(tc.registers[slot])
 		if numLabels < 32 {
 			bits &= (uint32(1) << numLabels) - 1
@@ -183,7 +214,7 @@ func (v *flatTransferVisitor) VisitFlags(names []string) {
 
 func (v *flatTransferVisitor) VisitOwn(rt ResourceType) {
 	slot := v.assignSlot()
-	v.emit(func(ctx context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		h := uint32(tc.registers[slot])
 		srcH, err := tc.caller.ResourceTable.LookupOwn(rt, h)
 		if err != nil {
@@ -199,7 +230,7 @@ func (v *flatTransferVisitor) VisitOwn(rt ResourceType) {
 
 func (v *flatTransferVisitor) VisitBorrow(rt ResourceType) {
 	slot := v.assignSlot()
-	v.emit(func(ctx context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		h := uint32(tc.registers[slot])
 		srcH, err := tc.caller.ResourceTable.LookupBorrowable(rt, h)
 		if err != nil {
@@ -215,7 +246,7 @@ func (v *flatTransferVisitor) VisitBorrow(rt ResourceType) {
 
 func (v *flatTransferVisitor) VisitEnum(numCases uint32) {
 	slot := v.assignSlot()
-	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32) {
+	v.emit(func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 		disc := uint32(tc.registers[slot])
 		if disc >= numCases {
 			panic(&Trap{msg: "enum: out-of-range discriminant"})
@@ -255,18 +286,30 @@ func (v *flatTransferVisitor) VisitVariant(cases []VariantCase) {
 		entries[i] = caseEntry{child.out, child.slot - payloadStart}
 	}
 
-	v.emit(func(ctx context.Context, tc *transferContext, _, _ uint32) {
-		disc := uint32(tc.registers[discSlot])
-		if disc >= uint32(len(entries)) {
-			panic(&Trap{msg: fmt.Sprintf("invalid variant discriminant %d", disc)})
-		}
-		for _, step := range entries[disc].steps {
-			step(ctx, tc, 0, 0)
-		}
-		for i := entries[disc].caseLocalSlots; i < joinedSlots; i++ {
-			tc.registers[payloadStart+i] = 0
-		}
-	})
+	v.emitAlloc(
+		func(tc *transferContext, _ uint32, sink *allocSink) {
+			disc := uint32(tc.registers[discSlot])
+			if disc >= uint32(len(entries)) {
+				return
+			}
+			for _, step := range entries[disc].steps {
+				if step.sizes != nil {
+					step.sizes(tc, 0, sink)
+				}
+			}
+		},
+		func(ctx context.Context, tc *transferContext, _, _ uint32, src *allocSource) {
+			disc := uint32(tc.registers[discSlot])
+			if disc >= uint32(len(entries)) {
+				panic(&Trap{msg: fmt.Sprintf("invalid variant discriminant %d", disc)})
+			}
+			for _, step := range entries[disc].steps {
+				step.transfer(ctx, tc, 0, 0, src)
+			}
+			for i := entries[disc].caseLocalSlots; i < joinedSlots; i++ {
+				tc.registers[payloadStart+i] = 0
+			}
+		})
 }
 
 func (v *flatTransferVisitor) VisitOption(inner Type) {

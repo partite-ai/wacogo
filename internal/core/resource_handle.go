@@ -158,10 +158,10 @@ type detachedResourceHandle struct {
 	valid bool
 }
 
-func (h *detachedResourceHandle) HandleID() uint32              { return h.rep }
-func (h *detachedResourceHandle) Rep() uint32                   { return h.rep }
-func (h *detachedResourceHandle) Type() *TypeResource           { return h.tr }
-func (h *detachedResourceHandle) Instance() *ComponentInstance  { return nil }
+func (h *detachedResourceHandle) HandleID() uint32             { return h.rep }
+func (h *detachedResourceHandle) Rep() uint32                  { return h.rep }
+func (h *detachedResourceHandle) Type() *TypeResource          { return h.tr }
+func (h *detachedResourceHandle) Instance() *ComponentInstance { return nil }
 
 func (h *detachedResourceHandle) LendTo(TransferTarget, *canon.Task) (ResourceHandle, error) {
 	panic("wacogo/core: LendTo on detached handle (carrier)")
@@ -212,11 +212,10 @@ func runDtor(ctx context.Context, tr *TypeResource, rep uint32, caller *Componen
 	if defining == nil {
 		return dtor(ctx, rep)
 	}
-	exit, err := defining.Enter(ctx)
-	if err != nil {
+	if err := defining.Enter(ctx); err != nil {
 		return err
 	}
-	defer exit(ctx)
+	defer defining.Exit(ctx)
 	return dtor(ctx, rep)
 }
 

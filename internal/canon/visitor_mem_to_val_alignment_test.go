@@ -10,22 +10,24 @@ import (
 // option's discriminant read from the wrong byte offset.
 //
 // Per canonical-ABI spec:
-//   alignment(option(t)) = max(alignment(disc), alignment(t))
+//
+//	alignment(option(t)) = max(alignment(disc), alignment(t))
+//
 // For option<string>, alignment = max(1, 4) = 4. So in a record
 // { u8, option<string>, option<string> }, the canonical layout is:
 //
-//   off | bytes | content
-//   ----+-------+----------------------------
-//    0  |   1   | u8 (status)
-//    1  |   3   | padding (option<string> aligns to 4)
-//    4  |   1   | message option disc
-//    5  |   3   | padding
-//    8  |   4   | message string ptr
-//   12  |   4   | message string len
-//   16  |   1   | details option disc
-//   17  |   3   | padding
-//   20  |   4   | details string ptr
-//   24  |   4   | details string len
+//	off | bytes | content
+//	----+-------+----------------------------
+//	 0  |   1   | u8 (status)
+//	 1  |   3   | padding (option<string> aligns to 4)
+//	 4  |   1   | message option disc
+//	 5  |   3   | padding
+//	 8  |   4   | message string ptr
+//	12  |   4   | message string len
+//	16  |   1   | details option disc
+//	17  |   3   | padding
+//	20  |   4   | details string ptr
+//	24  |   4   | details string len
 //
 // Total record size = 28, alignment = 4.
 //
@@ -46,11 +48,11 @@ func TestMemToValRecord_OptionFieldAlignment(t *testing.T) {
 	// Seed canonical layout.
 	_ = mem.WriteByte(base+0, 0) // status (u8)
 	// 1..3 padding (left zero, but value irrelevant)
-	_ = mem.WriteByte(base+4, 1)              // message disc = Some
-	_ = mem.WriteUint32Le(base+8, msgPtr)     // message string ptr
+	_ = mem.WriteByte(base+4, 1)                     // message disc = Some
+	_ = mem.WriteUint32Le(base+8, msgPtr)            // message string ptr
 	_ = mem.WriteUint32Le(base+12, uint32(len(msg))) // message string len
-	_ = mem.WriteByte(base+16, 1)             // details disc = Some
-	_ = mem.WriteUint32Le(base+20, detailsPtr) // details string ptr
+	_ = mem.WriteByte(base+16, 1)                    // details disc = Some
+	_ = mem.WriteUint32Le(base+20, detailsPtr)       // details string ptr
 	_ = mem.WriteUint32Le(base+24, uint32(len(det))) // details string len
 	if !mem.Write(msgPtr, []byte(msg)) {
 		t.Fatal("seed msg")

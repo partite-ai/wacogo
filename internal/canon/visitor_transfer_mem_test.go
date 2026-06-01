@@ -35,7 +35,7 @@ func TestMemTransferU32(t *testing.T) {
 		caller: &transferSide{Memory: srcMem},
 		callee: &transferSide{Memory: dstMem},
 	}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 
 	got, _ := dstMem.ReadUint32Le(0)
 	if got != 0xCAFEBABE {
@@ -69,7 +69,7 @@ func TestMemTransferRecord(t *testing.T) {
 		callee: &transferSide{Memory: dstMem},
 	}
 	for _, step := range v.out {
-		step(context.Background(), tc, 0, 0)
+		step.transfer(context.Background(), tc, 0, 0, &allocSource{})
 	}
 
 	a, _ := dstMem.ReadUint32Le(0)
@@ -103,7 +103,7 @@ func TestMemTransferU8ThenU32Padding(t *testing.T) {
 		callee: &transferSide{Memory: dstMem},
 	}
 	for _, step := range v.out {
-		step(context.Background(), tc, 0, 0)
+		step.transfer(context.Background(), tc, 0, 0, &allocSource{})
 	}
 
 	gotU8, _ := dstMem.ReadByte(0)
@@ -189,7 +189,7 @@ func TestMemTransferFlagsRoundtripSmall(t *testing.T) {
 		caller: &transferSide{Memory: srcMem},
 		callee: &transferSide{Memory: dstMem},
 	}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 
 	got, _ := dstMem.ReadByte(0)
 	if got != 0x05 {
@@ -212,7 +212,7 @@ func TestMemTransferBool(t *testing.T) {
 		caller: &transferSide{Memory: srcMem},
 		callee: &transferSide{Memory: dstMem},
 	}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 
 	got, _ := dstMem.ReadByte(0)
 	if got != 1 {
@@ -245,7 +245,7 @@ func TestMemTransferVisitor_VisitBorrow_AllocatesCalleeEntry(t *testing.T) {
 	if len(v.out) != 1 {
 		t.Fatalf("expected 1 step, got %d", len(v.out))
 	}
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 
 	calleeH, ok := dstMem.ReadUint32Le(0)
 	if !ok || calleeH == 0 {
@@ -284,7 +284,7 @@ func TestMemTransferVisitor_VisitBorrow_SameComponentShortcut(t *testing.T) {
 	}
 	v := &memTransferVisitor{}
 	v.VisitBorrow(rt)
-	v.out[0](context.Background(), tc, 0, 0)
+	v.out[0].transfer(context.Background(), tc, 0, 0, &allocSource{})
 
 	written, ok := dstMem.ReadUint32Le(0)
 	if !ok {

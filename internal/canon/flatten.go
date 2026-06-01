@@ -21,20 +21,20 @@ type flattenTypeVisitor struct {
 
 func (fv *flattenTypeVisitor) add(vt coreValueType) { fv.out = append(fv.out, vt) }
 
-func (fv *flattenTypeVisitor) VisitBool()                   { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitU8()                     { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitU16()                    { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitU32()                    { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitU64()                    { fv.add(coreI64) }
-func (fv *flattenTypeVisitor) VisitS8()                     { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitS16()                    { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitS32()                    { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitS64()                    { fv.add(coreI64) }
-func (fv *flattenTypeVisitor) VisitF32()                    { fv.add(coreF32) }
-func (fv *flattenTypeVisitor) VisitF64()                    { fv.add(coreF64) }
-func (fv *flattenTypeVisitor) VisitChar()                   { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitString()                 { fv.add(coreI32); fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitList(_ Type)             { fv.add(coreI32); fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitBool()       { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitU8()         { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitU16()        { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitU32()        { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitU64()        { fv.add(coreI64) }
+func (fv *flattenTypeVisitor) VisitS8()         { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitS16()        { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitS32()        { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitS64()        { fv.add(coreI64) }
+func (fv *flattenTypeVisitor) VisitF32()        { fv.add(coreF32) }
+func (fv *flattenTypeVisitor) VisitF64()        { fv.add(coreF64) }
+func (fv *flattenTypeVisitor) VisitChar()       { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitString()     { fv.add(coreI32); fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitList(_ Type) { fv.add(coreI32); fv.add(coreI32) }
 func (fv *flattenTypeVisitor) VisitFlags(names []string) {
 	numLabels := uint32(len(names))
 	if err := validateFlagsLabelCount(numLabels); err != nil {
@@ -46,7 +46,7 @@ func (fv *flattenTypeVisitor) VisitFlags(names []string) {
 }
 func (fv *flattenTypeVisitor) VisitOwn(_ ResourceType)    { fv.add(coreI32) }
 func (fv *flattenTypeVisitor) VisitBorrow(_ ResourceType) { fv.add(coreI32) }
-func (fv *flattenTypeVisitor) VisitEnum(_ uint32)           { fv.add(coreI32) }
+func (fv *flattenTypeVisitor) VisitEnum(_ uint32)         { fv.add(coreI32) }
 
 func (fv *flattenTypeVisitor) VisitRecord(fields []RecordField) {
 	for _, f := range fields {

@@ -714,6 +714,7 @@ func (s *instantiationState) buildLiftedFunc(
 		}
 	}
 	var reallocFn api.Function
+	var reallocModName, reallocFnExport string
 	if options.hasRealloc {
 		if int(options.realloc) >= len(s.coreFuncs) {
 			return nil, fmt.Errorf("wacogo: lift: realloc index %d out of range (have %d)", options.realloc, len(s.coreFuncs))
@@ -723,6 +724,8 @@ func (s *instantiationState) buildLiftedFunc(
 		if reallocFn == nil {
 			return nil, fmt.Errorf("wacogo: lift: realloc %q not exported by module", rf.name)
 		}
+		reallocModName = rf.instance.Name()
+		reallocFnExport = rf.name
 	}
 	var postReturnFn api.Function
 	if options.hasPostReturn {
@@ -737,10 +740,12 @@ func (s *instantiationState) buildLiftedFunc(
 	}
 	callee := canon.Callee{
 		CallSide: canon.CallSide{
-			Instance:       canonInstanceView{i: s.inst},
-			Memory:         mem,
-			Realloc:        reallocFn,
-			StringEncoding: options.stringEncoding,
+			Instance:        canonInstanceView{i: s.inst},
+			Memory:          mem,
+			Realloc:         reallocFn,
+			StringEncoding:  options.stringEncoding,
+			ReallocModName:  reallocModName,
+			ReallocFnExport: reallocFnExport,
 		},
 		CoreFunc:   coreFn,
 		PostReturn: postReturnFn,

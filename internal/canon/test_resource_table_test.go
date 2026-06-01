@@ -213,11 +213,10 @@ func (h *stubHandle) Drop(ctx context.Context) error {
 		if defining == nil {
 			return dtor(ctx, rep)
 		}
-		exit, err := defining.Enter(ctx)
-		if err != nil {
+		if err := defining.Enter(ctx); err != nil {
 			return err
 		}
-		defer exit(ctx)
+		defer defining.Exit(ctx)
 		return dtor(ctx, rep)
 	default:
 		return fmt.Errorf("unknown kind")
@@ -225,4 +224,3 @@ func (h *stubHandle) Drop(ctx context.Context) error {
 }
 
 var _ ResourceHandle = (*stubHandle)(nil)
-

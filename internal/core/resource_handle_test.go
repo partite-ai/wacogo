@@ -11,12 +11,13 @@ import (
 // the only thing used. The Enter/CanLeave methods are no-ops.
 type stubInstance struct{ name string }
 
-func (*stubInstance) Enter(ctx context.Context) (func(context.Context), error) {
-	return func(context.Context) {}, nil
-}
+func (*stubInstance) Enter(context.Context) error        { return nil }
+func (*stubInstance) Exit(context.Context)               {}
 func (*stubInstance) CanLeave() bool                     { return true }
-func (*stubInstance) SuspendLeave() func()               { return func() {} }
+func (*stubInstance) SuspendLeave() bool                 { return true }
+func (*stubInstance) RestoreLeave(bool)                  {}
 func (*stubInstance) ResourceTable() canon.ResourceTable { return nil }
+func (*stubInstance) Poison(error)                       {}
 
 func TestLiveHandle_Drop_OwnRunsDtor(t *testing.T) {
 	calls := 0

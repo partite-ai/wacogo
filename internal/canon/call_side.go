@@ -14,6 +14,20 @@ type CallSide struct {
 	Memory         api.Memory
 	Realloc        api.Function
 	StringEncoding StringEncoding
+
+	// ReallocModName is the wazero module name (set at instantiation time
+	// via WithName) of the module that exports Realloc. Used by
+	// Host.BuildAdapter to wire batched-realloc helper imports — the
+	// helper imports "tgt"."<name>" and wazero resolves "tgt" against
+	// this module name. Optional: when empty, no batched-realloc helper
+	// is built for this side, and the transfer takes the per-element
+	// fallback path.
+	ReallocModName string
+
+	// ReallocFnExport is the export name of Realloc within
+	// ReallocModName. Typically "cabi_realloc" or "realloc". Required
+	// when ReallocModName is set.
+	ReallocFnExport string
 }
 
 // Callee extends CallSide with the concrete core function to invoke and an

@@ -183,7 +183,7 @@ func emitReallocBody(bumpGlobalIdx uint32) ([]byte, []wasm.LocalEntry) {
 	cb.I32Const(pageMask)
 	cb.I32Add()
 	cb.I32Const(pageShift)
-	cb.I32ShrU()    // pages, rounded up
+	cb.I32ShrU() // pages, rounded up
 	cb.MemoryGrow(0)
 	cb.I32Const(-1)
 	cb.I32Eq()

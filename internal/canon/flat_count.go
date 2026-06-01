@@ -8,24 +8,24 @@ type flatCountVisitor struct {
 
 func (v *flatCountVisitor) add(n uint32) { v.count += n }
 
-func (v *flatCountVisitor) VisitBool()                 { v.add(1) }
-func (v *flatCountVisitor) VisitU8()                   { v.add(1) }
-func (v *flatCountVisitor) VisitU16()                  { v.add(1) }
-func (v *flatCountVisitor) VisitU32()                  { v.add(1) }
-func (v *flatCountVisitor) VisitU64()                  { v.add(1) }
-func (v *flatCountVisitor) VisitS8()                   { v.add(1) }
-func (v *flatCountVisitor) VisitS16()                  { v.add(1) }
-func (v *flatCountVisitor) VisitS32()                  { v.add(1) }
-func (v *flatCountVisitor) VisitS64()                  { v.add(1) }
-func (v *flatCountVisitor) VisitF32()                  { v.add(1) }
-func (v *flatCountVisitor) VisitF64()                  { v.add(1) }
-func (v *flatCountVisitor) VisitChar()                 { v.add(1) }
-func (v *flatCountVisitor) VisitString()               { v.add(2) }
+func (v *flatCountVisitor) VisitBool()               { v.add(1) }
+func (v *flatCountVisitor) VisitU8()                 { v.add(1) }
+func (v *flatCountVisitor) VisitU16()                { v.add(1) }
+func (v *flatCountVisitor) VisitU32()                { v.add(1) }
+func (v *flatCountVisitor) VisitU64()                { v.add(1) }
+func (v *flatCountVisitor) VisitS8()                 { v.add(1) }
+func (v *flatCountVisitor) VisitS16()                { v.add(1) }
+func (v *flatCountVisitor) VisitS32()                { v.add(1) }
+func (v *flatCountVisitor) VisitS64()                { v.add(1) }
+func (v *flatCountVisitor) VisitF32()                { v.add(1) }
+func (v *flatCountVisitor) VisitF64()                { v.add(1) }
+func (v *flatCountVisitor) VisitChar()               { v.add(1) }
+func (v *flatCountVisitor) VisitString()             { v.add(2) }
 func (v *flatCountVisitor) VisitList(Type)           { v.add(2) }
-func (v *flatCountVisitor) VisitFlags([]string)        { v.add(1) }
+func (v *flatCountVisitor) VisitFlags([]string)      { v.add(1) }
 func (v *flatCountVisitor) VisitOwn(ResourceType)    { v.add(1) }
 func (v *flatCountVisitor) VisitBorrow(ResourceType) { v.add(1) }
-func (v *flatCountVisitor) VisitEnum(uint32)           { v.add(1) }
+func (v *flatCountVisitor) VisitEnum(uint32)         { v.add(1) }
 func (v *flatCountVisitor) VisitRecord(fields []RecordField) {
 	for _, f := range fields {
 		f.Type.Accept(v)

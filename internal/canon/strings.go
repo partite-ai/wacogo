@@ -5,9 +5,22 @@ import (
 	"unicode/utf8"
 )
 
+// validateUTF8 is the fast path for UTF-8 validation: returns "" if b is
+// valid UTF-8, otherwise the precise canon-ABI trap message. utf8.Valid is
+// table-driven and substantially faster than the hand-rolled scalar loop
+// in classifyUTF8, especially on long ASCII strings; classifyUTF8 runs only
+// on failure to recover the spec-mandated trap message.
+func validateUTF8(b []byte) string {
+	if utf8.Valid(b) {
+		return ""
+	}
+	return classifyUTF8(b)
+}
+
 // classifyUTF8 returns "" if b is valid UTF-8, otherwise a short message
 // distinguishing a truncated trailing sequence ("incomplete utf-8 byte
-// sequence") from any other error ("invalid utf-8").
+// sequence") from any other error ("invalid utf-8"). Slow path — prefer
+// validateUTF8 unless you already know the input is invalid.
 func classifyUTF8(b []byte) string {
 	for i := 0; i < len(b); {
 		c := b[i]
@@ -60,6 +73,19 @@ func stringAlign(enc StringEncoding) uint32 {
 		return 2
 	}
 	return 1
+}
+
+// stringEncoderUpperBoundMultiplier returns the worst-case byte-size multiplier when
+// transferring a string from srcEnc to dstEnc. Same encoding is exact (1×);
+// any cross-encoding transfer fits in 2× the source byte size (UTF-8→UTF-16
+// is 2×, UTF-16→UTF-8 is 1.5×, Latin-1+UTF-16↔others are at most 2×). The
+// upper bound over-allocates in some cases; canon ABI permits this since
+// the actual written length is reported back via the coded-len return.
+func stringEncoderUpperBoundMultiplier(srcEnc, dstEnc StringEncoding) uint32 {
+	if srcEnc == dstEnc {
+		return 1
+	}
+	return 2
 }
 
 // latin1UTF16Decode interprets a codedLen field for Latin-1+UTF-16 encoding.
@@ -126,7 +152,7 @@ func decodeString(mem fakeOrRealMemory, ptr, codedLen uint32, enc StringEncoding
 	}
 	switch enc {
 	case EncUTF8:
-		if msg := classifyUTF8(bytes); msg != "" {
+		if msg := validateUTF8(bytes); msg != "" {
 			trapf("%s", msg)
 		}
 		return string(bytes)

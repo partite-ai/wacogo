@@ -42,6 +42,7 @@ type ComponentInstance struct {
 	userState    any
 	callListener CallListener
 	cleanups     []func()
+	hostCallCC   *core.CallContext
 }
 
 // Core returns the underlying *wacogo.ComponentInstance, suitable for

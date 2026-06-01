@@ -19,15 +19,15 @@ type testInstance struct{ name string }
 // now-deleted resource_test.go.
 type testResourceType struct{ name string }
 
-func (*testResourceType) IsResourceType()                                    {}
-func (*testResourceType) DefiningInstance() Instance                        { return nil }
-func (*testResourceType) Destructor() func(context.Context, uint32) error   { return nil }
+func (*testResourceType) IsResourceType()                                 {}
+func (*testResourceType) DefiningInstance() Instance                      { return nil }
+func (*testResourceType) Destructor() func(context.Context, uint32) error { return nil }
 
-func (*testInstance) Enter(ctx context.Context) (func(context.Context), error) {
-	return func(context.Context) {}, nil
-}
+func (*testInstance) Enter(context.Context) error  { return nil }
+func (*testInstance) Exit(context.Context)         {}
 func (*testInstance) CanLeave() bool               { return true }
-func (*testInstance) SuspendLeave() func()         { return func() {} }
+func (*testInstance) SuspendLeave() bool           { return true }
+func (*testInstance) RestoreLeave(bool)            {}
 func (*testInstance) ResourceTable() ResourceTable { return nil }
 func (*testInstance) Poison(error)                 {}
 

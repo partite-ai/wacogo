@@ -21,6 +21,7 @@ func TestRunGocallPlan_ErrorsOnUndroppedBorrow(t *testing.T) {
 			},
 		},
 		resultSteps: nil,
+		coreStack:   []uint64{},
 	}
 	calleeFn := newStubCoreFunc(t, nil, nil)
 	// The param step ignores its input; a nil-backed *ValOwnHandle is fine.

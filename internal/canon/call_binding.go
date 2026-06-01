@@ -11,17 +11,39 @@ import (
 // pre-bound to a Callee. Constructed once per exported Func, invoked many
 // times.
 type CallBinding struct {
-	plan   *gocallPlan
-	callee Callee
+	plan       *gocallPlan
+	callee     Callee
+	side       *transferSide  // precomputed at construction
+	postReturn PostReturnFunc // wrapped at construction; nil if callee has no post-return
+
+	// gcc is per-call state reused across Call invocations. Safe because
+	// each callee instance enforces single-threaded, non-reentrant access
+	// via its reentrance gate. gcc.callee is set once at construction;
+	// gcc.Task.NumBorrows is reset at the start of each Call (Task.End
+	// drains releases on every path but does not zero NumBorrows).
+	gcc gocallContext
 }
 
 // NewCallBinding compiles a gocall plan for params/results and captures the
-// Callee it will always dispatch against.
+// Callee it will always dispatch against. The transferSide and wrapped
+// post-return are precomputed here so each Call avoids those per-invocation
+// allocations.
 func NewCallBinding(params, results []Type, callee Callee) *CallBinding {
-	return &CallBinding{
-		plan:   compileGocallPlan(params, results),
-		callee: callee,
+	side := &transferSide{
+		Instance:       callee.Instance,
+		Memory:         callee.Memory,
+		Realloc:        wrapRealloc(callee.Realloc),
+		StringEncoding: callee.StringEncoding,
+		ResourceTable:  callee.Instance.ResourceTable(),
 	}
+	cb := &CallBinding{
+		plan:       compileGocallPlan(params, results),
+		callee:     callee,
+		side:       side,
+		postReturn: wrapPostReturn(callee.PostReturn),
+	}
+	cb.gcc.callee = side
+	return cb
 }
 
 // Callee returns the captured callee descriptor by value. Used by root-side
@@ -43,17 +65,8 @@ func (cb *CallBinding) Call(ctx context.Context, args []Val) (results []Val, err
 		}
 	}()
 
-	side := &transferSide{
-		Instance:       cb.callee.Instance,
-		Memory:         cb.callee.Memory,
-		Realloc:        wrapRealloc(cb.callee.Realloc),
-		StringEncoding: cb.callee.StringEncoding,
-		ResourceTable:  cb.callee.Instance.ResourceTable(),
-	}
-
-	gcc := newGocallContext(side)
-	return runGocallPlan(ctx, cb.plan, gcc, args, cb.callee.CoreFunc,
-		wrapPostReturn(cb.callee.PostReturn))
+	cb.gcc.Task.NumBorrows = 0
+	return runGocallPlan(ctx, cb.plan, &cb.gcc, args, cb.callee.CoreFunc, cb.postReturn)
 }
 
 // CallRaw invokes the function using caller-supplied flat-stack closures,
@@ -78,22 +91,13 @@ func (cb *CallBinding) CallRaw(
 		}
 	}()
 
-	exit, err := cb.callee.Instance.Enter(ctx)
-	if err != nil {
+	if err := cb.callee.Instance.Enter(ctx); err != nil {
 		return err
 	}
-	exited := false
-	defer func() {
-		if !exited {
-			exit(ctx)
-		}
-	}()
+	defer cb.callee.Instance.Exit(ctx)
 
-	n := cb.plan.nParamRegs
-	if cb.plan.nResultRegs > n {
-		n = cb.plan.nResultRegs
-	}
-	stack := make([]uint64, n)
+	stack := cb.plan.coreStack
+	clear(stack)
 	writeArgs(stack)
 
 	if err = cb.callee.CoreFunc.CallWithStack(ctx, stack); err != nil {
@@ -102,41 +106,47 @@ func (cb *CallBinding) CallRaw(
 
 	readResult(stack)
 
-	if pr := wrapPostReturn(cb.callee.PostReturn); pr != nil {
-		if err = pr(ctx, stack); err != nil {
+	if cb.postReturn != nil {
+		if err = cb.postReturn(ctx, stack); err != nil {
 			return err
 		}
 	}
-
-	exited = true
-	exit(ctx)
 	return nil
 }
 
 // wrapRealloc adapts an api.Function realloc into ReallocFunc, or nil.
+// The returned closure uses CallWithStack with a pre-allocated stack so
+// every realloc invocation is allocation-free. Safe under the per-instance
+// single-threaded invariant — the stack is shared across invocations of
+// this closure but never concurrent.
 func wrapRealloc(f api.Function) ReallocFunc {
 	if f == nil {
 		return nil
 	}
+	// Realloc sig: (i32 origPtr, i32 origSize, i32 align, i32 newSize) -> i32.
+	// CallWithStack stack length must be max(numParams, numResults) = 4.
+	stack := make([]uint64, 4)
 	return func(ctx context.Context, origPtr, origSize, align, newSize uint32) (uint32, error) {
-		out, err := f.Call(ctx, uint64(origPtr), uint64(origSize), uint64(align), uint64(newSize))
-		if err != nil {
+		stack[0] = uint64(origPtr)
+		stack[1] = uint64(origSize)
+		stack[2] = uint64(align)
+		stack[3] = uint64(newSize)
+		if err := f.CallWithStack(ctx, stack); err != nil {
 			return 0, err
 		}
-		if len(out) < 1 {
-			return 0, fmt.Errorf("realloc returned no result")
-		}
-		return uint32(out[0]), nil
+		return uint32(stack[0]), nil
 	}
 }
 
 // wrapPostReturn adapts an api.Function post-return into PostReturnFunc, or nil.
+// Uses CallWithStack so the call is allocation-free; the caller-supplied
+// results slice doubles as the wazero call stack (post-return params are
+// the function's flat result types, no results returned).
 func wrapPostReturn(f api.Function) PostReturnFunc {
 	if f == nil {
 		return nil
 	}
 	return func(ctx context.Context, results []uint64) error {
-		_, err := f.Call(ctx, results...)
-		return err
+		return f.CallWithStack(ctx, results)
 	}
 }

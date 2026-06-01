@@ -30,10 +30,11 @@ func TestRunTransferPlan_TrapInStepReleasesTask(t *testing.T) {
 	plan := &transferPlan{
 		paramSteps: nil,
 		resultSteps: []transferPlanStep{
-			func(_ context.Context, _ *transferContext, _, _ uint32) {
+			{transfer: func(_ context.Context, _ *transferContext, _, _ uint32, _ *allocSource) {
 				panic(&Trap{msg: "synthetic"})
-			},
+			}},
 		},
+		coreStack: []uint64{},
 	}
 	calleeFn := newStubCoreFunc(t, nil, nil)
 	defer func() {
@@ -68,7 +69,7 @@ func TestRunTransferPlan_TrapsOnUndroppedBorrow(t *testing.T) {
 	plan := &transferPlan{
 		paramSteps: []transferPlanStep{
 			// Simulate what VisitBorrow does via the interface: LookupBorrowable + LendTo.
-			func(_ context.Context, tc *transferContext, _, _ uint32) {
+			{transfer: func(_ context.Context, tc *transferContext, _, _ uint32, _ *allocSource) {
 				h := uint32(tc.registers[0])
 				srcH, err := tc.caller.ResourceTable.LookupBorrowable(rt, h)
 				if err != nil {
@@ -82,8 +83,9 @@ func TestRunTransferPlan_TrapsOnUndroppedBorrow(t *testing.T) {
 				if tc.Task.NumBorrows != 1 {
 					t.Errorf("paramStep: NumBorrows after LendTo = %d, want 1", tc.Task.NumBorrows)
 				}
-			},
+			}},
 		},
+		coreStack: make([]uint64, 1),
 	}
 	// Stub matches the runner's actual call shape: nCallerFlatParams=1
 	// causes runTransferPlan to push one i64 to the wasm-side Call.

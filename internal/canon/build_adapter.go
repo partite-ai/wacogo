@@ -80,12 +80,73 @@ func (h *Host) BuildAdapter(
 	}
 
 	// 5. Construct the adapterFunc.
+	//
+	// Precompute the callee side (memory, realloc, resource table, etc.)
+	// once here; it never varies across calls. Also precompute the wrapped
+	// post-return.
+	//
+	// The caller side is precomputed when caller.Memory is known at
+	// construction. When it is nil, the caller's memory is resolved per
+	// call from the calling wasm module (mod.Memory()); in that case we
+	// cache the non-memory parts on callerSideTpl and rebuild the side
+	// per call.
+	calleeSide := &transferSide{
+		Instance:       callee.Instance,
+		Memory:         callee.Memory,
+		Realloc:        wrapRealloc(callee.Realloc),
+		StringEncoding: callee.StringEncoding,
+		ResourceTable:  callee.Instance.ResourceTable(),
+	}
+	// caller.Memory is nil iff the corresponding canon-lower had no
+	// (memory ...) option — i.e. the signature doesn't transfer any
+	// indirect data (strings/lists). The transfer step closures only
+	// dereference caller Memory when they need to memcpy such data,
+	// so a nil Memory is correct here for primitive-only signatures.
+	callerSide := &transferSide{
+		Instance:       caller.Instance,
+		Memory:         caller.Memory,
+		Realloc:        wrapRealloc(caller.Realloc),
+		StringEncoding: caller.StringEncoding,
+		ResourceTable:  caller.Instance.ResourceTable(),
+	}
+	// Per-adapter batched-realloc helpers. One per side that has a
+	// realloc with a known wazero module/export name. The helpers let
+	// transfer steps that would otherwise issue N per-element realloc
+	// calls (e.g. list<string>) collapse them into a single Go↔wasm
+	// crossing; the loop calling cabi_realloc happens entirely in wasm.
+	// Construction is deferred to a helper because errors here must be
+	// surfaced as adapter-build failures, not transfer-time panics.
+	var auxModules []api.Module
+	if callee.ReallocModName != "" {
+		helper, err := buildBatchReallocHelper(ctx, h.runtime, callee.ReallocModName, callee.ReallocFnExport)
+		if err != nil {
+			return nil, fmt.Errorf("wacogo: build callee batch-realloc helper: %w", err)
+		}
+		calleeSide.BatchHelper = helper
+		auxModules = append(auxModules, helper.mod)
+	}
+	if caller.ReallocModName != "" {
+		helper, err := buildBatchReallocHelper(ctx, h.runtime, caller.ReallocModName, caller.ReallocFnExport)
+		if err != nil {
+			// Best-effort teardown of the callee helper before bubbling up.
+			for _, m := range auxModules {
+				_ = m.Close(ctx)
+			}
+			return nil, fmt.Errorf("wacogo: build caller batch-realloc helper: %w", err)
+		}
+		callerSide.BatchHelper = helper
+		auxModules = append(auxModules, helper.mod)
+	}
 	af := &adapterFunc{
 		caller:            caller,
 		callee:            callee,
 		plan:              plan,
 		nCallerFlatParams: nCallerFlatParams,
+		callerSide:        callerSide,
+		calleeSide:        calleeSide,
+		postReturn:        wrapPostReturn(callee.PostReturn),
 	}
+	af.tc.callee = calleeSide
 
 	// 6. Register the adapterFunc as a host module.
 	n := adapterCounter.Add(1)
@@ -108,11 +169,14 @@ func (h *Host) BuildAdapter(
 		return nil, fmt.Errorf("wacogo: build adapter: %w", err)
 	}
 
-	// 8. Return the CallAdapter.
+	// 8. Return the CallAdapter. Auxiliary modules (host trampoline +
+	// any batch-realloc helpers) will be closed when the adapter is
+	// closed.
+	aux := append([]api.Module{hostMod}, auxModules...)
 	return &CallAdapter{
 		Module: stubInst,
 		Name:   "adapt",
-		aux:    []api.Module{hostMod},
+		aux:    aux,
 	}, nil
 }
 
@@ -123,34 +187,28 @@ type adapterFunc struct {
 	callee            Callee
 	plan              *transferPlan
 	nCallerFlatParams uint32
+
+	// Precomputed at BuildAdapter time.
+	callerSide *transferSide
+	calleeSide *transferSide
+	postReturn PostReturnFunc
+
+	// tc is per-call state reused across Call invocations. Safe because
+	// the callee's reentrance gate serialises calls and forbids re-entry
+	// of the same instance through the same adapter. tc.callee is set
+	// once at construction; tc.caller is rebound per call (the result-
+	// phase side swap leaves caller/callee swapped); tc.registers is
+	// rebound to the wazero host-callback stack each call;
+	// tc.Task.NumBorrows is reset (Task.End drains releases on every
+	// path but does not zero NumBorrows).
+	tc transferContext
 }
 
 func (a *adapterFunc) Call(ctx context.Context, mod api.Module, stack []uint64) {
-	// Resolve caller memory: use the captured value, falling back to the
-	// calling wasm module's memory if not resolved at construction time.
-	callerMem := a.caller.Memory
-	if callerMem == nil {
-		callerMem = mod.Memory()
-	}
-
-	callerSide := &transferSide{
-		Instance:       a.caller.Instance,
-		Memory:         callerMem,
-		Realloc:        wrapRealloc(a.caller.Realloc),
-		StringEncoding: a.caller.StringEncoding,
-		ResourceTable:  a.caller.Instance.ResourceTable(),
-	}
-
-	calleeSide := &transferSide{
-		Instance:       a.callee.Instance,
-		Memory:         a.callee.Memory,
-		Realloc:        wrapRealloc(a.callee.Realloc),
-		StringEncoding: a.callee.StringEncoding,
-		ResourceTable:  a.callee.Instance.ResourceTable(),
-	}
-
-	tc := newTransferContext(callerSide, calleeSide, stack)
-
-	runTransferPlan(ctx, a.plan, tc, a.callee.CoreFunc,
-		wrapPostReturn(a.callee.PostReturn), a.nCallerFlatParams, mod)
+	a.tc.caller = a.callerSide
+	a.tc.callee = a.calleeSide
+	a.tc.registers = stack
+	a.tc.Task.NumBorrows = 0
+	runTransferPlan(ctx, a.plan, &a.tc, a.callee.CoreFunc,
+		a.postReturn, a.nCallerFlatParams, mod)
 }

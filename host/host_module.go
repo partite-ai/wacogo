@@ -18,26 +18,18 @@ var hostCounter atomic.Uint64
 // wrapper. One host module per Instantiate call; closing the
 // *ComponentInstance also closes this module.
 //
-// h.core must be filled before any of these closures fire — the host
-// module is built before core.NewInstance returns, but the closures
-// run only at call time, well after Component.Instantiate has
-// populated h.core.
+// h.core and h.hostCallCC must be filled before any of these closures
+// fire — the host module is built before core.NewInstance returns, but
+// the closures run only at call time, well after Component.Instantiate
+// has populated both fields.
 func buildPerInstanceHostMod(
 	ctx context.Context,
 	rt wazero.Runtime,
 	comp *Component,
 	h *ComponentInstance,
-) (api.Module, func(api.Memory, core.ReallocFunc), error) {
+) (api.Module, error) {
 	modName := fmt.Sprintf("%s_host_%d", comp.name, hostCounter.Add(1))
 	hmb := rt.NewHostModuleBuilder(modName)
-
-	var realloc core.ReallocFunc
-	var mem api.Memory
-
-	setup := func(m api.Memory, r core.ReallocFunc) {
-		mem = m
-		realloc = r
-	}
 
 	for i := range comp.allFuncs {
 		fr := comp.allFuncs[i] // capture pointer for closure (stable across iterations)
@@ -45,8 +37,7 @@ func buildPerInstanceHostMod(
 		resultTypes := valueTypesFromCoreBytes(fr.flatResults)
 		fn := api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
 			instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
-				cc := core.NewCallContext(h.core, nil, mem, realloc)
-				return fr.userFn(ctx, cc, h, stack)
+				return fr.userFn(ctx, h.hostCallCC, h, stack)
 			})
 		})
 		hmb.NewFunctionBuilder().
@@ -84,13 +75,13 @@ func buildPerInstanceHostMod(
 	// method would panic on that assertion.
 	compiled, err := hmb.Compile(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("wacogo/host: compile per-instance hostMod: %w", err)
+		return nil, fmt.Errorf("wacogo/host: compile per-instance hostMod: %w", err)
 	}
 	mod, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName(modName))
 	if err != nil {
-		return nil, nil, fmt.Errorf("wacogo/host: instantiate per-instance hostMod: %w", err)
+		return nil, fmt.Errorf("wacogo/host: instantiate per-instance hostMod: %w", err)
 	}
-	return mod, setup, nil
+	return mod, nil
 }
 
 // instrumentCall runs fn under any CallListener attached to h. With or

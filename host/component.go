@@ -119,7 +119,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	}
 
 	// 2. Per-instance host module + stub instantiation; closures capture h.
-	hostMod, setupHostMod, err := buildPerInstanceHostMod(ctx, core.WazeroRuntime(c.engine), c, h)
+	hostMod, err := buildPerInstanceHostMod(ctx, core.WazeroRuntime(c.engine), c, h)
 	if err != nil {
 		return nil, err
 	}
@@ -130,11 +130,11 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	}
 
 	// 3. Resolve the stub's memory + realloc once for the canon.Callee
-	//    construction below; the host-module trampolines capture caller
-	//    memory/realloc fresh per call, not from the wrapper.
+	//    construction below. The reusable host-call CallContext (see
+	//    step after h.core is set) also closes over these.
 	stubMemory := stubMod.Memory()
 	reallocAPI := stubMod.ExportedFunction("realloc")
-	setupHostMod(stubMemory, wrapRealloc(reallocAPI))
+	stubRealloc := wrapRealloc(reallocAPI)
 
 	// 4. Per-instance TypeResources, one per entry in comp.allResources.
 	//    Per-resource dtor closures capture h directly — no UserData type
@@ -333,6 +333,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 		return nil, err
 	}
 	h.core = coreInst
+	h.hostCallCC = core.NewCallContext(h.core, nil, stubMemory, stubRealloc)
 
 	return h, nil
 }

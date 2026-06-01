@@ -152,18 +152,27 @@ func (i *ComponentInstance) ExportedType(name string) Type {
 // runtime's invariants and can cause deadlocks or trap leaks. Touch this
 // only when implementing a low-level call path that the canonical-ABI
 // runners do not already cover.
-func (i *ComponentInstance) Enter(ctx context.Context) (func(context.Context), error) {
+func (i *ComponentInstance) Enter(ctx context.Context) error {
 	if i == nil {
-		return func(context.Context) {}, nil
+		return nil
 	}
 	if i.poisoned != nil {
-		return nil, fmt.Errorf("component instance unusable: %w", i.poisoned)
+		return fmt.Errorf("component instance unusable: %w", i.poisoned)
 	}
 	if i.entered {
-		return nil, fmt.Errorf("cannot enter component instance (reentrance trap)")
+		return fmt.Errorf("cannot enter component instance (reentrance trap)")
 	}
 	i.entered = true
-	return func(context.Context) { i.entered = false }, nil
+	return nil
+}
+
+// Exit releases the reentrance lock acquired by Enter. Idempotent on a nil
+// receiver. The caller MUST NOT call Exit unless a matching Enter succeeded.
+func (i *ComponentInstance) Exit(_ context.Context) {
+	if i == nil {
+		return
+	}
+	i.entered = false
 }
 
 // Poison marks the instance as unusable due to a trap. Subsequent Enter
@@ -204,31 +213,39 @@ func (i *ComponentInstance) CanLeave() bool {
 	return i.canLeave
 }
 
-// SuspendLeave clears the may_leave flag and returns a restorer
-// closure that the caller MUST invoke exactly once (typically via
-// defer) to put the prior value back. It is part of the canonical-ABI
-// post-return protocol — invoked around the callee's post-return hook
-// so that realloc and other leaving operations trap during teardown.
+// SuspendLeave clears the may_leave flag and returns the prior value. The
+// caller MUST pass that prior value to RestoreLeave exactly once (typically
+// via defer) to put it back. It is part of the canonical-ABI post-return
+// protocol — invoked around the callee's post-return hook so that realloc
+// and other leaving operations trap during teardown.
 //
-// Calling without a matching restore, or restoring twice, corrupts
-// the runtime invariants. Most users should never call this directly.
-func (i *ComponentInstance) SuspendLeave() func() {
+// Calling without a matching RestoreLeave, or restoring twice, corrupts the
+// runtime invariants. Most users should never call this directly.
+func (i *ComponentInstance) SuspendLeave() (prev bool) {
 	if i == nil {
-		return func() {}
+		return true
 	}
-	prev := i.canLeave
+	prev = i.canLeave
 	i.canLeave = false
-	return func() { i.canLeave = prev }
+	return prev
+}
+
+// RestoreLeave restores the may_leave flag to prev. Idempotent on a nil
+// receiver.
+func (i *ComponentInstance) RestoreLeave(prev bool) {
+	if i == nil {
+		return
+	}
+	i.canLeave = prev
 }
 
 // RunInComponent runs fn with the instance entered, releasing on return
 // regardless of whether fn errored.
 func (i *ComponentInstance) RunInComponent(ctx context.Context, fn func() error) error {
-	exit, err := i.Enter(ctx)
-	if err != nil {
+	if err := i.Enter(ctx); err != nil {
 		return err
 	}
-	defer exit(ctx)
+	defer i.Exit(ctx)
 	return fn()
 }
 
@@ -265,4 +282,3 @@ func (i *ComponentInstance) Close(ctx context.Context) error {
 	}
 	return errors.Join(errs...)
 }
-

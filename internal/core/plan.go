@@ -26,7 +26,7 @@ type planStep interface {
 type instanceKind uint8
 
 const (
-	instanceKindCore    instanceKind = iota
+	instanceKindCore instanceKind = iota
 	instanceKindAdapter
 	instanceKindRuntime
 )

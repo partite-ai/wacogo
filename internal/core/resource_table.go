@@ -49,11 +49,11 @@ type ResourceTable struct {
 }
 
 type resourceEntry struct {
-	rep      uint32
-	tr       *TypeResource
-	kind     resourceKind
-	occupied bool
-	numLends uint32
+	rep         uint32
+	tr          *TypeResource
+	kind        resourceKind
+	occupied    bool
+	numLends    uint32
 	borrowScope *canon.Task
 }
 

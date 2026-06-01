@@ -7,12 +7,11 @@ import (
 
 func TestComponentInstance_EnterReentranceTrap(t *testing.T) {
 	inst := &ComponentInstance{}
-	exit, err := inst.Enter(context.Background())
-	if err != nil {
+	if err := inst.Enter(context.Background()); err != nil {
 		t.Fatalf("first Enter err = %v", err)
 	}
-	defer exit(context.Background())
-	if _, err := inst.Enter(context.Background()); err == nil {
+	defer inst.Exit(context.Background())
+	if err := inst.Enter(context.Background()); err == nil {
 		t.Fatal("second Enter returned nil err, want reentrance trap")
 	}
 }
@@ -40,14 +39,14 @@ func TestComponentInstance_NilSafety(t *testing.T) {
 	if !i.CanLeave() {
 		t.Fatal("nil CanLeave = false, want true")
 	}
-	exit, err := i.Enter(context.Background())
-	if err != nil {
+	if err := i.Enter(context.Background()); err != nil {
 		t.Fatalf("nil Enter err = %v", err)
 	}
-	exit(context.Background())
-	// SuspendLeave on a nil receiver must be a no-op that returns a
-	// callable restore — runners defer-call it unconditionally.
-	i.SuspendLeave()()
+	i.Exit(context.Background())
+	// SuspendLeave/RestoreLeave on a nil receiver must be no-ops —
+	// runners invoke them unconditionally.
+	prev := i.SuspendLeave()
+	i.RestoreLeave(prev)
 }
 
 func TestComponentInstance_SuspendLeaveStacks(t *testing.T) {
@@ -63,11 +62,11 @@ func TestComponentInstance_SuspendLeaveStacks(t *testing.T) {
 	if inst.CanLeave() {
 		t.Fatal("nested SuspendLeave: CanLeave = true, want false")
 	}
-	r2()
+	inst.RestoreLeave(r2)
 	if inst.CanLeave() {
 		t.Fatal("after inner restore: CanLeave = true, want false (outer still suspended)")
 	}
-	r1()
+	inst.RestoreLeave(r1)
 	if !inst.CanLeave() {
 		t.Fatal("after outer restore: CanLeave = false, want true")
 	}

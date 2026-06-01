@@ -11,11 +11,15 @@ import "context"
 // compare two Instance values for identity, so concrete implementations
 // must always thread the same pointer for a given component instance.
 type Instance interface {
-	// Enter locks the instance against reentrance. The returned exit
-	// closure must be called exactly once when the call completes
-	// (defer it). Returns a non-nil error if the instance is already
-	// entered.
-	Enter(ctx context.Context) (exit func(ctx context.Context), err error)
+	// Enter locks the instance against reentrance. The caller MUST call
+	// Exit exactly once when the call completes (defer it). Returns a
+	// non-nil error if the instance is already entered.
+	Enter(ctx context.Context) error
+
+	// Exit releases the reentrance lock acquired by Enter. Idempotent on
+	// a nil receiver. The caller MUST NOT call Exit unless a matching
+	// Enter succeeded.
+	Exit(ctx context.Context)
 
 	// CanLeave reports the may_leave flag. The flag is true initially
 	// and is cleared for the duration of canonical-ABI value lowering
@@ -28,11 +32,16 @@ type Instance interface {
 	CanLeave() bool
 
 	// SuspendLeave clears may_leave for the duration of a canonical-ABI
-	// value-lowering window (param lowering, result lowering, post-return).
-	// The returned closure restores the prior may_leave value and must be
-	// called exactly once when the window closes; defer it. Nested calls
-	// stack — the closure restores whatever value was in effect on entry.
-	SuspendLeave() (restore func())
+	// value-lowering window (param lowering, result lowering, post-return)
+	// and returns the prior value. The caller MUST pass that prior value
+	// to RestoreLeave exactly once when the window closes (defer it).
+	// Nested calls stack — RestoreLeave puts back whatever value was in
+	// effect on entry.
+	SuspendLeave() (prev bool)
+
+	// RestoreLeave restores the may_leave flag to prev. Idempotent on a
+	// nil receiver.
+	RestoreLeave(prev bool)
 
 	// ResourceTable returns the per-instance resource handle table.
 	ResourceTable() ResourceTable
@@ -41,4 +50,3 @@ type Instance interface {
 	// Enter calls must fail with the captured reason. Idempotent.
 	Poison(reason error)
 }
-
