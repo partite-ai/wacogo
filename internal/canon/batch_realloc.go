@@ -8,7 +8,15 @@ import (
 	"github.com/partite-ai/wacogo/internal/wasm"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
+	"github.com/tetratelabs/wazero/experimental"
 )
+
+// batchReallocTargetModName is the placeholder import-module name baked into
+// every compiled helper. It is never registered in the store; each
+// instantiation rebinds it to the real target module via an ImportResolver.
+// Keeping it fixed (rather than the per-instance target module name) is what
+// lets a single compiled helper be shared across adapters.
+const batchReallocTargetModName = "wacogo:realloc_target"
 
 // batchReallocHelper is a per-adapter tiny wasm module that batches N
 // cabi_realloc calls behind a single Go→wasm boundary crossing. The helper
@@ -38,27 +46,42 @@ type batchReallocHelper struct {
 var batchHelperCounter atomic.Uint64
 
 // buildBatchReallocHelper instantiates a batched-realloc helper bound to
-// the target realloc identified by (targetModName, targetFnName). The
-// import is resolved by wazero's standard cross-module name lookup — the
-// caller must have already instantiated a module by targetModName that
-// exports targetFnName with the cabi_realloc signature.
-func buildBatchReallocHelper(
+// the target realloc identified by (targetModName, targetFnName). The helper
+// is compiled from bytes that import a fixed placeholder module name; this
+// call rebinds that placeholder to the real target module (resolved by
+// targetModName) via an ImportResolver so a single compiled helper per
+// realloc export name serves every adapter. The caller must have already
+// instantiated a module by targetModName that exports targetFnName with the
+// cabi_realloc signature.
+func (h *Host) buildBatchReallocHelper(
 	ctx context.Context,
-	rt wazero.Runtime,
 	targetModName, targetFnName string,
 ) (*batchReallocHelper, error) {
 	if targetModName == "" || targetFnName == "" {
 		return nil, fmt.Errorf("buildBatchReallocHelper: empty targetModName or targetFnName")
 	}
-	wasmBytes := encodeBatchReallocHelperModule(targetModName, targetFnName)
-
-	compiled, err := rt.CompileModule(ctx, wasmBytes)
+	compiled, err := h.compiledBatchHelper(ctx, targetFnName)
 	if err != nil {
-		return nil, fmt.Errorf("compile batch_realloc helper: %w", err)
+		return nil, err
 	}
 
+	target := h.runtime.Module(targetModName)
+	if target == nil {
+		return nil, fmt.Errorf("batch_realloc helper: target module %q not found", targetModName)
+	}
+	resolver := func(name string) api.Module {
+		if name == batchReallocTargetModName {
+			return target
+		}
+		return nil
+	}
+	ictx := experimental.WithImportResolver(ctx, resolver)
+	// Back the helper's scratch with a plain Go slice rather than any
+	// mmap-backed allocator the caller installed for guest modules.
+	ictx = experimental.WithMemoryAllocator(ictx, internalMemoryAllocator)
+
 	instName := fmt.Sprintf("wacogo_batch_realloc_%d", batchHelperCounter.Add(1))
-	mod, err := rt.InstantiateModule(ctx, compiled,
+	mod, err := h.runtime.InstantiateModule(ictx, compiled,
 		wazero.NewModuleConfig().WithName(instName))
 	if err != nil {
 		return nil, fmt.Errorf("instantiate batch_realloc helper: %w", err)
@@ -79,6 +102,24 @@ func buildBatchReallocHelper(
 		scratch:   scratch,
 		callStack: make([]uint64, 1),
 	}, nil
+}
+
+// compiledBatchHelper returns the shared compiled helper module for a given
+// realloc export name, compiling and caching it on first use. The compiled
+// module is reused across every adapter that targets a realloc of that name
+// and is freed when the runtime is closed.
+func (h *Host) compiledBatchHelper(ctx context.Context, targetFnName string) (wazero.CompiledModule, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if cm, ok := h.batchHelperCache[targetFnName]; ok {
+		return cm, nil
+	}
+	cm, err := h.runtime.CompileModule(ctx, encodeBatchReallocHelperModule(targetFnName))
+	if err != nil {
+		return nil, fmt.Errorf("compile batch_realloc helper: %w", err)
+	}
+	h.batchHelperCache[targetFnName] = cm
+	return cm, nil
 }
 
 // writeSizeAlign writes the i-th allocation request (size, align) into the
@@ -134,9 +175,11 @@ func (h *batchReallocHelper) close(ctx context.Context) error {
 }
 
 // encodeBatchReallocHelperModule builds the wasm bytecode for the helper.
-// targetModName and targetFnName are the wazero module name and exported
-// function name of the target's cabi_realloc — these become the import
-// (module, name) pair in the emitted helper.
+// The import module name is the fixed batchReallocTargetModName placeholder
+// (rebound per instantiation via an ImportResolver); targetFnName is the
+// exported function name of the target's cabi_realloc and becomes the import
+// field name. Only targetFnName varies the bytes, so the compiled result is
+// cached by it.
 //
 // The body implements the loop:
 //
@@ -147,14 +190,14 @@ func (h *batchReallocHelper) close(ctx context.Context) error {
 //	}
 //
 // Param 0 = n. One i32 local: i.
-func encodeBatchReallocHelperModule(targetModName, targetFnName string) []byte {
+func encodeBatchReallocHelperModule(targetFnName string) []byte {
 	var mb wasm.ModuleBuilder
 
 	reallocSig := wasm.FuncSig{
 		Params:  []byte{wasm.ValI32, wasm.ValI32, wasm.ValI32, wasm.ValI32},
 		Results: []byte{wasm.ValI32},
 	}
-	reallocIdx := mb.AddImportFunc(targetModName, targetFnName, reallocSig)
+	reallocIdx := mb.AddImportFunc(batchReallocTargetModName, targetFnName, reallocSig)
 
 	memIdx := mb.AddMemory(1, 0)
 	mb.AddExportMemory("scratch", memIdx)

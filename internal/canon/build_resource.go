@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/partite-ai/wacogo/internal/wasm"
+	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
 
@@ -30,7 +30,6 @@ func (h *Host) BuildResourceNew(
 		stack[0] = uint64(dst.HandleID())
 	})
 	return h.buildResourceStub(ctx, baseName, "resource.new", fn,
-		wasm.FuncSig{Params: []byte{wasm.ValI32}, Results: []byte{wasm.ValI32}},
 		[]api.ValueType{api.ValueTypeI32},
 		[]api.ValueType{api.ValueTypeI32})
 }
@@ -64,7 +63,6 @@ func (h *Host) BuildResourceDrop(
 		}
 	})
 	return h.buildResourceStub(ctx, baseName, "resource.drop", fn,
-		wasm.FuncSig{Params: []byte{wasm.ValI32}, Results: nil},
 		[]api.ValueType{api.ValueTypeI32}, nil)
 }
 
@@ -90,7 +88,6 @@ func (h *Host) BuildResourceRep(
 		stack[0] = uint64(h.Rep())
 	})
 	return h.buildResourceStub(ctx, baseName, "resource.rep", fn,
-		wasm.FuncSig{Params: []byte{wasm.ValI32}, Results: []byte{wasm.ValI32}},
 		[]api.ValueType{api.ValueTypeI32},
 		[]api.ValueType{api.ValueTypeI32})
 }
@@ -99,28 +96,30 @@ func (h *Host) buildResourceStub(
 	ctx context.Context,
 	baseName, opName string,
 	fn api.GoModuleFunction,
-	sig wasm.FuncSig,
 	paramTypes, resultTypes []api.ValueType,
 ) (*CallAdapter, error) {
 	n := resourceCounter.Add(1)
 	hostModName := fmt.Sprintf("%s_host_%d", baseName, n)
-	hostMod, err := h.runtime.NewHostModuleBuilder(hostModName).
+	// Compile + instantiate in two steps so the host instance is a raw
+	// *ModuleInstance usable directly as the core function via wazero's
+	// import resolver.
+	hostCompiled, err := h.runtime.NewHostModuleBuilder(hostModName).
 		NewFunctionBuilder().
 		WithGoModuleFunction(fn, paramTypes, resultTypes).
 		Export("f").
-		Instantiate(ctx)
+		Compile(ctx)
 	if err != nil {
+		return nil, fmt.Errorf("canon: %s: compile host: %w", opName, err)
+	}
+	hostMod, err := h.runtime.InstantiateModule(ctx, hostCompiled,
+		wazero.NewModuleConfig().WithName(""))
+	if err != nil {
+		_ = hostCompiled.Close(ctx)
 		return nil, fmt.Errorf("canon: %s: instantiate host: %w", opName, err)
 	}
-	stubInst, err := buildStubModule(ctx, h.runtime,
-		hostModName, "f", sig, baseName+"_stub", "f")
-	if err != nil {
-		_ = hostMod.Close(ctx)
-		return nil, fmt.Errorf("canon: %s: %w", opName, err)
-	}
 	return &CallAdapter{
-		Module: stubInst,
-		Name:   "f",
-		aux:    []api.Module{hostMod},
+		Module:   hostMod,
+		Name:     "f",
+		compiled: []wazero.CompiledModule{hostCompiled},
 	}, nil
 }

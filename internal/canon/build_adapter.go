@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/partite-ai/wacogo/internal/wasm"
+	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
 
@@ -38,30 +38,24 @@ func (h *Host) BuildAdapter(
 	// (flat vs single-i32 indirect based on maxFlatParams/maxFlatResults).
 	var adapterParamTypes []api.ValueType
 	var adapterResultTypes []api.ValueType
-	var wasmParams []byte
-	var wasmResults []byte
 
 	if flatParamCount <= maxFlatParams {
 		for _, p := range params {
 			for _, cv := range flattenTypeOf(p) {
 				adapterParamTypes = append(adapterParamTypes, coreValueTypeToAPI(cv))
-				wasmParams = append(wasmParams, coreValueTypeToWasm(cv))
 			}
 		}
 	} else {
 		adapterParamTypes = []api.ValueType{api.ValueTypeI32}
-		wasmParams = []byte{wasm.ValI32}
 	}
 
 	resultViaMemory := flatResultCount > maxFlatResults
 	if resultViaMemory {
 		adapterParamTypes = append(adapterParamTypes, api.ValueTypeI32)
-		wasmParams = append(wasmParams, wasm.ValI32)
 	} else {
 		for _, r := range results {
 			for _, cv := range flattenTypeOf(r) {
 				adapterResultTypes = append(adapterResultTypes, coreValueTypeToAPI(cv))
-				wasmResults = append(wasmResults, coreValueTypeToWasm(cv))
 			}
 		}
 	}
@@ -118,7 +112,7 @@ func (h *Host) BuildAdapter(
 	// surfaced as adapter-build failures, not transfer-time panics.
 	var auxModules []api.Module
 	if callee.ReallocModName != "" {
-		helper, err := buildBatchReallocHelper(ctx, h.runtime, callee.ReallocModName, callee.ReallocFnExport)
+		helper, err := h.buildBatchReallocHelper(ctx, callee.ReallocModName, callee.ReallocFnExport)
 		if err != nil {
 			return nil, fmt.Errorf("wacogo: build callee batch-realloc helper: %w", err)
 		}
@@ -126,7 +120,7 @@ func (h *Host) BuildAdapter(
 		auxModules = append(auxModules, helper.mod)
 	}
 	if caller.ReallocModName != "" {
-		helper, err := buildBatchReallocHelper(ctx, h.runtime, caller.ReallocModName, caller.ReallocFnExport)
+		helper, err := h.buildBatchReallocHelper(ctx, caller.ReallocModName, caller.ReallocFnExport)
 		if err != nil {
 			// Best-effort teardown of the callee helper before bubbling up.
 			for _, m := range auxModules {
@@ -148,35 +142,36 @@ func (h *Host) BuildAdapter(
 	}
 	af.tc.callee = calleeSide
 
-	// 6. Register the adapterFunc as a host module.
+	// 6. Register the adapterFunc as a host module and use its export
+	// directly as the adapter's core function. Compile and instantiate in
+	// two steps (rather than the builder's Instantiate) so we get a raw
+	// module instance — the wrapper from Instantiate fails the
+	// *ModuleInstance type assertion in wazero's import resolver.
 	n := adapterCounter.Add(1)
 	hostModName := fmt.Sprintf("%s_host_%d", baseName, n)
-	hostMod, err := h.runtime.NewHostModuleBuilder(hostModName).
+	hostCompiled, err := h.runtime.NewHostModuleBuilder(hostModName).
 		NewFunctionBuilder().
 		WithGoModuleFunction(af, adapterParamTypes, adapterResultTypes).
 		Export("adapt").
-		Instantiate(ctx)
+		Compile(ctx)
 	if err != nil {
+		return nil, fmt.Errorf("wacogo: build adapter: compile host module: %w", err)
+	}
+	hostMod, err := h.runtime.InstantiateModule(ctx, hostCompiled,
+		wazero.NewModuleConfig().WithName(""))
+	if err != nil {
+		_ = hostCompiled.Close(ctx)
 		return nil, fmt.Errorf("wacogo: build adapter: instantiate host module: %w", err)
 	}
 
-	// 7. Build the stub via buildStubModule.
-	sig := wasm.FuncSig{Params: wasmParams, Results: wasmResults}
-	stubInstName := fmt.Sprintf("%s_stub", baseName)
-	stubInst, err := buildStubModule(ctx, h.runtime, hostModName, "adapt", sig, stubInstName, "adapt")
-	if err != nil {
-		_ = hostMod.Close(ctx)
-		return nil, fmt.Errorf("wacogo: build adapter: %w", err)
-	}
-
-	// 8. Return the CallAdapter. Auxiliary modules (host trampoline +
-	// any batch-realloc helpers) will be closed when the adapter is
+	// 7. Return the CallAdapter. Auxiliary modules (any batch-realloc
+	// helpers) and the host CompiledModule are closed when the adapter is
 	// closed.
-	aux := append([]api.Module{hostMod}, auxModules...)
 	return &CallAdapter{
-		Module: stubInst,
-		Name:   "adapt",
-		aux:    aux,
+		Module:   hostMod,
+		Name:     "adapt",
+		aux:      auxModules,
+		compiled: []wazero.CompiledModule{hostCompiled},
 	}, nil
 }
 

@@ -3,6 +3,7 @@ package canon
 import (
 	"context"
 
+	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
 
@@ -14,7 +15,12 @@ type CallAdapter struct {
 
 	// aux holds host module + stub instances plus any other modules this
 	// adapter owns. Teardown order is reverse of append order.
-	aux    []api.Module
+	aux []api.Module
+
+	// compiled holds per-adapter compiled code (the host module's) that
+	// must be freed after the module instances referencing it are closed.
+	compiled []wazero.CompiledModule
+
 	closed bool
 }
 
@@ -33,6 +39,13 @@ func (a *CallAdapter) Close(ctx context.Context) error {
 	}
 	if a.Module != nil {
 		if err := a.Module.Close(ctx); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	// Compiled code is freed only after every instance referencing it is
+	// closed above.
+	for _, cm := range a.compiled {
+		if err := cm.Close(ctx); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
