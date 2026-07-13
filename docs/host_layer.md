@@ -90,7 +90,8 @@ non-interchangeable `*core.TypeResource` values.
   (witgen) wraps this in typed Go signatures.
 - **`AddType(name, expr)`** — register a value type. Returns a
   `*TypeRef` usable wherever a `TypeExpr` is accepted. `name=""`
-  registers a structural type purely for sharing across signatures.
+  registers a structural type purely for sharing across signatures;
+  non-empty names are exported from the current lexical scope.
 - **`AddResource(name, dtor)`** — register a host-defined resource
   type. Returns a `*ResourceType` that constructs `Own()` / `Borrow()`
   `TypeExpr`s for use in signatures.
@@ -134,11 +135,15 @@ factories register these names verbatim.
 appended to the *current* scope, and `Build` walks the tree
 producing a parallel `*scopeRuntime` on the `*Component`. Names
 must be unique within one scope but may collide across nested
-scopes. Resource-type IDs are allocated from one builder-wide
-counter (not per-scope) so each `*ResourceType` has a stable
-instance-wide slot in `trSlice`. `AddResourceAlias` shares the same
-`*core.TypeResource` identity (and the same arena `ResourceID`)
-between the original export and the alias.
+scopes. Each runtime scope retains its own `AddType` declarations.
+Those declarations receive stable scope-local runtime slot numbers,
+and each live scope populates and exports only its own slots. An
+anonymous structural declaration still occupies its stable slot but
+does not produce a live or parser-side export. Resource-type IDs are
+allocated from one builder-wide counter (not per-scope) so each
+`*ResourceType` has a stable instance-wide slot in `trSlice`.
+`AddResourceAlias` shares the same `*core.TypeResource` identity (and
+the same arena `ResourceID`) between the original export and the alias.
 
 ### TypeExpr — host's own type vocabulary
 
@@ -173,17 +178,18 @@ compounds `Record` / `Variant` / `Flags` / `Enum`.
    (`flattenFuncForStub` in `host/translate.go`). Resource-identity-
    independent (own/borrow both flatten to i32), so it runs at
    Build time directly off the `TypeExpr` tree.
+4. Translates the declared types and function signatures into the
+   `wasmparser` arena and synthesises one recursive component signature.
+   Named `AddType` declarations appear in the parser-side instance type
+   for their lexical scope; anonymous structural declarations do not.
 
-Per-instance work — translating `TypeExpr` and `FuncType` into
-`wasmparser` arena entries, synthesising the `*wasmparser.InstanceType`
-that `wacogo.WithInstanceImport` advertises to consuming components,
-and minting per-instance `*core.TypeResource` values — happens
-inside `Component.Instantiate` (`buildPerInstanceWpType` in
-`host/component.go`). One `*InstanceType` per `Instantiate`, with
-fresh `ResourceID`s reflecting any `WithResourceFrom` bindings, so
-that the subtype checker treats two instances of the same template
-as having distinct resource identities (per the canonical ABI's
-`(component, instantiation)` rule).
+`Component.Instantiate` then mints the fresh `*wasmparser.InstanceType`
+advertised through `wacogo.WithInstanceImport`, creates per-instance
+`*core.TypeResource` values, and materialises the live runtime type
+slots. The live root and nested exports use the same retained scope
+declarations as the parser signature. One `*InstanceType` is minted per
+root `Instantiate`; nested live instances remain part of that recursive
+signature rather than becoming independently importable instances.
 
 ## Stub module + per-instance host module
 

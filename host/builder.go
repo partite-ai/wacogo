@@ -111,9 +111,9 @@ func (b *Builder) AddResourceRef(exportName string) *ResourceTypeRef {
 }
 
 // AddType registers typ and returns a TypeRef usable wherever a
-// TypeExpr is accepted. exportName is the name typ is exported
-// under; pass "" to share a structural type internally without
-// exporting it.
+// TypeExpr is accepted. exportName is the name typ is exported under
+// from the root scope; pass "" to share a structural type internally
+// without exporting it.
 //
 // Nominal kinds (Record, Variant, Flags, Enum) must be registered
 // with a non-empty exportName and cannot be used inline. Structural
@@ -313,9 +313,21 @@ func buildScopeTree(b *Builder, comp *Component, root *scope) error {
 			})
 		}
 		for _, ts := range s.types {
+			if ts.name != "" {
+				if err := check(ts.name); err != nil {
+					return nil, err
+				}
+			}
 			if err := validateTopLevelTypeExpr(ts.expr); err != nil {
 				return nil, fmt.Errorf("wacogo/host: AddType %q: %w", ts.name, err)
 			}
+			tr := &typeRuntime{
+				exportName: ts.name,
+				ref:        ts.ref,
+				slot:       uint32(len(sr.types)),
+			}
+			comp.allTypes = append(comp.allTypes, tr)
+			sr.types = append(sr.types, tr)
 		}
 		for _, child := range s.nested {
 			if err := check(child.name); err != nil {

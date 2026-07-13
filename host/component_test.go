@@ -203,3 +203,90 @@ func TestInstantiateExportsResourceType(t *testing.T) {
 		t.Errorf(`ExportedType("r") = %T, want *core.TypeResource`, got)
 	}
 }
+
+func TestInstantiateExportsAddTypesByScope(t *testing.T) {
+	ctx := context.Background()
+	b, _ := newTestBuilder(t)
+	b.AddResource("resource-slot", nil)
+	b.AddType("shared", Variant{Cases: []Case{
+		{Name: "denied"},
+		{Name: "detail", Payload: String},
+	}})
+	b.AddType("", List{Elem: U32})
+	b.AddType("tail", Enum{Cases: []string{"ready", "done"}})
+
+	nested := b.AddNestedInstance("nested")
+	nested.AddType("shared", Record{Fields: []Field{{Name: "code", Type: U32}}})
+	nested.AddType("", Option{Inner: String})
+
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+
+	if got, want := len(comp.allTypes), 5; got != want {
+		t.Fatalf("len(allTypes) = %d, want %d", got, want)
+	}
+	if got, want := len(comp.root.types), 3; got != want {
+		t.Fatalf("len(root.types) = %d, want %d", got, want)
+	}
+	if got, want := len(comp.root.nested[0].types), 2; got != want {
+		t.Fatalf("len(nested.types) = %d, want %d", got, want)
+	}
+	for i, tr := range comp.root.types {
+		if got, want := tr.slot, uint32(i); got != want {
+			t.Fatalf("root.types[%d].slot = %d, want %d", i, got, want)
+		}
+	}
+	for i, tr := range comp.root.nested[0].types {
+		if got, want := tr.slot, uint32(i); got != want {
+			t.Fatalf("nested.types[%d].slot = %d, want %d", i, got, want)
+		}
+	}
+
+	inst, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+
+	rootShared, ok := inst.Core().ExportedType("shared").(core.TypeVariant)
+	if !ok {
+		t.Fatalf("root shared = %T, want core.TypeVariant", inst.Core().ExportedType("shared"))
+	}
+	if len(rootShared.Cases) != 2 || rootShared.Cases[1].Name != "detail" {
+		t.Fatalf("root shared cases = %#v", rootShared.Cases)
+	}
+	if _, ok := rootShared.Cases[1].Payload.(core.TypeString); !ok {
+		t.Fatalf("root shared detail payload = %T, want core.TypeString", rootShared.Cases[1].Payload)
+	}
+	if got := inst.Core().ExportedType(""); got != nil {
+		t.Fatalf("root anonymous type exported as %T, want nil", got)
+	}
+	rootTail, ok := inst.Core().ExportedType("tail").(core.TypeEnum)
+	if !ok || len(rootTail.Cases) != 2 || rootTail.Cases[1] != "done" {
+		t.Fatalf("root tail = %#v (%T), want enum[ready done]", rootTail, rootTail)
+	}
+
+	nestedInst := inst.Core().ExportedInstance("nested")
+	if nestedInst == nil {
+		t.Fatal(`ExportedInstance("nested") = nil`)
+	}
+	nestedShared, ok := nestedInst.ExportedType("shared").(core.TypeRecord)
+	if !ok {
+		t.Fatalf("nested shared = %T, want core.TypeRecord", nestedInst.ExportedType("shared"))
+	}
+	if len(nestedShared.Fields) != 1 || nestedShared.Fields[0].Name != "code" {
+		t.Fatalf("nested shared fields = %#v", nestedShared.Fields)
+	}
+	if _, ok := nestedShared.Fields[0].Type.(core.TypeU32); !ok {
+		t.Fatalf("nested shared code = %T, want core.TypeU32", nestedShared.Fields[0].Type)
+	}
+	if got := nestedInst.ExportedType(""); got != nil {
+		t.Fatalf("nested anonymous type exported as %T, want nil", got)
+	}
+	if got := nestedInst.ExportedType("tail"); got != nil {
+		t.Fatalf("root type leaked into nested exports as %T", got)
+	}
+}

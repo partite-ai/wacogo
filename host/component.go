@@ -40,6 +40,7 @@ type Component struct {
 	// which produce one stub module + one host module spanning the tree.
 	allFuncs     []*funcRuntime
 	allResources []*resourceRuntime
+	allTypes     []*typeRuntime
 
 	// resourceRefs holds the root-scope ResourceTypeRef declarations.
 	// resolveResourceRefs reads from here.
@@ -52,11 +53,22 @@ type Component struct {
 type scopeRuntime struct {
 	exportName   string // "" at the root
 	funcs        []*funcRuntime
+	types        []*typeRuntime
 	resources    []*resourceRuntime
 	resourceRefs []resourceRefDecl
 	aliases      []aliasRuntime
 	coreModules  []coreModuleRuntime
 	nested       []*scopeRuntime
+}
+
+// typeRuntime retains one AddType declaration after Builder.Build. slot is
+// stable across Component.Instantiate calls and indexes the AddType portion of
+// its lexical scope's live type space; resource and resource-ref slots precede
+// it.
+type typeRuntime struct {
+	exportName string
+	ref        *TypeRef
+	slot       uint32
 }
 
 type aliasRuntime struct {
@@ -194,28 +206,58 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	//    inside the root's BuildExports callback so each canon.Callee
 	//    captures the freshly-allocated root *ComponentInstance. Nested
 	//    *ComponentInstance shells are built INSIDE the root callback
-	//    too — they share the type-slot space and reference the same
-	//    funcExports — and attached as InstanceKindInstance entries on
-	//    the root.
+	//    too — they receive lexical AddType slot views, reference the same
+	//    funcExports, and attach as InstanceKindInstance entries on the root.
 	funcIdx := map[*funcRuntime]int{}
 	for i, fr := range c.allFuncs {
 		funcIdx[fr] = i
 	}
 
-	// Type slots are root-only (resources + resourceRefs share the root
-	// instance's type-index space; nested scopes never define their own
-	// resources in this iteration).
-	typeSlots := make([]core.InstanceTypeSlot, 0, len(c.allResources)+len(c.resourceRefs))
+	// Resource slots retain their existing root-instance layout. Each scope's
+	// AddType slots follow that reserved prefix in stable local declaration
+	// order. Nested live instances receive only their own AddType portion: this
+	// makes named types addressable without changing nested-resource ownership.
+	typeSlotBase := len(c.allResources) + len(c.resourceRefs)
+	rootResourceSlots := make([]core.InstanceTypeSlot, 0, typeSlotBase)
 	for i, rr := range c.allResources {
-		typeSlots = append(typeSlots, core.InstanceTypeSlot{Name: rr.exportName, Type: resourceTRs[i]})
+		rootResourceSlots = append(rootResourceSlots, core.InstanceTypeSlot{Name: rr.exportName, Type: resourceTRs[i]})
 	}
 	for _, rrd := range c.resourceRefs {
 		tr, ok := refResolved[rrd.ref]
 		if !ok {
 			return nil, fmt.Errorf("wacogo/host: ResourceTypeRef %q unresolved", rrd.name)
 		}
-		typeSlots = append(typeSlots, core.InstanceTypeSlot{Name: rrd.name, Type: tr})
+		rootResourceSlots = append(rootResourceSlots, core.InstanceTypeSlot{Name: rrd.name, Type: tr})
 	}
+	typeValues := make(map[*typeRuntime]core.Type, len(c.allTypes))
+	for _, tr := range c.allTypes {
+		t, err := buildCoreType(tr.ref, trSlice)
+		if err != nil {
+			return nil, fmt.Errorf("wacogo/host: AddType %q runtime type: %w", tr.exportName, err)
+		}
+		typeValues[tr] = t
+	}
+
+	// Keep each live scope's type space lexical while retaining stable indexes:
+	// every scope gets the existing resource-slot prefix followed by only its
+	// own AddType declarations. The root alone populates the resource prefix.
+	scopeTypeSlots := make(map[*scopeRuntime][]core.InstanceTypeSlot)
+	var assignScopeTypeSlots func(sr *scopeRuntime, root bool)
+	assignScopeTypeSlots = func(sr *scopeRuntime, root bool) {
+		slots := make([]core.InstanceTypeSlot, typeSlotBase+len(sr.types))
+		if root {
+			copy(slots[:typeSlotBase], rootResourceSlots)
+		}
+		for _, tr := range sr.types {
+			idx := typeSlotBase + int(tr.slot)
+			slots[idx] = core.InstanceTypeSlot{Name: tr.exportName, Type: typeValues[tr]}
+		}
+		scopeTypeSlots[sr] = slots
+		for _, child := range sr.nested {
+			assignScopeTypeSlots(child, false)
+		}
+	}
+	assignScopeTypeSlots(c.root, true)
 
 	coreInst, err := core.NewInstance(c.engine, &core.InstanceSpec{
 		Modules:            []api.Module{stubMod, hostMod},
@@ -262,7 +304,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 			var scopeExports func(sr *scopeRuntime) ([]core.InstanceExport, error)
 			scopeExports = func(sr *scopeRuntime) ([]core.InstanceExport, error) {
 				out := make([]core.InstanceExport, 0,
-					len(sr.funcs)+len(sr.resources)+len(sr.resourceRefs)+
+					len(sr.funcs)+len(sr.types)+len(sr.resources)+len(sr.resourceRefs)+
 						len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
 				for _, fr := range sr.funcs {
 					out = append(out, core.InstanceExport{
@@ -290,6 +332,15 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 						CompiledModule: cm.compiled,
 					})
 				}
+				for _, tr := range sr.types {
+					if tr.exportName == "" {
+						continue
+					}
+					out = append(out, core.InstanceExport{
+						Name: tr.exportName, Kind: core.InstanceKindType,
+						TypeIdx: uint32(typeSlotBase) + tr.slot,
+					})
+				}
 				for _, child := range sr.nested {
 					childExports, err := scopeExports(child)
 					if err != nil {
@@ -298,7 +349,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 					childExportsCopy := childExports
 					childInst, err := core.NewInstance(c.engine, &core.InstanceSpec{
 						BuildExports: func(*core.ComponentInstance) ([]core.InstanceTypeSlot, []core.InstanceExport, error) {
-							return nil, childExportsCopy, nil
+							return scopeTypeSlots[child], childExportsCopy, nil
 						},
 					})
 					if err != nil {
@@ -324,7 +375,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 					TypeIdx: uint32(len(c.allResources) + i),
 				})
 			}
-			return typeSlots, rootExports, nil
+			return scopeTypeSlots[c.root], rootExports, nil
 		},
 	})
 	if err != nil {
@@ -371,11 +422,12 @@ func (c *Component) resolveResourceRefs(opts []resourceFromOpt) (map[*ResourceTy
 	return resolved, nil
 }
 
-// buildComponentWpType pushes every wasmparser type the host Component
-// advertises into its arena, using each ResourceTypeRef's
-// placeholderRID for refs. Returns a frozen *ComponentType handle plus
-// the per-func *FuncType handle slice, indexed parallel to c.allFuncs.
-// Called once from Builder.Build; never reads per-Instantiate state.
+// buildComponentWpType pushes every wasmparser type needed by the host
+// Component into its arena and constructs the recursively advertised exports,
+// using each ResourceTypeRef's placeholderRID for refs. Returns a frozen
+// *ComponentType handle plus the per-func *FuncType handle slice, indexed
+// parallel to c.allFuncs. Called once from Builder.Build; never reads
+// per-Instantiate state.
 func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparser.FuncType, error) {
 	htb := c.arena.HostTypeBuilder()
 	xt := newInstTranslator(htb)
@@ -385,6 +437,21 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 	}
 	for _, rrd := range c.resourceRefs {
 		xt.refResID[rrd.ref] = rrd.placeholderRID
+	}
+
+	// Translate every AddType declaration, including anonymous structural
+	// declarations, before constructing exports. The TypeRef cache guarantees
+	// that function signatures and named exports refer to the same arena entry.
+	typeValTypes := make(map[*typeRuntime]wasmparser.ValTypeDesc, len(c.allTypes))
+	for _, tr := range c.allTypes {
+		vt, err := xt.instTranslateValType(tr.ref)
+		if err != nil {
+			return nil, nil, fmt.Errorf("wacogo/host: AddType %q parser type: %w", tr.exportName, err)
+		}
+		if vt.IsPrimitive {
+			return nil, nil, fmt.Errorf("wacogo/host: AddType %q unexpectedly resolved to a primitive", tr.exportName)
+		}
+		typeValTypes[tr] = vt
 	}
 
 	// Translate every func signature in build order so wpFuncTypes is
@@ -410,7 +477,7 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 	var buildScopeExports func(sr *scopeRuntime) (map[string]wasmparser.ComponentEntityType, []string)
 	buildScopeExports = func(sr *scopeRuntime) (map[string]wasmparser.ComponentEntityType, []string) {
 		exp := make(map[string]wasmparser.ComponentEntityType,
-			len(sr.funcs)+len(sr.resources)+len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
+			len(sr.funcs)+len(sr.types)+len(sr.resources)+len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
 		var order []string
 		for _, fr := range sr.funcs {
 			exp[fr.exportName] = wasmparser.ComponentEntityType{
@@ -445,6 +512,20 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 				ModuleID: modID,
 			}
 			order = append(order, cmRT.exportName)
+		}
+		for _, tr := range sr.types {
+			if tr.exportName == "" {
+				continue
+			}
+			vt := typeValTypes[tr]
+			exp[tr.exportName] = wasmparser.ComponentEntityType{
+				Kind: wasmparser.EntityType,
+				TypeRef: wasmparser.ComponentAnyTypeID{
+					Kind:  wasmparser.AnyTypeDefined,
+					Index: uint32(vt.TypeID),
+				},
+			}
+			order = append(order, tr.exportName)
 		}
 		for _, child := range sr.nested {
 			childExp, childOrder := buildScopeExports(child)

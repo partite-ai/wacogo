@@ -55,8 +55,10 @@ func (ib *InstanceBuilder) AddResourceRef(exportName string) *ResourceTypeRef {
 	return r
 }
 
-// AddType registers typ in this nested instance's type space. See
-// Builder.AddType for the nominal/structural rules.
+// AddType registers typ in this nested instance's type space. A non-empty
+// exportName is local to this instance scope; pass "" only for an anonymous
+// structural type shared by declarations in this component. See Builder.AddType
+// for the nominal/structural rules.
 func (ib *InstanceBuilder) AddType(exportName string, typ TypeExpr) *TypeRef {
 	ref := &TypeRef{declExpr: typ}
 	ib.scope.types = append(ib.scope.types, typeDecl{name: exportName, expr: typ, ref: ref})

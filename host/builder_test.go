@@ -105,6 +105,17 @@ func TestBuild_DuplicateFuncName_Errors(t *testing.T) {
 	}
 }
 
+func TestBuild_AddTypeNameCollisionWithinScopeErrors(t *testing.T) {
+	b, _ := newTestBuilder(t)
+	b.AddType("duplicate", Enum{Cases: []string{"a"}})
+	b.AddFunction("duplicate", &FuncType{}, func(context.Context, *core.CallContext, *ComponentInstance, []uint64) error {
+		return nil
+	})
+	if _, err := b.Build(context.Background()); err == nil {
+		t.Fatal("want duplicate AddType export-name error")
+	}
+}
+
 func TestBuilder_AddResourceRef_ReturnsDistinctRefs(t *testing.T) {
 	ctx := context.Background()
 	e := core.NewEngine(ctx)
