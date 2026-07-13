@@ -1,7 +1,8 @@
-# Instantiation Type Checking
+# Instantiation Import Checking
 
-How `(*core.Component).Instantiate` validates host-supplied imports against
-the component's declared import types before any plan step executes.
+How `(*core.Component).CheckInstantiation` and `Instantiate` validate
+host-supplied imports against a component's declarations before any plan step
+executes.
 
 Spec reference:
 [Subtyping.md](https://github.com/WebAssembly/component-model/blob/main/design/mvp/Subtyping.md)
@@ -10,25 +11,30 @@ and the `(instantiate ...)` rules in
 
 ## Why this exists
 
-Without the pre-check, mismatched imports surface late: a wrong-arity func
+Without import checking, mismatched imports surface late: a wrong-arity func
 import would not fail until lift; an unsatisfied `(eq $r)` resource
 constraint would not fail at all (the resource handles would silently flow
 through with mismatched identities and the bug would manifest as a trap or
 data corruption inside a callee). The wasm-tools spec suite has several
 `assert_unlinkable` cases that exercise exactly these failures (e.g.
 `instance.wast` lines 287/294/301/308/315/322 — six `mismatched resource
-types`). The pre-check folds all of them into one authoritative entry
-point that runs before any imports are wired.
+types`). Import checking folds all of them into one authoritative helper that
+runs before any imports are wired.
 
-The check also keeps the runtime kind check in `validateImportKind`
-(`internal/core/engine_instantiate.go`) honest: that function only knows
-the Go type of a supplied arg, not its structural type. The pre-check
-enforces the structural rules; the runtime kind check stays as a
-last-ditch guard for host-supplied args that have no wasmparser handle.
+The helper composes three distinct checks:
+
+1. every declared import has a non-nil provider;
+2. `validateImportKind` confirms that the provider's Go type matches the
+   declared component-model sort;
+3. providers carrying wasmparser type handles are checked for structural and
+   resource-identity compatibility.
+
+The public `CheckInstantiation` method and top-level `Instantiate` call this
+same helper, so their import validation cannot drift.
 
 ## Where it runs
 
-Two layers, with a hard split:
+There are three relevant points in the lifecycle:
 
 - **Load** (`internal/core/engine_load.go`). Validating parser walks the
   component binary; the validator (`*wasmparser.Validator`, owned by the
@@ -45,26 +51,52 @@ Two layers, with a hard split:
   `*ComponentInstance.wpInstance`. No subtype check fires at load
   time.
 
-- **Instantiate** (`internal/core/engine_instantiate.go`,
-  `(*Engine).instantiate`). Right after option parsing and before the
-  plan loop, `cfg.imports` is type-switched into a
-  `map[string]any` of handle values and handed to
-  `(*wasmparser.ComponentType).CheckInstantiation`. On error the
-  Instantiate call returns with a `wacogo: instantiate:` prefix — no
-  plan step runs, no core module is instantiated.
+- **Check imports** (`internal/core/engine_instantiate.go`,
+  `(*Component).checkInstantiationImports`). The helper checks required
+  presence and Go runtime kind, then type-switches providers with parser
+  metadata into a `map[string]any` for
+  `(*wasmparser.ComponentType).CheckInstantiation`.
+
+- **Public check or execution** (`internal/core/component.go` and
+  `internal/core/engine_instantiate.go`). `Component.CheckInstantiation`
+  applies its options and returns the helper's result without executing the
+  component. Top-level `Instantiate` first rejects a closed Engine, applies
+  the same options and helper, and only then starts the instantiation plan.
 
 The split is deliberate. Load produces type handles but never compares
 them; one component can be loaded and instantiated against many different
-provider sets. Instantiate is the only place a complete arg map exists,
-and it is the only place subtype checking is meaningful.
+provider sets. Import options provide the concrete argument map needed for
+subtype checking, independently of whether the caller then executes the
+component.
+
+## What `CheckInstantiation` does not guarantee
+
+`CheckInstantiation` is deliberately an import-metadata check, not a dry run
+of the complete instantiation process:
+
+- A loaded `Component` has no independent `Close` operation. The check reads
+  its immutable metadata and does not inspect whether its owning Engine is
+  still open. It likewise does not inspect whether supplied Components or
+  ComponentInstances are closed, poisoned, or otherwise usable.
+- A provider without a wasmparser type handle receives presence and runtime-
+  kind checks only. Host and synthetic providers may fall into this category.
+- Type and value imports have no parser-side structural handles today, so only
+  their presence and runtime kind are checked.
+- The check does not execute the instantiation plan, allocate runtime state,
+  resolve external resources, or run a core start function. Any of those steps
+  can still make `Instantiate` fail.
+
+Consequently, a nil result means only that the checks above passed; it is not a
+promise that a subsequent `Instantiate` call will succeed.
 
 ## Subtype rules per import kind
 
-The wasmparser-side dispatch lives in
+The wasmparser-side subtype dispatch lives in
 `(*ComponentType).CheckInstantiation` in `wasmparser/public_instantiate.go`.
-For each declared import (in `compType.ImportOrder`) the checker either
-accepts a missing arg (silent skip — instance imports without a handle
-are picked up by the runtime path) or type-switches the arg.
+For each declared import (in `compType.ImportOrder`) the checker type-switches
+supplied parser handles. The wasmparser API itself silently skips missing
+arguments because it is also useful to lower-level callers; the core helper
+enforces required-import presence before invoking it.
 
 ### Func imports — `*wasmparser.FuncType`
 
@@ -128,10 +160,10 @@ If not, the missing export is reported by name (the same
 
 ### Value and type imports
 
-Out of scope for `CheckInstantiation`. The runtime path
-(`validateImportKind`) verifies the Go-level kind for type imports, but
-no structural check runs. A future change could add handles for these
-once a concrete spec case demands it.
+Out of scope for parser-level structural checking. The shared core helper
+still verifies presence and Go-level kind via `validateImportKind`, but no
+structural subtype check runs. A future change could add handles for these once
+a concrete spec case demands it.
 
 ## Resource identity and `(eq $r)` constraints
 
@@ -165,9 +197,11 @@ instance is later supplied as an arg.
 
 ## Error model
 
-Errors flow up through `CheckInstantiation` wrapped with the import name
-(`import %q: <inner>`). The engine wrapper adds `wacogo: instantiate:`
-on top. Phrasing for the spec-bearing failure modes is fixed:
+Parser errors flow up through wasmparser's `CheckInstantiation`, wrapped with
+the import name (`import %q: <inner>`). The core helper retains the existing
+`wacogo: instantiate:` prefix for those errors. Missing-provider and runtime-
+kind errors originate in the core helper. Phrasing for the spec-bearing
+failure modes is fixed:
 
 - `mismatched resource types` — a resource-equality constraint can't be
   satisfied (emitted from `checkResourceMatch`).
@@ -180,20 +214,14 @@ These strings are matched verbatim by the wasm-tools spec test harness;
 do not paraphrase without checking the corresponding `assert_unlinkable`
 fixture.
 
-## What the runtime path still does
+## Runtime defense in depth
 
-`validateImportKind` (in `engine_instantiate.go`) runs unchanged for
-every import after the pre-check. Its job is the Go-level kind check:
-the supplied `any` must be a `*ExportedFunc` for `SortFunc`, a
-`*CompiledModule` for `SortCoreModule`, etc. This catches the case where
-the host calls `WithFuncImport(name, fn)` for an import declared as an
-instance — a bug `CheckInstantiation` cannot see, because that arg never
-makes it into the `map[string]any` it receives (the type switch in
-`(*Engine).instantiate` only forwards args whose Go type is recognized).
+`validateImportKind` requires a `*ExportedFunc` for `SortFunc`, a
+`*CompiledModule` for `SortCoreModule`, and so on. The shared helper runs it
+before parser subtyping, which catches misuse such as supplying
+`WithFuncImport(name, fn)` for a declared instance import even when no parser
+handle is available.
 
-Together: the pre-check catches structural mismatches between
-component-sourced args and the consumer's declared types; the runtime
-kind check catches misuse of the `WithXImport` options. Anything that
-slips past both surfaces later as a plan-step error from
-`planImport*.execute`, which formats the same `expected X found Y`
-messages.
+`instantiateWithParentCfg` retains its own runtime-kind guard for internal
+nested-component instantiation paths. Anything that cannot be decided from
+metadata still surfaces later as a plan-step or start-function error.

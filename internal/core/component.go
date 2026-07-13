@@ -107,6 +107,14 @@ func (cfg *instantiateConfig) put(name string, arg any) {
 	cfg.imports[wasmparser.CanonicalizeImportName(name)] = arg
 }
 
+func applyInstantiateOptions(opts []InstantiateOption) *instantiateConfig {
+	cfg := &instantiateConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return cfg
+}
+
 // WithFuncImport satisfies a named func import with the given *ExportedFunc.
 func WithFuncImport(name string, f *ExportedFunc) InstantiateOption {
 	return func(cfg *instantiateConfig) { cfg.put(name, f) }
@@ -135,4 +143,18 @@ func WithTypeImport(name string, t Type) InstantiateOption {
 // Instantiate creates a running instance of this component.
 func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) (*ComponentInstance, error) {
 	return c.engine.instantiate(ctx, c, opts...)
+}
+
+// CheckInstantiation validates the supplied imports without executing the
+// component's instantiation plan or any core start function. It checks that
+// every declared import is present, non-nil, and of the expected runtime kind.
+// Providers carrying parser type metadata are also checked for component-model
+// subtype compatibility.
+//
+// CheckInstantiation does not check whether the component's engine or a
+// provider is open and usable, and providers without parser type metadata get
+// only presence and runtime-kind checks. A nil result does not guarantee that
+// Instantiate will succeed.
+func (c *Component) CheckInstantiation(opts ...InstantiateOption) error {
+	return c.checkInstantiationImports(applyInstantiateOptions(opts))
 }

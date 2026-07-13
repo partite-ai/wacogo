@@ -93,6 +93,13 @@ individual imports manually, use `wacogo.WithInstanceImport`,
 `wacogo.WithFuncImport`, `wacogo.WithModuleImport`,
 `wacogo.WithComponentImport`, or `wacogo.WithTypeImport`.
 
+`comp.CheckInstantiation(opts...)` runs the same non-executing import
+validation that `Instantiate` uses: every declared import must be present and
+have the expected runtime kind, and providers carrying parser type metadata
+must satisfy component-model subtyping. It does not check engine or provider
+liveness and does not execute the instantiation plan or core start functions,
+so a nil result is not a guarantee that `Instantiate` will succeed.
+
 Runnable demo: [`examples/wasi-greet/`](examples/wasi-greet/).
 
 ---

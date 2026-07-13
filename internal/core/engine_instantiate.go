@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync/atomic"
 
 	"github.com/partite-ai/wacogo/internal/canon"
@@ -98,40 +99,9 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 	if e.closed.Load() {
 		return nil, ErrEngineClosed
 	}
-	cfg := &instantiateConfig{}
-	for _, opt := range opts {
-		opt(cfg)
-	}
-
-	// Pre-check instance-typed imports against the component's declared
-	// type before running the plan. CheckInstantiation silently skips
-	// imports that have no typed handle (e.g. synthetic host-provided
-	// instances); those fall through to the existing runtime machinery.
-	if component.wpType != nil {
-		args := make(map[string]any, len(cfg.imports))
-		for name, v := range cfg.imports {
-			switch ap := v.(type) {
-			case *ComponentInstance:
-				if ap.wpInstance != nil {
-					args[name] = ap.wpInstance
-				}
-			case *ExportedFunc:
-				if ft := ap.ParserFunctionType(); ft != nil {
-					args[name] = ft
-				}
-			case *CompiledModule:
-				if ap.wpModuleType != nil {
-					args[name] = ap.wpModuleType
-				}
-			case *Component:
-				if ap.wpType != nil {
-					args[name] = ap.wpType
-				}
-			}
-		}
-		if err := component.wpType.CheckInstantiation(args); err != nil {
-			return nil, fmt.Errorf("wacogo: instantiate: %w", err)
-		}
+	cfg := applyInstantiateOptions(opts)
+	if err := component.checkInstantiationImports(cfg); err != nil {
+		return nil, err
 	}
 
 	inst, err := e.instantiateWithParentCfg(ctx, component, nil, cfg)
@@ -166,11 +136,65 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 }
 
 func (e *Engine) instantiateWithParent(ctx context.Context, component *Component, parentState *instantiationState, opts ...InstantiateOption) (*ComponentInstance, error) {
-	cfg := &instantiateConfig{}
-	for _, opt := range opts {
-		opt(cfg)
-	}
+	cfg := applyInstantiateOptions(opts)
 	return e.instantiateWithParentCfg(ctx, component, parentState, cfg)
+}
+
+// checkInstantiationImports is the shared, non-executing import validation
+// path for Component.CheckInstantiation and top-level Instantiate. It checks
+// required-import presence and runtime kind before asking wasmparser to check
+// providers that carry parser type metadata.
+func (component *Component) checkInstantiationImports(cfg *instantiateConfig) error {
+	args := make(map[string]any, len(component.imports))
+	for _, imp := range component.imports {
+		name := wasmparser.CanonicalizeImportName(imp.Name)
+		provider, ok := cfg.imports[name]
+		if !ok || isNilImportProvider(provider) {
+			return fmt.Errorf("wacogo: import %q: was not found", imp.Name)
+		}
+		if err := validateImportKind(imp, provider); err != nil {
+			return err
+		}
+
+		switch p := provider.(type) {
+		case *ComponentInstance:
+			if p.wpInstance != nil {
+				args[name] = p.wpInstance
+			}
+		case *ExportedFunc:
+			if ft := p.ParserFunctionType(); ft != nil {
+				args[name] = ft
+			}
+		case *CompiledModule:
+			if p.wpModuleType != nil {
+				args[name] = p.wpModuleType
+			}
+		case *Component:
+			if p.wpType != nil {
+				args[name] = p.wpType
+			}
+		}
+	}
+
+	if component.wpType != nil {
+		if err := component.wpType.CheckInstantiation(args); err != nil {
+			return fmt.Errorf("wacogo: instantiate: %w", err)
+		}
+	}
+	return nil
+}
+
+func isNilImportProvider(provider any) bool {
+	if provider == nil {
+		return true
+	}
+	v := reflect.ValueOf(provider)
+	switch v.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return v.IsNil()
+	default:
+		return false
+	}
 }
 
 // instantiateWithParentCfg is the shared body of instantiateWithParent, taking
