@@ -69,6 +69,14 @@ type ValEnum = core.ValEnum
 // ValOwnHandle is an owned resource handle value.
 type ValOwnHandle = core.ValOwnHandle
 
+// NewValOwnHandle constructs a host-created owned resource value for
+// passing to Func.Call. rt and rep must identify a resource owned by the
+// same defining instance. If the value is not transferred to a call, the
+// caller must invoke Drop to release it.
+func NewValOwnHandle(rt *TypeResource, rep uint32) *ValOwnHandle {
+	return core.NewValOwnHandle(rt, rep)
+}
+
 // NewValListOf constructs a *ValList whose elements are elems.
 func NewValListOf[T Val](elems ...T) *ValList {
 	return core.NewValListOf[T](elems...)
