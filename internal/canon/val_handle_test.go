@@ -2,6 +2,8 @@ package canon
 
 import (
 	"context"
+	"errors"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -73,6 +75,30 @@ func TestValOwnHandle_TransferOwnIntoTable(t *testing.T) {
 	}
 	if h.Rep() != 7 {
 		t.Fatalf("rep = %d, want 7", h.Rep())
+	}
+}
+
+func TestValOwnHandle_TransferOwnStopsLeakCleanup(t *testing.T) {
+	rt := &testResourceType{name: "R"}
+	src := newStubResourceTable()
+	val := liftIntoVal(t, src.IssueOwn(rt, 7))
+	if val.cleanup == (runtime.Cleanup{}) {
+		t.Fatal("valid handle has no cleanup token")
+	}
+
+	dst := newStubResourceTable()
+	if _, err := val.TransferOwn(dst); err != nil {
+		t.Fatalf("TransferOwn: %v", err)
+	}
+	if val.cleanup != (runtime.Cleanup{}) {
+		t.Fatal("transferred handle retained cleanup token")
+	}
+
+	if _, err := val.TransferOwn(dst); err == nil {
+		t.Fatal("second TransferOwn unexpectedly succeeded")
+	}
+	if val.cleanup != (runtime.Cleanup{}) {
+		t.Fatal("failed second transfer restored cleanup token")
 	}
 }
 
@@ -166,6 +192,73 @@ func TestValOwnHandle_DropRunsDtor(t *testing.T) {
 	}
 	if !called {
 		t.Error("dtor not called")
+	}
+}
+
+func TestValOwnHandle_DropStopsLeakCleanupOnDtorError(t *testing.T) {
+	wantErr := errors.New("dtor failed")
+	rt := &testResourceTypeWithDtor{
+		name: "R",
+		dtor: func(context.Context, uint32) error {
+			return wantErr
+		},
+	}
+	src := newStubResourceTable()
+	val := liftIntoVal(t, src.IssueOwn(rt, 99))
+	if val.cleanup == (runtime.Cleanup{}) {
+		t.Fatal("valid handle has no cleanup token")
+	}
+
+	if err := val.Drop(context.Background()); !errors.Is(err, wantErr) {
+		t.Fatalf("Drop error = %v, want %v", err, wantErr)
+	}
+	if val.cleanup != (runtime.Cleanup{}) {
+		t.Fatal("dropped handle retained cleanup token")
+	}
+
+	if err := val.Drop(context.Background()); err != nil {
+		t.Fatalf("second Drop: %v", err)
+	}
+	if val.cleanup != (runtime.Cleanup{}) {
+		t.Fatal("idempotent Drop restored cleanup token")
+	}
+}
+
+func TestValOwnHandle_FailedTerminalOperationsKeepLeakCleanup(t *testing.T) {
+	rt := &testResourceType{name: "R"}
+	src := newStubResourceTable()
+	val := liftIntoVal(t, src.IssueOwn(rt, 11))
+	if val.cleanup == (runtime.Cleanup{}) {
+		t.Fatal("valid handle has no cleanup token")
+	}
+
+	dst := newStubResourceTable()
+	task := &Task{}
+	borrow, err := val.LendTo(dst, task)
+	if err != nil {
+		t.Fatalf("LendTo: %v", err)
+	}
+	if _, err := val.TransferOwn(dst); err == nil {
+		t.Fatal("TransferOwn with outstanding borrow unexpectedly succeeded")
+	}
+	if err := val.Drop(context.Background()); err == nil {
+		t.Fatal("Drop with outstanding borrow unexpectedly succeeded")
+	}
+	if val.cleanup == (runtime.Cleanup{}) {
+		t.Fatal("valid handle lost cleanup token after failed operations")
+	}
+
+	if err := borrow.Drop(context.Background()); err != nil {
+		t.Fatalf("borrow.Drop: %v", err)
+	}
+	if err := task.End(); err != nil {
+		t.Fatalf("task.End: %v", err)
+	}
+	if err := val.Drop(context.Background()); err != nil {
+		t.Fatalf("Drop after borrow release: %v", err)
+	}
+	if val.cleanup != (runtime.Cleanup{}) {
+		t.Fatal("successful Drop retained cleanup token")
 	}
 }
 
