@@ -401,6 +401,7 @@ type ValOwnHandle struct {
 	rep      uint32
 	numLends uint32
 	state    valHandleState
+	cleanup  runtime.Cleanup
 }
 
 func (h *ValOwnHandle) val() {}
@@ -414,7 +415,7 @@ func (h *ValOwnHandle) IssueOwn(rt ResourceType, rep uint32) ResourceHandle {
 	h.rt = rt
 	h.rep = rep
 	h.state = valHandleValid
-	runtime.AddCleanup(h, leakWarn, leakInfo{rt: rt, rep: rep})
+	h.cleanup = runtime.AddCleanup(h, leakWarn, leakInfo{rt: rt, rep: rep})
 	return h
 }
 
@@ -471,6 +472,7 @@ func (h *ValOwnHandle) TransferOwn(target TransferTarget) (ResourceHandle, error
 	rt := h.rt
 	rep := h.rep
 	h.state = valHandleTransferred
+	h.stopCleanup()
 	return target.IssueOwn(rt, rep), nil
 }
 
@@ -494,6 +496,7 @@ func (h *ValOwnHandle) Drop(ctx context.Context) error {
 	rt := h.rt
 	rep := h.rep
 	h.state = valHandleDropped
+	h.stopCleanup()
 	dtor := rt.Destructor()
 	if dtor == nil {
 		return nil
@@ -507,6 +510,15 @@ func (h *ValOwnHandle) Drop(ctx context.Context) error {
 	}
 	defer defining.Exit(ctx)
 	return dtor(ctx, rep)
+}
+
+func (h *ValOwnHandle) stopCleanup() {
+	cleanup := h.cleanup
+	h.cleanup = runtime.Cleanup{}
+	cleanup.Stop()
+	// Keep h reachable across Stop so the runtime cannot queue the cleanup
+	// concurrently just before Stop removes it.
+	runtime.KeepAlive(h)
 }
 
 func (h *ValOwnHandle) stateName() string {

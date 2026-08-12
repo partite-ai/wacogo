@@ -452,7 +452,12 @@ Invariants:
   release closure registered with `task.AddRelease` always fires.
 - **Leak warning, not finalizer-driven dtor.** `IssueOwn` registers
   a `runtime.AddCleanup` that logs a leak warning if the handle is
-  GC'd while still valid. The dtor is *not* invoked from a
+  GC'd while still valid. A successful `TransferOwn` or `Drop`
+  cancels that cleanup as it enters the corresponding terminal
+  state; failed operations leave it armed while the handle remains
+  valid. Cancellation keeps the handle reachable across
+  `runtime.Cleanup.Stop` so the warning cannot race with an explicit
+  ownership transfer or drop. The dtor is *not* invoked from a
   finalizer — running it would require entering the defining
   instance from a goroutine the runtime did not control.
 
