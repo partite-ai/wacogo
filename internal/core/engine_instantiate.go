@@ -1222,7 +1222,11 @@ func (step *planResolveType) execute(_ context.Context, s *instantiationState) e
 	// Sync the instance index space so instanceImportResolver can find
 	// instances populated by preceding plan steps (imports and sub-instances).
 	s.inst.instances = s.componentInstances
-	s.inst.types[step.typeID] = r.resolve(&resolverCtx{inst: s.inst, imports: s.imports, state: s})
+	typ := r.resolve(&resolverCtx{inst: s.inst, imports: s.imports, state: s})
+	if typ == nil {
+		return fmt.Errorf("wacogo: planResolveType: nil type at %d (missing import?)", step.typeID)
+	}
+	s.inst.types[step.typeID] = typ
 	return nil
 }
 

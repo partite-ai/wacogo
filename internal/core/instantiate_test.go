@@ -641,3 +641,26 @@ func TestInstantiateRejectsModuleArgWithWrongType(t *testing.T) {
 		t.Fatal("expected mismatch error from pre-check, got nil")
 	}
 }
+
+func TestInstantiate_ImportEqType(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+
+	f, err := os.Open("testdata/import-eq-type.wasm")
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer f.Close()
+
+	comp, err := engine.LoadComponent(ctx, f)
+	if err != nil {
+		t.Fatalf("LoadComponent: %v", err)
+	}
+
+	inst, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+}
