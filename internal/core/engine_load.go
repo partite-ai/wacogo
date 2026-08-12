@@ -553,6 +553,15 @@ func (l *componentLoader) processImportSection(sec *wasmparser.ValidatedComponen
 				index: idx,
 			})
 		case SortType:
+			// If the bound of the imported type is an eq bound, we know the type
+			// without actually needing to import it
+			if tr, ok := item.Import.Type.(wasmparser.TypeRefType); ok {
+				if eq, ok := tr.Bounds.(wasmparser.TypeBoundsEq); ok {
+					l.allocType(indexResolver{idx: eq.Index})
+					return nil
+				}
+			}
+
 			// Direct component-level type imports ((import "T" (type ...)))
 			// resolve at instantiate time by reading the TypeArg from the
 			// instantiation args bag.
