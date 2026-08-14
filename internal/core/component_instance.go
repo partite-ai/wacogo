@@ -30,17 +30,7 @@ type ComponentInstance struct {
 	// poisoned is set by Poison when a trap leaves the instance in an
 	// unreliable state. Non-nil makes Enter fail; nil means usable.
 	poisoned error
-	// types is the resolved type index space for this instance, populated by
-	// planResolveType steps during instantiation.
-	types []Type
 
-	// parent points to the enclosing ComponentInstance (nil for the root).
-	// Used by aliasResolver to walk up the scope chain.
-	parent *ComponentInstance
-	// instances is the component instance index space for this instance
-	// (imported + locally-instantiated sub-instances, in declaration order).
-	// Used by instanceImportResolver.
-	instances []*ComponentInstance
 	// wpInstance is the opaque wasmparser instance-type handle minted at
 	// creation time (fresh ResourceIDs for any resources this instance
 	// defines). Nil for sub-component instances and for instances whose
@@ -69,7 +59,7 @@ type exportEntry struct {
 	instance       *ComponentInstance
 	compiledModule *CompiledModule // for SortCoreModule exports
 	component      *Component      // for SortComponent exports
-	typeIdx        uint32          // populated only for SortType entries
+	typ            Type            // populated only for SortType entries
 }
 
 // ParserInstanceType returns the wasmparser instance-type handle for
@@ -125,10 +115,7 @@ func (i *ComponentInstance) exportedType(name string) Type {
 	if !ok || e.kind != SortType {
 		return nil
 	}
-	if int(e.typeIdx) >= len(i.types) {
-		return nil
-	}
-	return i.types[e.typeIdx]
+	return e.typ
 }
 
 // ExportedType returns the Type exported under the given name, or nil

@@ -52,11 +52,20 @@ type Component struct {
 type scopeRuntime struct {
 	exportName   string // "" at the root
 	funcs        []*funcRuntime
+	types        []typeRuntime
 	resources    []*resourceRuntime
 	resourceRefs []resourceRefDecl
 	aliases      []aliasRuntime
 	coreModules  []coreModuleRuntime
 	nested       []*scopeRuntime
+}
+
+// typeRuntime is a named (exported) defined-type declaration. AddType
+// calls with an empty name share a type internally without exporting
+// it and never reach here.
+type typeRuntime struct {
+	exportName string
+	ref        *TypeRef
 }
 
 type aliasRuntime struct {
@@ -136,12 +145,214 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	reallocAPI := stubMod.ExportedFunction("realloc")
 	stubRealloc := wrapRealloc(reallocAPI)
 
-	// 4. Per-instance TypeResources, one per entry in comp.allResources.
-	//    Per-resource dtor closures capture h directly — no UserData type
-	//    assertion.
-	resourceTRs := make([]*core.TypeResource, len(c.allResources))
-	resourceTRIdx := make(map[*resourceRuntime]int, len(c.allResources))
-	for i, rr := range c.allResources {
+	// 4. Build a per-instance wasmparser ComponentType reflecting each
+	//    ResourceTypeRef's lender-supplied resource identity. The
+	//    per-func wpFuncType handles minted here are the same identities
+	//    advertised in the resulting *InstanceType, so guests' import
+	//    type checks pass.
+	origins, err := buildInstanceOrigins(c, iopts.resourceFroms)
+	if err != nil {
+		return nil, err
+	}
+	wpInst := c.wpComponentType.NewInstance()
+	if len(origins) > 0 {
+		wpInst.SetResourceOrigin(origins)
+	}
+
+	// 5. Build the core instance. Its contents refer back to it, so they
+	//    are assembled in the BuildContents callback.
+	coreInst, err := core.NewInstance(c.engine, &core.InstanceSpec{
+		Modules:            []api.Module{stubMod, hostMod},
+		ParserInstanceType: wpInst,
+		ExternTable:        h.extTable,
+		BuildExports: func(inst *core.ComponentInstance) ([]core.InstanceExport, error) {
+			// Mint the resource types inst defines. Every resource in
+			// the tree is defined here whichever scope declares it:
+			// this instance's canon table holds the handles, its
+			// extern table backs the dtors, and its reentrance gate
+			// wraps them. Nested scopes are namespaces over those
+			// definitions, not full components of their own.
+			res, err := c.newInstanceResources(inst, stubMod, h, refResolved)
+			if err != nil {
+				return nil, err
+			}
+			// Resolve the named AddType declarations across the tree.
+			namedTypes, err := c.buildNamedTypes(res)
+			if err != nil {
+				return nil, err
+			}
+			// Exported funcs, flat across the tree and indexed parallel
+			// to c.allFuncs so wpFuncTypes[i] matches.
+			funcExports, err := c.buildFuncExports(inst, stubMod, stubMemory, reallocAPI, res.byComponentResourceTypeID)
+			if err != nil {
+				return nil, err
+			}
+			rootExports, err := c.buildScopeExports(c.root, res, namedTypes, funcExports)
+			if err != nil {
+				return nil, err
+			}
+			// resourceRef exports live on the root only.
+			for _, rrd := range c.resourceRefs {
+				rootExports = append(rootExports, core.InstanceExport{
+					Name: rrd.name, Kind: core.InstanceKindType,
+					Type: refResolved[rrd.ref],
+				})
+			}
+			return rootExports, nil
+		},
+	})
+	if err != nil {
+		_ = stubMod.Close(ctx)
+		_ = hostMod.Close(ctx)
+		return nil, err
+	}
+
+	h.core = coreInst
+	h.hostCallCC = core.NewCallContext(h.core, nil, stubMemory, stubRealloc)
+
+	return h, nil
+}
+
+// buildFuncExports produces one *core.ExportedFunc per entry in
+// c.allFuncs, in the same order, each bound to a canon callee that
+// enters inst.
+func (c *Component) buildFuncExports(
+	inst *core.ComponentInstance,
+	stubMod api.Module,
+	stubMemory api.Memory,
+	reallocAPI api.Function,
+	trSlice []*core.TypeResource,
+) ([]*core.ExportedFunc, error) {
+	funcExports := make([]*core.ExportedFunc, len(c.allFuncs))
+	for i, fr := range c.allFuncs {
+		coreFn := stubMod.ExportedFunction(fr.stubExportName)
+		if coreFn == nil {
+			return nil, fmt.Errorf("wacogo/host: stub missing export %q", fr.stubExportName)
+		}
+		coreFT, err := buildCoreFuncType(fr.userFT, trSlice)
+		if err != nil {
+			return nil, fmt.Errorf("wacogo/host: func %q: %w", fr.exportName, err)
+		}
+		callee := canon.Callee{
+			CallSide: canon.CallSide{
+				Instance:       core.InstanceAsCanon(inst),
+				Memory:         stubMemory,
+				Realloc:        reallocAPI,
+				StringEncoding: canon.EncUTF8,
+			},
+			CoreFunc: coreFn,
+		}
+		binding := canon.NewCallBinding(
+			core.FuncTypeParamsAsCanon(coreFT),
+			core.FuncTypeResultsAsCanon(coreFT),
+			callee,
+		)
+		funcExports[i] = core.NewExportedFunc(
+			fr.exportName,
+			core.NewFunc(coreFT, binding),
+			c.wpFuncTypes[i],
+		)
+	}
+	return funcExports, nil
+}
+
+// buildScopeExports emits the InstanceExport list for one scope,
+// recursing for nested instances. A nested instance is a bare shell —
+// no modules, no parser type, no extern table — that names the types
+// its enclosing instance defines. It defines nothing itself.
+func (c *Component) buildScopeExports(
+	sr *scopeRuntime,
+	res *instanceResources,
+	namedTypes map[*TypeRef]core.Type,
+	funcExports []*core.ExportedFunc,
+) ([]core.InstanceExport, error) {
+	funcIdx := map[*funcRuntime]int{}
+	for i, fr := range c.allFuncs {
+		funcIdx[fr] = i
+	}
+	out := make([]core.InstanceExport, 0,
+		len(sr.funcs)+len(sr.types)+len(sr.resources)+len(sr.resourceRefs)+
+			len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
+	for _, fr := range sr.funcs {
+		out = append(out, core.InstanceExport{
+			Name:    fr.exportName,
+			Kind:    core.InstanceKindFunc,
+			FuncVal: funcExports[funcIdx[fr]],
+		})
+	}
+	for _, tr := range sr.types {
+		out = append(out, core.InstanceExport{
+			Name: tr.exportName, Kind: core.InstanceKindType,
+			Type: namedTypes[tr.ref],
+		})
+	}
+	for _, rr := range sr.resources {
+		out = append(out, core.InstanceExport{
+			Name: rr.exportName, Kind: core.InstanceKindType,
+			Type: res.trOf[rr],
+		})
+	}
+	for _, ar := range sr.aliases {
+		out = append(out, core.InstanceExport{
+			Name: ar.exportName, Kind: core.InstanceKindType,
+			Type: res.trOf[ar.target],
+		})
+	}
+	for _, cm := range sr.coreModules {
+		out = append(out, core.InstanceExport{
+			Name:           cm.exportName,
+			Kind:           core.InstanceKindCoreModule,
+			CompiledModule: cm.compiled,
+		})
+	}
+	for _, child := range sr.nested {
+		childExports, err := c.buildScopeExports(child, res, namedTypes, funcExports)
+		if err != nil {
+			return nil, err
+		}
+		childInst, err := core.NewInstance(c.engine, &core.InstanceSpec{
+			BuildExports: func(*core.ComponentInstance) ([]core.InstanceExport, error) {
+				return childExports, nil
+			},
+		})
+		if err != nil {
+			return nil, fmt.Errorf("wacogo/host: nested instance %q: %w", child.exportName, err)
+		}
+		out = append(out, core.InstanceExport{
+			Name:     child.exportName,
+			Kind:     core.InstanceKindInstance,
+			Instance: childInst,
+		})
+	}
+	return out, nil
+}
+
+// instanceResources is one Instantiate call's resource wiring: the
+// fresh TypeResources the instance defines, plus the lookups that map
+// build-time declarations onto them.
+type instanceResources struct {
+	// trOf gives the TypeResource minted for each declared resource.
+	trOf map[*resourceRuntime]*core.TypeResource
+	// byComponentResourceTypeID indexes defined resources and lender-
+	// supplied ResourceTypeRefs in one shared ID space.
+	byComponentResourceTypeID []*core.TypeResource
+}
+
+// newInstanceResources mints the per-instance TypeResources defined by
+// inst. Every resource in the tree is defined by the root instance
+// whichever scope declares it — a nested scope is a namespace over
+// those definitions, not a runtime of its own.
+func (c *Component) newInstanceResources(
+	inst *core.ComponentInstance,
+	stubMod api.Module,
+	h *ComponentInstance,
+	refResolved map[*ResourceTypeRef]*core.TypeResource,
+) (*instanceResources, error) {
+	res := &instanceResources{
+		trOf:                      make(map[*resourceRuntime]*core.TypeResource, len(c.allResources)),
+		byComponentResourceTypeID: make([]*core.TypeResource, len(c.allResources)+len(c.resourceRefs)),
+	}
+	for _, rr := range c.allResources {
 		if rr.hostModExport != "" && stubMod.ExportedFunction(rr.hostModExport) == nil {
 			return nil, fmt.Errorf("wacogo/host: stub missing dtor export %q", rr.hostModExport)
 		}
@@ -157,185 +368,45 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 			}
 			return nil
 		}
-		resourceTRs[i] = core.NewTypeResource(dtor)
-		resourceTRIdx[rr] = i
-	}
-
-	// 5. Build trSlice (resources + resourceRefs share one ID space).
-	trSlice := make([]*core.TypeResource, len(c.allResources)+len(c.resourceRefs))
-	for i, rr := range c.allResources {
-		trSlice[rr.rt.componentResourceTypeID] = resourceTRs[i]
+		tr := core.NewTypeResource(inst, dtor)
+		res.trOf[rr] = tr
+		res.byComponentResourceTypeID[rr.rt.componentResourceTypeID] = tr
 	}
 	for _, rrd := range c.resourceRefs {
 		tr, ok := refResolved[rrd.ref]
 		if !ok {
 			return nil, fmt.Errorf("wacogo/host: ResourceTypeRef %q unresolved", rrd.name)
 		}
-		trSlice[rrd.ref.componentResourceTypeID] = tr
+		res.byComponentResourceTypeID[rrd.ref.componentResourceTypeID] = tr
 	}
+	return res, nil
+}
 
-	// 6. Build a per-instance wasmparser ComponentType reflecting each
-	//    ResourceTypeRef's lender-supplied resource identity. The
-	//    per-func wpFuncType handles minted here are the same identities
-	//    advertised in the resulting *InstanceType, so guests' import
-	//    type checks pass.
-	origins, err := buildInstanceOrigins(c, iopts.resourceFroms)
-	if err != nil {
-		return nil, err
-	}
-	wpInst := c.wpComponentType.NewInstance()
-	if len(origins) > 0 {
-		wpInst.SetResourceOrigin(origins)
-	}
-	wpFuncTypes := c.wpFuncTypes
-
-	// 7. Build the per-scope export lists. Funcs are pre-built once
-	//    (flat across the whole tree, indexed parallel to c.allFuncs)
-	//    inside the root's BuildExports callback so each canon.Callee
-	//    captures the freshly-allocated root *ComponentInstance. Nested
-	//    *ComponentInstance shells are built INSIDE the root callback
-	//    too — they share the type-slot space and reference the same
-	//    funcExports — and attached as InstanceKindInstance entries on
-	//    the root.
-	funcIdx := map[*funcRuntime]int{}
-	for i, fr := range c.allFuncs {
-		funcIdx[fr] = i
-	}
-
-	// Type slots are root-only (resources + resourceRefs share the root
-	// instance's type-index space; nested scopes never define their own
-	// resources in this iteration).
-	typeSlots := make([]core.InstanceTypeSlot, 0, len(c.allResources)+len(c.resourceRefs))
-	for i, rr := range c.allResources {
-		typeSlots = append(typeSlots, core.InstanceTypeSlot{Name: rr.exportName, Type: resourceTRs[i]})
-	}
-	for _, rrd := range c.resourceRefs {
-		tr, ok := refResolved[rrd.ref]
-		if !ok {
-			return nil, fmt.Errorf("wacogo/host: ResourceTypeRef %q unresolved", rrd.name)
-		}
-		typeSlots = append(typeSlots, core.InstanceTypeSlot{Name: rrd.name, Type: tr})
-	}
-
-	coreInst, err := core.NewInstance(c.engine, &core.InstanceSpec{
-		Modules:            []api.Module{stubMod, hostMod},
-		ParserInstanceType: wpInst,
-		ExternTable:        h.extTable,
-		BuildExports: func(inst *core.ComponentInstance) ([]core.InstanceTypeSlot, []core.InstanceExport, error) {
-			// Build a flat funcExports slice parallel to c.allFuncs
-			// so wpFuncTypes[i] matches.
-			funcExports := make([]*core.ExportedFunc, len(c.allFuncs))
-			for i, fr := range c.allFuncs {
-				coreFn := stubMod.ExportedFunction(fr.stubExportName)
-				if coreFn == nil {
-					return nil, nil, fmt.Errorf("wacogo/host: stub missing export %q", fr.stubExportName)
-				}
-				coreFT, err := buildCoreFuncType(fr.userFT, trSlice)
-				if err != nil {
-					return nil, nil, fmt.Errorf("wacogo/host: func %q: %w", fr.exportName, err)
-				}
-				callee := canon.Callee{
-					CallSide: canon.CallSide{
-						Instance:       core.InstanceAsCanon(inst),
-						Memory:         stubMemory,
-						Realloc:        reallocAPI,
-						StringEncoding: canon.EncUTF8,
-					},
-					CoreFunc: coreFn,
-				}
-				binding := canon.NewCallBinding(
-					core.FuncTypeParamsAsCanon(coreFT),
-					core.FuncTypeResultsAsCanon(coreFT),
-					callee,
-				)
-				funcExports[i] = core.NewExportedFunc(
-					fr.exportName,
-					core.NewFunc(coreFT, binding),
-					wpFuncTypes[i],
-				)
-			}
-
-			// scopeExports walks one *scopeRuntime and emits the
-			// InstanceExport list for it, recursing for nested
-			// instances. Nested instances become bare *ComponentInstance
-			// shells (no modules / no parser type / no extern table).
-			var scopeExports func(sr *scopeRuntime) ([]core.InstanceExport, error)
-			scopeExports = func(sr *scopeRuntime) ([]core.InstanceExport, error) {
-				out := make([]core.InstanceExport, 0,
-					len(sr.funcs)+len(sr.resources)+len(sr.resourceRefs)+
-						len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
-				for _, fr := range sr.funcs {
-					out = append(out, core.InstanceExport{
-						Name:    fr.exportName,
-						Kind:    core.InstanceKindFunc,
-						FuncVal: funcExports[funcIdx[fr]],
-					})
-				}
-				for _, rr := range sr.resources {
-					out = append(out, core.InstanceExport{
-						Name: rr.exportName, Kind: core.InstanceKindType,
-						TypeIdx: uint32(resourceTRIdx[rr]),
-					})
-				}
-				for _, ar := range sr.aliases {
-					out = append(out, core.InstanceExport{
-						Name: ar.exportName, Kind: core.InstanceKindType,
-						TypeIdx: uint32(resourceTRIdx[ar.target]),
-					})
-				}
-				for _, cm := range sr.coreModules {
-					out = append(out, core.InstanceExport{
-						Name:           cm.exportName,
-						Kind:           core.InstanceKindCoreModule,
-						CompiledModule: cm.compiled,
-					})
-				}
-				for _, child := range sr.nested {
-					childExports, err := scopeExports(child)
-					if err != nil {
-						return nil, err
-					}
-					childExportsCopy := childExports
-					childInst, err := core.NewInstance(c.engine, &core.InstanceSpec{
-						BuildExports: func(*core.ComponentInstance) ([]core.InstanceTypeSlot, []core.InstanceExport, error) {
-							return nil, childExportsCopy, nil
-						},
-					})
-					if err != nil {
-						return nil, fmt.Errorf("wacogo/host: nested instance %q: %w", child.exportName, err)
-					}
-					out = append(out, core.InstanceExport{
-						Name:     child.exportName,
-						Kind:     core.InstanceKindInstance,
-						Instance: childInst,
-					})
-				}
-				return out, nil
-			}
-
-			rootExports, err := scopeExports(c.root)
+// buildNamedTypes resolves every named AddType declaration in the
+// scope tree against this instance's resource identities, keyed by the
+// declaration's *TypeRef so per-scope export lists can name it.
+func (c *Component) buildNamedTypes(res *instanceResources) (map[*TypeRef]core.Type, error) {
+	out := map[*TypeRef]core.Type{}
+	var collect func(sr *scopeRuntime) error
+	collect = func(sr *scopeRuntime) error {
+		for _, tr := range sr.types {
+			t, err := buildCoreType(tr.ref, res.byComponentResourceTypeID)
 			if err != nil {
-				return nil, nil, err
+				return fmt.Errorf("wacogo/host: AddType %q: %w", tr.exportName, err)
 			}
-			// Append resourceRef exports for the root only.
-			for i, rrd := range c.resourceRefs {
-				rootExports = append(rootExports, core.InstanceExport{
-					Name: rrd.name, Kind: core.InstanceKindType,
-					TypeIdx: uint32(len(c.allResources) + i),
-				})
+			out[tr.ref] = t
+		}
+		for _, child := range sr.nested {
+			if err := collect(child); err != nil {
+				return err
 			}
-			return typeSlots, rootExports, nil
-		},
-	})
-	if err != nil {
-		_ = stubMod.Close(ctx)
-		_ = hostMod.Close(ctx)
+		}
+		return nil
+	}
+	if err := collect(c.root); err != nil {
 		return nil, err
 	}
-	h.core = coreInst
-	h.hostCallCC = core.NewCallContext(h.core, nil, stubMemory, stubRealloc)
-
-	return h, nil
+	return out, nil
 }
 
 // resolveResourceRefs walks the Component's resourceRefs in
@@ -407,16 +478,30 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 	// nested scopes this pushes a sub-ComponentTypeDesc + sub-
 	// InstanceTypeDesc into the arena and references it via
 	// EntityInstance{InstID:...} on the parent.
-	var buildScopeExports func(sr *scopeRuntime) (map[string]wasmparser.ComponentEntityType, []string)
-	buildScopeExports = func(sr *scopeRuntime) (map[string]wasmparser.ComponentEntityType, []string) {
+	var buildScopeExports func(sr *scopeRuntime) (map[string]wasmparser.ComponentEntityType, []string, error)
+	buildScopeExports = func(sr *scopeRuntime) (map[string]wasmparser.ComponentEntityType, []string, error) {
 		exp := make(map[string]wasmparser.ComponentEntityType,
-			len(sr.funcs)+len(sr.resources)+len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
+			len(sr.funcs)+len(sr.types)+len(sr.resources)+len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
 		var order []string
 		for _, fr := range sr.funcs {
 			exp[fr.exportName] = wasmparser.ComponentEntityType{
 				Kind: wasmparser.EntityFunc, FuncID: funcIDs[funcIdx[fr]],
 			}
 			order = append(order, fr.exportName)
+		}
+		for _, tr := range sr.types {
+			id, err := xt.instTranslateDefinedType(tr.ref)
+			if err != nil {
+				return nil, nil, fmt.Errorf("wacogo/host: AddType %q: %w", tr.exportName, err)
+			}
+			exp[tr.exportName] = wasmparser.ComponentEntityType{
+				Kind: wasmparser.EntityType,
+				TypeRef: wasmparser.ComponentAnyTypeID{
+					Kind:  wasmparser.AnyTypeDefined,
+					Index: uint32(id),
+				},
+			}
+			order = append(order, tr.exportName)
 		}
 		for _, rr := range sr.resources {
 			exp[rr.exportName] = wasmparser.ComponentEntityType{
@@ -447,7 +532,10 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 			order = append(order, cmRT.exportName)
 		}
 		for _, child := range sr.nested {
-			childExp, childOrder := buildScopeExports(child)
+			childExp, childOrder, err := buildScopeExports(child)
+			if err != nil {
+				return nil, nil, err
+			}
 			ctID := htb.PushComponentType(wasmparser.ComponentTypeDesc{
 				Imports:     map[string]wasmparser.ComponentEntityType{},
 				ImportOrder: nil,
@@ -464,10 +552,13 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 			}
 			order = append(order, child.exportName)
 		}
-		return exp, order
+		return exp, order, nil
 	}
 
-	exports, exportOrder := buildScopeExports(c.root)
+	exports, exportOrder, err := buildScopeExports(c.root)
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, rrd := range c.resourceRefs {
 		exports[rrd.name] = wasmparser.ComponentEntityType{
 			Kind: wasmparser.EntityType,

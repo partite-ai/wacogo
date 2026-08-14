@@ -186,10 +186,11 @@ func TestResourceHandle_InstanceAndType(t *testing.T) {
 	ctx := context.Background()
 	e := NewEngine(ctx)
 	defer e.Close(ctx)
-	tr := NewTypeResource(nil)
+	var tr *TypeResource
 	inst, err := NewInstance(e, &InstanceSpec{
-		BuildExports: func(*ComponentInstance) ([]InstanceTypeSlot, []InstanceExport, error) {
-			return []InstanceTypeSlot{{Name: "r", Type: tr}}, nil, nil
+		BuildExports: func(inst *ComponentInstance) ([]InstanceExport, error) {
+			tr = NewTypeResource(inst, nil)
+			return []InstanceExport{{Name: "r", Kind: InstanceKindType, Type: tr}}, nil
 		},
 	})
 	if err != nil {

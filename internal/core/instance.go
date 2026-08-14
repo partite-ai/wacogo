@@ -38,20 +38,15 @@ type InstanceSpec struct {
 	// per-instance extern table here; sub-component instances leave it nil.
 	ExternTable ExternTable
 
-	// BuildExports, when non-nil, is invoked once during NewInstance
-	// after the *ComponentInstance is allocated but before it is
-	// returned. The callback may capture inst into the values it
-	// returns (e.g. canon.Callees that reference inst for
-	// resource-table lookup). Any error it returns is propagated from
-	// NewInstance.
-	BuildExports func(inst *ComponentInstance) (types []InstanceTypeSlot, exports []InstanceExport, err error)
-}
-
-// InstanceTypeSlot is one entry in an instance's type index space.
-// Name may be "" for anonymous structural types.
-type InstanceTypeSlot struct {
-	Name string
-	Type Type
+	// BuildExports assembles the instance's exports. It runs once during
+	// NewInstance, after the *ComponentInstance is allocated but before
+	// it is returned, so that exports which refer back to the instance
+	// can be constructed: the resource types it defines, minted with
+	// NewTypeResource(inst, …), and the canon callees its exported
+	// funcs carry. Any error it returns is propagated from NewInstance,
+	// which closes the attached modules rather than returning a
+	// half-built instance.
+	BuildExports func(inst *ComponentInstance) ([]InstanceExport, error)
 }
 
 // InstanceExport is one entry in an instance's exports map.
@@ -68,15 +63,19 @@ type InstanceExport struct {
 	// CompiledModule is non-nil when Kind == InstanceKindCoreModule.
 	CompiledModule *CompiledModule
 
-	// TypeIdx is valid when Kind == InstanceKindType; it indexes into
-	// the types slice returned alongside this export.
-	TypeIdx uint32
+	// Type is the exported type when Kind == InstanceKindType. Naming a
+	// type here makes it resolvable on this instance; it says nothing
+	// about which instance defines it, which is fixed when the type is
+	// created. An instance assembled purely from exports names types
+	// its enclosing instance defines.
+	Type Type
 }
 
 // NewInstance constructs a *ComponentInstance from an InstanceSpec.
-// If spec.BuildExports is non-nil, it is invoked during construction
-// to populate the instance's type-index space and exports map; any
-// error it returns is propagated.
+// The returned instance is fully built: if spec.BuildExports is
+// non-nil it is invoked during construction to assemble the instance's
+// exports, and any error it returns is propagated instead of a
+// partially populated instance.
 func NewInstance(e *Engine, spec *InstanceSpec) (*ComponentInstance, error) {
 	inst := &ComponentInstance{
 		engine:  e,
@@ -99,7 +98,7 @@ func NewInstance(e *Engine, spec *InstanceSpec) (*ComponentInstance, error) {
 	}
 
 	if spec.BuildExports != nil {
-		types, exports, err := spec.BuildExports(inst)
+		exports, err := spec.BuildExports(inst)
 		if err != nil {
 			// Close already-attached modules in reverse declaration order so
 			// the failed instance does not leak wazero state. Errors from
@@ -110,19 +109,12 @@ func NewInstance(e *Engine, spec *InstanceSpec) (*ComponentInstance, error) {
 			}
 			return nil, err
 		}
-		inst.initExports(types, exports)
+		inst.initExports(exports)
 	}
 	return inst, nil
 }
 
-func (inst *ComponentInstance) initExports(types []InstanceTypeSlot, exports []InstanceExport) {
-	if len(types) > 0 {
-		inst.types = make([]Type, len(types))
-		for i, slot := range types {
-			inst.types[i] = slot.Type
-		}
-	}
-
+func (inst *ComponentInstance) initExports(exports []InstanceExport) {
 	if inst.exports == nil {
 		inst.exports = make(map[string]exportEntry, len(exports))
 	}
@@ -135,21 +127,13 @@ func (inst *ComponentInstance) initExports(types []InstanceTypeSlot, exports []I
 				es.FuncVal.instance = inst
 			}
 		case InstanceKindType:
-			entry.typeIdx = es.TypeIdx
+			entry.typ = es.Type
 		case InstanceKindInstance:
 			entry.instance = es.Instance
 		case InstanceKindCoreModule:
 			entry.compiledModule = es.CompiledModule
 		}
 		inst.exports[es.Name] = entry
-	}
-
-	for _, slot := range types {
-		if tr, ok := slot.Type.(*TypeResource); ok {
-			if tr.instance == nil {
-				tr.instance = inst
-			}
-		}
 	}
 }
 
