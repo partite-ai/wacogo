@@ -18,9 +18,9 @@ var instanceCounter atomic.Uint64
 // instantiationState holds the runtime index spaces for a component being
 // instantiated. Plan steps append to these slices as they execute.
 //
-// The spec's component type index space (spec: type) is not tracked here —
-// all type information needed at runtime is resolved at load time and embedded
-// directly in plan steps (e.g. planLift.funcType, planImportFunc.funcType).
+// The index spaces live here rather than on the instance because they are
+// scratch: they exist for the duration of the plan run, and nothing reads
+// them once the instance is built.
 type instantiationState struct {
 	inst    *ComponentInstance // the instance being built
 	imports map[string]any     // one of *Func, *ComponentInstance, *CompiledModule, *Component, Type, Val
@@ -47,6 +47,12 @@ type instantiationState struct {
 	funcs              []*ExportedFunc      // spec: func
 	componentInstances []*ComponentInstance // spec: instance
 	values             []Val                // spec: value
+	// types is the type index space (spec: type), filled in by
+	// planResolveType steps. It is instantiation-time scratch: once the
+	// plan has run, every type it holds has been copied into whatever
+	// referenced it (exports, func signatures, resource tables), and
+	// descendants reach it through parentState rather than the instance.
+	types []Type
 
 	// funcExportInfo, indexed by component func-index, supplies the
 	// export name and wasmparser function-type handle for funcs that
@@ -232,16 +238,13 @@ func (e *Engine) instantiateWithParentCfg(ctx context.Context, component *Compon
 		engine:    e,
 		component: component,
 		exports:   make(map[string]exportEntry),
-		types:     make([]Type, len(component.typeResolvers)),
 		canLeave:  true,
 	}
 	inst.resources = NewResourceTable(inst)
-	if parentState != nil {
-		inst.parent = parentState.inst
-	}
 	state := &instantiationState{
 		inst:            inst,
 		imports:         cfg.imports,
+		types:           make([]Type, len(component.typeResolvers)),
 		compiledModules: compiledModules,
 		subComponents:   subComponents,
 		parentState:     parentState,
@@ -320,12 +323,14 @@ func (e *Engine) instantiateWithParentCfg(ctx context.Context, component *Compon
 				instance: state.componentInstances[exp.Index],
 			}
 		case SortType:
-			// exp.Index is a TypeID in the component type index space.
-			// Store it so exportedType(name) can look up the resolved Type
-			// in inst.types at call time.
+			// exp.Index is a TypeID in the component type index space,
+			// fully resolved by the plan run above.
+			if int(exp.Index) >= len(state.types) {
+				return nil, fmt.Errorf("wacogo: export %q: type index %d out of range (have %d)", exp.Name, exp.Index, len(state.types))
+			}
 			inst.exports[exp.Name] = exportEntry{
-				kind:    SortType,
-				typeIdx: exp.Index,
+				kind: SortType,
+				typ:  state.types[exp.Index],
 			}
 		}
 	}
@@ -804,10 +809,10 @@ func (step *planImportFunc) execute(_ context.Context, s *instantiationState) er
 // then pass nil through to the resourceTable, matching the pre-refactor
 // discriminator-less behavior for slots whose type wasn't resolvable.
 func lookupResourceType(s *instantiationState, typeID uint32) *TypeResource {
-	if int(typeID) >= len(s.inst.types) {
+	if int(typeID) >= len(s.types) {
 		return nil
 	}
-	rt, _ := s.inst.types[typeID].(*TypeResource)
+	rt, _ := s.types[typeID].(*TypeResource)
 	return rt
 }
 
@@ -818,10 +823,10 @@ func lookupResourceType(s *instantiationState, typeID uint32) *TypeResource {
 // nil funcType and downstream code fell back accordingly. ctxDesc labels
 // the caller for out-of-range panics, which are programmer errors.
 func (s *instantiationState) lookupFuncType(typeID uint32, ctxDesc string) (*FuncType, error) {
-	if int(typeID) >= len(s.inst.types) {
-		return nil, fmt.Errorf("wacogo: %s: typeID %d out of range (have %d)", ctxDesc, typeID, len(s.inst.types))
+	if int(typeID) >= len(s.types) {
+		return nil, fmt.Errorf("wacogo: %s: typeID %d out of range (have %d)", ctxDesc, typeID, len(s.types))
 	}
-	t := s.inst.types[typeID]
+	t := s.types[typeID]
 	if t == nil {
 		return nil, nil
 	}
@@ -919,10 +924,10 @@ func (step *planInstantiateComponent) execute(ctx context.Context, s *instantiat
 			cm := s.compiledModules[arg.index]
 			opts = append(opts, WithModuleImport(arg.name, &cm))
 		case SortType:
-			if int(arg.index) >= len(s.inst.types) {
-				return fmt.Errorf("wacogo: instantiate component: arg %q references type %d, but only %d resolved", arg.name, arg.index, len(s.inst.types))
+			if int(arg.index) >= len(s.types) {
+				return fmt.Errorf("wacogo: instantiate component: arg %q references type %d, but only %d resolved", arg.name, arg.index, len(s.types))
 			}
-			t := s.inst.types[arg.index]
+			t := s.types[arg.index]
 			if t == nil {
 				return fmt.Errorf("wacogo: instantiate component: arg %q references unresolved type %d", arg.name, arg.index)
 			}
@@ -1219,14 +1224,11 @@ func (step *planResolveType) execute(_ context.Context, s *instantiationState) e
 	if r == nil {
 		return fmt.Errorf("wacogo: planResolveType: nil resolver at %d", step.typeID)
 	}
-	// Sync the instance index space so instanceImportResolver can find
-	// instances populated by preceding plan steps (imports and sub-instances).
-	s.inst.instances = s.componentInstances
 	typ := r.resolve(&resolverCtx{inst: s.inst, imports: s.imports, state: s})
 	if typ == nil {
 		return fmt.Errorf("wacogo: planResolveType: nil type at %d (missing import?)", step.typeID)
 	}
-	s.inst.types[step.typeID] = typ
+	s.types[step.typeID] = typ
 	return nil
 }
 

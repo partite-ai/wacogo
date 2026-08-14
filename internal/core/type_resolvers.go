@@ -7,18 +7,18 @@ import (
 
 // typeResolver constructs a Type value for one slot in a component's type
 // index space. Each TypeID slot has exactly one resolver, run once per
-// ComponentInstance to populate ComponentInstance.types[typeID].
+// instantiation to populate instantiationState.types[typeID].
 type typeResolver interface {
 	resolve(rc *resolverCtx) Type
 }
 
 // resolverCtx is the per-run context passed to typeResolver.resolve. Stack
 // allocated by planResolveType.execute; discarded at return. Holds only the
-// state resolvers actually need — the instance whose type table is being
-// built (reaches its component, parent, and sibling instances) plus the
-// instantiation args bag (used by importResolver for direct type imports)
-// and the in-progress instantiation state (used by resourceResolver to
-// resolve a dtor core func against the component's index spaces).
+// state resolvers actually need — the in-progress instantiation state,
+// carrying the index spaces being filled in and the chain to enclosing
+// instantiations, plus the instantiation args bag (used by importResolver
+// for direct type imports) and the instance being built (used by
+// resourceResolver as the defining instance of the resources it mints).
 type resolverCtx struct {
 	inst    *ComponentInstance
 	imports map[string]any
@@ -38,7 +38,7 @@ func (r primitiveResolver) resolve(*resolverCtx) Type { return r.t }
 // TypeID slot in the component's type index space.
 type indexResolver struct{ idx uint32 }
 
-func (r indexResolver) resolve(rc *resolverCtx) Type { return rc.inst.types[r.idx] }
+func (r indexResolver) resolve(rc *resolverCtx) Type { return rc.state.types[r.idx] }
 
 type listResolver struct{ elem typeResolver }
 
@@ -154,7 +154,7 @@ func (r funcResolver) resolve(rc *resolverCtx) Type {
 type ownResolver struct{ resource uint32 }
 
 func (r ownResolver) resolve(rc *resolverCtx) Type {
-	t := rc.inst.types[r.resource]
+	t := rc.state.types[r.resource]
 	if t == nil {
 		// Referenced resource type is unresolved; return nil so parent
 		// structural resolvers can fall back to nil.
@@ -166,7 +166,7 @@ func (r ownResolver) resolve(rc *resolverCtx) Type {
 type borrowResolver struct{ resource uint32 }
 
 func (r borrowResolver) resolve(rc *resolverCtx) Type {
-	t := rc.inst.types[r.resource]
+	t := rc.state.types[r.resource]
 	if t == nil {
 		return nil
 	}
@@ -187,20 +187,20 @@ type resourceResolver struct {
 }
 
 func (r resourceResolver) resolve(rc *resolverCtx) Type {
-	rt := &TypeResource{instance: rc.inst}
+	var dtorFn func(ctx context.Context, rep uint32) error
 	if r.hasDtor && rc.state != nil {
 		if dtor := rc.state.resolveDtor(r.dtorFuncIdx); dtor != nil {
 			// Wrap the wasm-callable api.Function so canon's
 			// ResourceTable.Drop can invoke it via the
 			// ResourceType.Destructor() path. Captures dtor by
 			// value; safe to retain across the instance lifetime.
-			rt.dtor = func(ctx context.Context, rep uint32) error {
+			dtorFn = func(ctx context.Context, rep uint32) error {
 				_, err := dtor.Call(ctx, uint64(rep))
 				return err
 			}
 		}
 	}
-	return rt
+	return NewTypeResource(rc.inst, dtorFn)
 }
 
 type instanceImportResolver struct {
@@ -209,12 +209,12 @@ type instanceImportResolver struct {
 }
 
 func (r instanceImportResolver) resolve(rc *resolverCtx) Type {
-	if int(r.instanceIdx) >= len(rc.inst.instances) {
+	if int(r.instanceIdx) >= len(rc.state.componentInstances) {
 		// Instance index space is out of range — this is a validator-guaranteed
 		// invariant so reaching this is a loader/validator bug.
-		panic(fmt.Sprintf("wacogo: instanceImportResolver: instance %d out of range (have %d)", r.instanceIdx, len(rc.inst.instances)))
+		panic(fmt.Sprintf("wacogo: instanceImportResolver: instance %d out of range (have %d)", r.instanceIdx, len(rc.state.componentInstances)))
 	}
-	inst := rc.inst.instances[r.instanceIdx]
+	inst := rc.state.componentInstances[r.instanceIdx]
 	if inst == nil {
 		// Instance slot present but not yet populated (import not satisfied).
 		// Return nil so callers can surface an instantiation-time error.
@@ -229,12 +229,12 @@ type aliasResolver struct {
 }
 
 func (r aliasResolver) resolve(rc *resolverCtx) Type {
-	target := rc.inst
+	target := rc.state
 	for range r.outerDepth {
-		if target.parent == nil {
+		if target.parentState == nil {
 			panic("wacogo: aliasResolver: outerDepth exceeds nesting")
 		}
-		target = target.parent
+		target = target.parentState
 	}
 	return target.types[r.typeIdx]
 }

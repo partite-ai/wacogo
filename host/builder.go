@@ -316,6 +316,15 @@ func buildScopeTree(b *Builder, comp *Component, root *scope) error {
 			if err := validateTopLevelTypeExpr(ts.expr); err != nil {
 				return nil, fmt.Errorf("wacogo/host: AddType %q: %w", ts.name, err)
 			}
+			// An empty name shares the type internally without exporting
+			// it, so it neither claims a name nor produces an export.
+			if ts.name == "" {
+				continue
+			}
+			if err := check(ts.name); err != nil {
+				return nil, err
+			}
+			sr.types = append(sr.types, typeRuntime{exportName: ts.name, ref: ts.ref})
 		}
 		for _, child := range s.nested {
 			if err := check(child.name); err != nil {

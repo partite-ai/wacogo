@@ -112,25 +112,27 @@ type TypeResource struct {
 
 func (*TypeResource) typ() {}
 
-// NewTypeResource returns a *TypeResource carrying dtor. The defining
-// instance field is left nil and is populated by NewInstance when the
-// returned *TypeResource appears in spec.Types. Pass a nil dtor for
-// resources with no destructor. Each returned *TypeResource must be
-// used in at most one NewInstance call.
+// NewTypeResource returns a *TypeResource defined by inst — the
+// instance whose resource table holds its handles and whose reentrance
+// gate wraps its destructor. Pass a nil dtor for resources with no
+// destructor.
+//
+// inst is the instance that introduces the type, which is not
+// necessarily the one that exports the name: an instance assembled
+// purely from exports resolves names over types defined by its
+// enclosing instance.
 //
 // dtor is the single Go-callable destructor canon's ResourceTable.Drop
 // invokes via ResourceType.Destructor when the last own handle for
 // the resource type is dropped. Wasm callers must wrap their
 // api.Function into this closure shape at construction time; host-impl
 // resources supply the closure directly.
-func NewTypeResource(dtor func(ctx context.Context, rep uint32) error) *TypeResource {
-	return &TypeResource{dtor: dtor}
+func NewTypeResource(inst *ComponentInstance, dtor func(ctx context.Context, rep uint32) error) *TypeResource {
+	return &TypeResource{instance: inst, dtor: dtor}
 }
 
 // Instance returns the *ComponentInstance that defines this resource
-// type — i.e., the instance whose Instantiate call placed this TR into
-// its type slots. Nil for TRs that have not yet been bound to an
-// instance.
+// type. Nil for TRs that have not yet been bound to an instance.
 func (tr *TypeResource) Instance() *ComponentInstance { return tr.instance }
 
 // InstanceType is a placeholder Type used to occupy TypeID slots allocated

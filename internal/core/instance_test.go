@@ -53,8 +53,8 @@ func TestNewInstance_NestedInstanceExport(t *testing.T) {
 	}
 
 	parent, err := NewInstance(e, &InstanceSpec{
-		BuildExports: func(*ComponentInstance) ([]InstanceTypeSlot, []InstanceExport, error) {
-			return nil, []InstanceExport{
+		BuildExports: func(*ComponentInstance) ([]InstanceExport, error) {
+			return []InstanceExport{
 				{Name: "nested", Kind: InstanceKindInstance, Instance: child},
 			}, nil
 		},
@@ -81,8 +81,8 @@ func TestNewInstance_CoreModuleExport(t *testing.T) {
 	mod := &CompiledModule{module: cm}
 
 	parent, err := NewInstance(e, &InstanceSpec{
-		BuildExports: func(*ComponentInstance) ([]InstanceTypeSlot, []InstanceExport, error) {
-			return nil, []InstanceExport{
+		BuildExports: func(*ComponentInstance) ([]InstanceExport, error) {
+			return []InstanceExport{
 				{Name: "m", Kind: InstanceKindCoreModule, CompiledModule: mod},
 			}, nil
 		},

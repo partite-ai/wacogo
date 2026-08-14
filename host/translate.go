@@ -717,6 +717,23 @@ func (t *instTranslator) instTranslateTopLevel(te TypeExpr) (wasmparser.ValTypeD
 	}
 }
 
+// instTranslateDefinedType translates a registered *TypeRef and returns
+// the arena ID of the resulting defined type, suitable for an
+// AnyTypeDefined export entry. A *TypeRef whose declaration collapses to
+// a bare primitive is wrapped in a primitive alias so it still has an ID.
+func (t *instTranslator) instTranslateDefinedType(ref *TypeRef) (wasmparser.ComponentDefinedTypeID, error) {
+	vt, err := t.instTranslateValType(ref)
+	if err != nil {
+		return 0, err
+	}
+	if vt.IsPrimitive {
+		return t.htb.PushDefinedType(wasmparser.DefinedTypeDesc{
+			Kind: wasmparser.DefinedKindPrimitive, Primitive: vt.Primitive,
+		}), nil
+	}
+	return vt.TypeID, nil
+}
+
 func (t *instTranslator) instTranslateFuncType(ft *FuncType) (wasmparser.FuncTypeDesc, error) {
 	fd := wasmparser.FuncTypeDesc{}
 	for _, p := range ft.Params {
