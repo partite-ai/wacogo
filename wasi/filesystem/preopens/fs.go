@@ -66,6 +66,26 @@ type SymlinkAter interface {
 	SymlinkAt(target, linkName string) error
 }
 
+// RenameAter and LinkAter let a directory rename or hard-link one of its
+// entries into another directory without real file descriptors.
+//
+// Unlike the other capabilities, these involve two directories: the
+// receiver (the source) and newDir (the destination), which is the fs.File
+// behind the destination descriptor, possibly wrapped (see As). Both must
+// belong to the same filesystem, which only the implementation can judge:
+// if newDir is not one of its own directories, it must return an error
+// matching syscall.EXDEV, reported to the guest as cross-device. Returning
+// an error matching errors.ErrUnsupported instead makes wacogo fall back to
+// renameat(2)/linkat(2) when both files expose Fd() (e.g. *os.File).
+type RenameAter interface {
+	RenameAt(oldName string, newDir fs.File, newName string) error
+}
+
+// LinkAter is the hard-link counterpart of RenameAter; see there.
+type LinkAter interface {
+	LinkAt(oldName string, newDir fs.File, newName string) error
+}
+
 type Unwrapper[T any] interface {
 	Unwrap() T
 }
@@ -92,6 +112,13 @@ func as[T, U any](x U) (T, bool) {
 		var zero T
 		return zero, false
 	}
+}
+
+// As reports whether f, or a file it wraps (through Unwrap or As methods),
+// is a T - the same lookup wacogo uses to find capabilities. RenameAter
+// and LinkAter implementations can use it to recognize newDir.
+func As[T any](f fs.File) (T, bool) {
+	return as[T](f)
 }
 
 // errEscape signals an attempt by an ImmutableFS-wrapped path to
@@ -507,16 +534,36 @@ func (d *fsDescriptor) UnlinkFileAt(_ context.Context, p string) (types.Result_E
 	return types.Result_ErrorCodeOk{}, nil
 }
 
-// LinkAt and RenameAt cross descriptor boundaries. On unix we dispatch
-// to linkat(2)/renameat(2) when both descriptors expose Fd() uintptr;
-// otherwise (and on non-unix builds) we report Unsupported.
+// LinkAt and RenameAt cross descriptor boundaries. The source directory's
+// LinkAter/RenameAter capability is tried first; failing that (or if it
+// reports errors.ErrUnsupported), on unix we dispatch to linkat(2)/
+// renameat(2) when both descriptors expose Fd() uintptr. Otherwise (and on
+// non-unix builds) we report Unsupported.
+
+func link(src fs.File, srcPath string, dst fs.File, dstPath string) error {
+	if l, ok := as[LinkAter](src); ok {
+		if err := l.LinkAt(srcPath, dst, dstPath); !errors.Is(err, errors.ErrUnsupported) {
+			return err
+		}
+	}
+	return linkAt(src, srcPath, dst, dstPath)
+}
+
+func rename(src fs.File, srcPath string, dst fs.File, dstPath string) error {
+	if r, ok := as[RenameAter](src); ok {
+		if err := r.RenameAt(srcPath, dst, dstPath); !errors.Is(err, errors.ErrUnsupported) {
+			return err
+		}
+	}
+	return renameAt(src, srcPath, dst, dstPath)
+}
 
 func (d *fsDescriptor) LinkAt(_ context.Context, _ types.PathFlags, srcPath string, newDir *types.DescriptorHandle, dstPath string) (types.Result_ErrorCode, error) {
 	dst, ok := dstFile(newDir)
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
-	if err := linkAt(d.file, srcPath, dst, dstPath); err != nil {
+	if err := link(d.file, srcPath, dst, dstPath); err != nil {
 		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
 	}
 	return types.Result_ErrorCodeOk{}, nil
@@ -527,7 +574,7 @@ func (d *fsDescriptor) RenameAt(_ context.Context, srcPath string, newDir *types
 	if !ok {
 		return types.Result_ErrorCodeErr{Value: types.ErrorCodeUnsupported}, nil
 	}
-	if err := renameAt(d.file, srcPath, dst, dstPath); err != nil {
+	if err := rename(d.file, srcPath, dst, dstPath); err != nil {
 		return types.Result_ErrorCodeErr{Value: fsErr(err)}, nil
 	}
 	return types.Result_ErrorCodeOk{}, nil
@@ -655,8 +702,22 @@ func fsErr(err error) types.ErrorCode {
 	switch {
 	case errors.Is(err, errEscape):
 		return types.ErrorCodeNotPermitted
-	case errors.Is(err, errUnsupported):
+	case errors.Is(err, errUnsupported), errors.Is(err, errors.ErrUnsupported):
 		return types.ErrorCodeUnsupported
+	// Specific errnos before the fs.Err* classes: syscall.Errno reports
+	// ENOTEMPTY as matching fs.ErrExist, for one.
+	case errors.Is(err, syscall.EXDEV):
+		return types.ErrorCodeCrossDevice
+	case errors.Is(err, syscall.ENOTEMPTY):
+		return types.ErrorCodeNotEmpty
+	case errors.Is(err, syscall.ENOTDIR):
+		return types.ErrorCodeNotDirectory
+	case errors.Is(err, syscall.EISDIR):
+		return types.ErrorCodeIsDirectory
+	case errors.Is(err, syscall.ENAMETOOLONG):
+		return types.ErrorCodeNameTooLong
+	case errors.Is(err, syscall.ELOOP):
+		return types.ErrorCodeLoop
 	case errors.Is(err, fs.ErrNotExist):
 		return types.ErrorCodeNoEntry
 	case errors.Is(err, fs.ErrPermission):
