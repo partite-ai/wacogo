@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 
 	"github.com/partite-ai/wacogo/internal/canon"
@@ -35,6 +36,11 @@ type Engine struct {
 	canonHost *canon.Host
 	features  wasmparser.FeatureSet
 	closed    atomic.Bool
+
+	// bridges caches compiled instantiate-from-exports bridge modules by
+	// their bytes, which depend only on the component, not the instance.
+	bridgeMu sync.Mutex
+	bridges  map[string]wazero.CompiledModule
 }
 
 // NewEngine creates a new Engine with the given options.
@@ -52,7 +58,24 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 		runtime:   rt,
 		canonHost: canon.NewHost(rt),
 		features:  wasmparser.DefaultFeatures(),
+		bridges:   map[string]wazero.CompiledModule{},
 	}
+}
+
+// compiledBridge returns the compiled bridge module for bridgeWasm,
+// compiling it on first use.
+func (e *Engine) compiledBridge(ctx context.Context, bridgeWasm []byte) (wazero.CompiledModule, error) {
+	e.bridgeMu.Lock()
+	defer e.bridgeMu.Unlock()
+	if cm, ok := e.bridges[string(bridgeWasm)]; ok {
+		return cm, nil
+	}
+	cm, err := e.runtime.CompileModule(ctx, bridgeWasm)
+	if err != nil {
+		return nil, err
+	}
+	e.bridges[string(bridgeWasm)] = cm
+	return cm, nil
 }
 
 // Close releases all resources held by the engine. Idempotent: subsequent
