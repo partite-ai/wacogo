@@ -1037,9 +1037,11 @@ func (s *instantiationState) execInstantiateFromExportsWithWasm(ctx context.Cont
 	}
 	var bridgeImports []bridgeImport
 
-	bridgeID := instanceCounter.Add(1)
-
-	for _, exp := range step.exports {
+	// Import module names only need to be unique within the bridge (the
+	// resolver below maps them to this instantiation's instances), so they
+	// are positional: the bridge's bytes then depend only on the component,
+	// and it is compiled once per engine rather than per instantiation.
+	for pos, exp := range step.exports {
 		switch exp.sort {
 		case SortCoreFunc:
 			if int(exp.index) >= len(s.coreFuncs) {
@@ -1066,7 +1068,7 @@ func (s *instantiationState) execInstantiateFromExportsWithWasm(ctx context.Cont
 				sig.Results[i] = apiValTypeToWasm(r)
 			}
 
-			importModName := fmt.Sprintf("__bridge_%d_%d", bridgeID, exp.index)
+			importModName := fmt.Sprintf("__bridge_%d", pos)
 			importFuncIdx := b.AddImportFunc(importModName, cf.name, sig)
 			b.AddExportFunc(exp.name, importFuncIdx)
 			bridgeImports = append(bridgeImports, bridgeImport{importModule: importModName, importName: cf.name})
@@ -1077,7 +1079,7 @@ func (s *instantiationState) execInstantiateFromExportsWithWasm(ctx context.Cont
 			}
 			cm := s.coreMemories[exp.index]
 
-			importModName := fmt.Sprintf("__bridge_mem_%d_%d", bridgeID, exp.index)
+			importModName := fmt.Sprintf("__bridge_mem_%d", pos)
 			memIdx := b.AddImportMemory(importModName, cm.name, 0, 0)
 			b.AddExportMemory(exp.name, memIdx)
 			bridgeImports = append(bridgeImports, bridgeImport{importModule: importModName, importName: cm.name})
@@ -1088,7 +1090,7 @@ func (s *instantiationState) execInstantiateFromExportsWithWasm(ctx context.Cont
 			}
 			ct := s.coreTables[exp.index]
 
-			importModName := fmt.Sprintf("__bridge_tbl_%d_%d", bridgeID, exp.index)
+			importModName := fmt.Sprintf("__bridge_tbl_%d", pos)
 			// Import with funcref type (0x70) and min 0 to be permissive.
 			tblIdx := b.AddImportTable(importModName, ct.name, 0, 0, 0x70)
 			b.AddExportTable(exp.name, tblIdx)
@@ -1100,7 +1102,7 @@ func (s *instantiationState) execInstantiateFromExportsWithWasm(ctx context.Cont
 			}
 			cg := s.coreGlobals[exp.index]
 
-			importModName := fmt.Sprintf("__bridge_glb_%d_%d", bridgeID, exp.index)
+			importModName := fmt.Sprintf("__bridge_glb_%d", pos)
 			glbIdx := b.AddImportGlobal(importModName, cg.name, cg.valType, cg.mutable)
 			b.AddExportGlobal(exp.name, glbIdx)
 			bridgeImports = append(bridgeImports, bridgeImport{importModule: importModName, importName: cg.name})
@@ -1112,7 +1114,7 @@ func (s *instantiationState) execInstantiateFromExportsWithWasm(ctx context.Cont
 
 	bridgeWasm := b.Encode()
 
-	compiled, err := s.inst.engine.runtime.CompileModule(ctx, bridgeWasm)
+	compiled, err := s.inst.engine.compiledBridge(ctx, bridgeWasm)
 	if err != nil {
 		return fmt.Errorf("wacogo: instantiate-from-exports: compile bridge: %w", err)
 	}
