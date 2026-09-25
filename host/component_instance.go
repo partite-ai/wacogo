@@ -51,8 +51,9 @@ type ComponentInstance struct {
 func (h *ComponentInstance) Core() *core.ComponentInstance { return h.core }
 
 // RegisterResource records obj in this instance and returns a fresh
-// ExternHandle. Use the returned handle as the rep value when
-// minting an own<R> for a host-defined resource.
+// ExternHandle. Pass the exported resource type and the returned handle as
+// the rep value to wacogo.NewValOwnHandle when minting an own<R> for a
+// host-defined resource.
 func (h *ComponentInstance) RegisterResource(obj any) ExternHandle {
 	return h.extTable.put(obj)
 }

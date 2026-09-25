@@ -2,9 +2,12 @@ package wacogo_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/partite-ai/wacogo"
+	"github.com/partite-ai/wacogo/host"
 )
 
 // TestValList tests list construction, Len, and Get.
@@ -216,4 +219,75 @@ func TestValOwnHandleDrop(t *testing.T) {
 		t.Errorf("zero-value Drop returned %v, want nil", err)
 	}
 	var _ wacogo.Val = &v
+}
+
+func TestNewValOwnHandleTransfersThroughFuncCall(t *testing.T) {
+	ctx := context.Background()
+	engine := wacogo.NewEngine(ctx)
+	t.Cleanup(func() { _ = engine.Close(ctx) })
+
+	var drops int
+	builder := engine.NewHostBuilder("own-value-test")
+	item := builder.AddResource("item", func(_ context.Context, _ *host.ComponentInstance, obj any) error {
+		if obj != "payload" {
+			return fmt.Errorf("dropped object = %v, want payload", obj)
+		}
+		drops++
+		return nil
+	})
+	builder.AddFunction("consume", &host.FuncType{
+		Params: []host.Param{{Name: "item", Type: item.Own()}},
+	}, func(ctx context.Context, cc *host.CallContext, instance *host.ComponentInstance, stack []uint64) error {
+		rt, ok := cc.Instance().ExportedType("item").(*wacogo.TypeResource)
+		if !ok {
+			return fmt.Errorf("item export = %T, want *wacogo.TypeResource", cc.Instance().ExportedType("item"))
+		}
+		handle, err := cc.LookupOwn(rt, uint32(stack[0]))
+		if err != nil {
+			return fmt.Errorf("lookup transferred own: %w", err)
+		}
+		if obj, ok := instance.LookupResource(host.ExternHandle(handle.Rep())); !ok || obj != "payload" {
+			return fmt.Errorf("registered object = (%v, %v), want (payload, true)", obj, ok)
+		}
+		return handle.Drop(ctx)
+	})
+
+	component, err := builder.Build(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = component.Close(ctx) })
+	instance, err := component.Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = instance.Close(ctx) })
+
+	rt, ok := instance.Core().ExportedType("item").(*wacogo.TypeResource)
+	if !ok {
+		t.Fatalf("item export = %T, want *wacogo.TypeResource", instance.Core().ExportedType("item"))
+	}
+	extern := instance.RegisterResource("payload")
+	own := wacogo.NewValOwnHandle(rt, uint32(extern))
+	if _, err := instance.Core().ExportedFunc("consume").Call(ctx, own); err != nil {
+		t.Fatalf("consume host-created own: %v", err)
+	}
+	if drops != 1 {
+		t.Fatalf("resource drops = %d, want 1", drops)
+	}
+	if _, live := instance.LookupResource(extern); live {
+		t.Fatal("transferred resource remained registered after callee drop")
+	}
+	if _, err := instance.Core().ExportedFunc("consume").Call(ctx, own); err == nil || !strings.Contains(err.Error(), "transferred") {
+		t.Fatalf("second consume error = %v, want transferred ownership error", err)
+	}
+}
+
+func TestNewValOwnHandleRejectsNilType(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("NewValOwnHandle(nil, ...) did not panic")
+		}
+	}()
+	_ = wacogo.NewValOwnHandle(nil, 1)
 }

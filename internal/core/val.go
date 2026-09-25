@@ -80,6 +80,15 @@ type ValFlags = canon.ValFlags
 // ValOwnHandle is an owned resource handle.
 type ValOwnHandle = canon.ValOwnHandle
 
+// NewValOwnHandle constructs a host-created owned resource value suitable
+// for passing to Func.Call. rep is interpreted by rt's defining instance.
+func NewValOwnHandle(rt *TypeResource, rep uint32) *ValOwnHandle {
+	if rt == nil {
+		panic("wacogo: NewValOwnHandle: nil resource type")
+	}
+	return canon.NewValOwnHandle(resourceType{rt: rt}, rep)
+}
+
 // --- Non-generic constructors (re-exported as variable aliases) ---
 
 // NewValRecord constructs a record from the given fields in order.

@@ -392,10 +392,10 @@ const (
 // subsequently lower as own (TransferOwn into a callee table) or
 // borrow (LendTo) depending on what the call expects.
 //
-// Construction is internal: the gocall path mints ValOwnHandle values
-// only by lifting them out of a component call. External callers
-// obtain a *ValOwnHandle from a Func.Call result and may either pass
-// it back to another call or invoke Drop to release it.
+// The gocall path mints ValOwnHandle values when lifting them out of a
+// component call. Hosts may also create one explicitly with
+// NewValOwnHandle when they already own a resource representation that
+// must be transferred through Func.Call.
 type ValOwnHandle struct {
 	rt       ResourceType
 	rep      uint32
@@ -539,6 +539,14 @@ func (h *ValOwnHandle) stateName() string {
 // fires.
 func newValOwnHandleEmpty() *ValOwnHandle {
 	return &ValOwnHandle{}
+}
+
+// NewValOwnHandle constructs an owned resource value from a resource type
+// and a representation owned by that type's defining instance.
+func NewValOwnHandle(rt ResourceType, rep uint32) *ValOwnHandle {
+	h := newValOwnHandleEmpty()
+	h.IssueOwn(rt, rep)
+	return h
 }
 
 // NewValOwnHandleForTest mints a *ValOwnHandle pre-populated with
