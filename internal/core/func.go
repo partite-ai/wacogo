@@ -71,11 +71,15 @@ func (f *Func) CallRaw(
 	callee := f.binding.Callee()
 	task := &canon.Task{}
 	callerCC := NewCallContext(caller, task, nil, nil)
+	realloc := ReallocFunc(callee.GoRealloc)
+	if realloc == nil {
+		realloc = wrapAPIRealloc(callee.Realloc)
+	}
 	calleeCC := NewCallContext(
 		instanceFromCanon(callee.Instance),
 		task,
 		callee.Memory,
-		wrapAPIRealloc(callee.Realloc),
+		realloc,
 	)
 
 	defer func() {

@@ -1,0 +1,22 @@
+package example:demo;
+
+// One function per primitive element type, for the bulk list copy:
+// each takes a list and returns it reversed.
+interface primlists {
+    rev-bool: func(xs: list<bool>) -> list<bool>;
+    rev-s8: func(xs: list<s8>) -> list<s8>;
+    rev-u8: func(xs: list<u8>) -> list<u8>;
+    rev-s16: func(xs: list<s16>) -> list<s16>;
+    rev-u16: func(xs: list<u16>) -> list<u16>;
+    rev-s32: func(xs: list<s32>) -> list<s32>;
+    rev-u32: func(xs: list<u32>) -> list<u32>;
+    rev-s64: func(xs: list<s64>) -> list<s64>;
+    rev-u64: func(xs: list<u64>) -> list<u64>;
+    rev-f32: func(xs: list<f32>) -> list<f32>;
+    rev-f64: func(xs: list<f64>) -> list<f64>;
+    rev-char: func(xs: list<char>) -> list<char>;
+}
+
+world primlistshost {
+    import primlists;
+}

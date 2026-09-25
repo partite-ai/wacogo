@@ -87,7 +87,7 @@ func (h *Host) BuildAdapter(
 	calleeSide := &transferSide{
 		Instance:       callee.Instance,
 		Memory:         callee.Memory,
-		Realloc:        wrapRealloc(callee.Realloc),
+		Realloc:        callee.realloc(),
 		StringEncoding: callee.StringEncoding,
 		ResourceTable:  callee.Instance.ResourceTable(),
 	}
@@ -99,7 +99,7 @@ func (h *Host) BuildAdapter(
 	callerSide := &transferSide{
 		Instance:       caller.Instance,
 		Memory:         caller.Memory,
-		Realloc:        wrapRealloc(caller.Realloc),
+		Realloc:        caller.realloc(),
 		StringEncoding: caller.StringEncoding,
 		ResourceTable:  caller.Instance.ResourceTable(),
 	}
@@ -111,7 +111,8 @@ func (h *Host) BuildAdapter(
 	// Construction is deferred to a helper because errors here must be
 	// surfaced as adapter-build failures, not transfer-time panics.
 	var auxModules []api.Module
-	if callee.ReallocModName != "" {
+	// A Go allocator needs no batching: each allocation is a Go call.
+	if callee.ReallocModName != "" && callee.GoRealloc == nil {
 		helper, err := h.buildBatchReallocHelper(ctx, callee.ReallocModName, callee.ReallocFnExport)
 		if err != nil {
 			return nil, fmt.Errorf("wacogo: build callee batch-realloc helper: %w", err)
@@ -119,7 +120,7 @@ func (h *Host) BuildAdapter(
 		calleeSide.BatchHelper = helper
 		auxModules = append(auxModules, helper.mod)
 	}
-	if caller.ReallocModName != "" {
+	if caller.ReallocModName != "" && caller.GoRealloc == nil {
 		helper, err := h.buildBatchReallocHelper(ctx, caller.ReallocModName, caller.ReallocFnExport)
 		if err != nil {
 			// Best-effort teardown of the callee helper before bubbling up.
@@ -139,6 +140,7 @@ func (h *Host) BuildAdapter(
 		callerSide:        callerSide,
 		calleeSide:        calleeSide,
 		postReturn:        wrapPostReturn(callee.PostReturn),
+		core:              callee.core(),
 	}
 	af.tc.callee = calleeSide
 
@@ -187,6 +189,7 @@ type adapterFunc struct {
 	callerSide *transferSide
 	calleeSide *transferSide
 	postReturn PostReturnFunc
+	core       coreCallable
 
 	// tc is per-call state reused across Call invocations. Safe because
 	// the callee's reentrance gate serialises calls and forbids re-entry
@@ -204,6 +207,6 @@ func (a *adapterFunc) Call(ctx context.Context, mod api.Module, stack []uint64) 
 	a.tc.callee = a.calleeSide
 	a.tc.registers = stack
 	a.tc.Task.NumBorrows = 0
-	runTransferPlan(ctx, a.plan, &a.tc, a.callee.CoreFunc,
+	runTransferPlan(ctx, a.plan, &a.tc, a.core,
 		a.postReturn, a.nCallerFlatParams, mod)
 }

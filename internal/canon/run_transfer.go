@@ -14,7 +14,8 @@ import (
 //   - plan: compiled transferPlan carrying param/result steps and mode flags.
 //   - tc: per-call state. tc.registers is the wazero stack — caller params
 //     on entry, callee results on exit.
-//   - calleeFn: the callee component's canon-lifted core function.
+//   - calleeFn: the callee component's canon-lifted core function (or
+//     its Go implementation, for a host component).
 //   - postReturn: optional callee post-return hook.
 //   - nCallerFlatParams: caller-side flat slot count for params (used to
 //     locate the canon-lower retptr in flat-params mode).
@@ -29,7 +30,7 @@ func runTransferPlan(
 	ctx context.Context,
 	plan *transferPlan,
 	tc *transferContext,
-	calleeFn api.Function,
+	calleeFn coreCallable,
 	postReturn PostReturnFunc,
 	nCallerFlatParams uint32,
 	callerCoreModule api.Module,

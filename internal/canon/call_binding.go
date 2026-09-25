@@ -15,6 +15,7 @@ type CallBinding struct {
 	callee     Callee
 	side       *transferSide  // precomputed at construction
 	postReturn PostReturnFunc // wrapped at construction; nil if callee has no post-return
+	core       coreCallable   // callee.Direct or callee.CoreFunc
 
 	// gcc is per-call state reused across Call invocations. Safe because
 	// each callee instance enforces single-threaded, non-reentrant access
@@ -32,7 +33,7 @@ func NewCallBinding(params, results []Type, callee Callee) *CallBinding {
 	side := &transferSide{
 		Instance:       callee.Instance,
 		Memory:         callee.Memory,
-		Realloc:        wrapRealloc(callee.Realloc),
+		Realloc:        callee.realloc(),
 		StringEncoding: callee.StringEncoding,
 		ResourceTable:  callee.Instance.ResourceTable(),
 	}
@@ -41,6 +42,7 @@ func NewCallBinding(params, results []Type, callee Callee) *CallBinding {
 		callee:     callee,
 		side:       side,
 		postReturn: wrapPostReturn(callee.PostReturn),
+		core:       callee.core(),
 	}
 	cb.gcc.callee = side
 	return cb
@@ -66,7 +68,7 @@ func (cb *CallBinding) Call(ctx context.Context, args []Val) (results []Val, err
 	}()
 
 	cb.gcc.Task.NumBorrows = 0
-	return runGocallPlan(ctx, cb.plan, &cb.gcc, args, cb.callee.CoreFunc, cb.postReturn)
+	return runGocallPlan(ctx, cb.plan, &cb.gcc, args, cb.core, cb.postReturn)
 }
 
 // CallRaw invokes the function using caller-supplied flat-stack closures,
@@ -100,7 +102,7 @@ func (cb *CallBinding) CallRaw(
 	clear(stack)
 	writeArgs(stack)
 
-	if err = cb.callee.CoreFunc.CallWithStack(ctx, stack); err != nil {
+	if err = cb.core.CallWithStack(ctx, stack); err != nil {
 		return err
 	}
 

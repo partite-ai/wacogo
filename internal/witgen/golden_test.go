@@ -30,6 +30,12 @@ func TestGolden(t *testing.T) {
 			packageRoot: "github.com/partite-ai/wacogo/internal/witgen/testdata/genfixtures",
 		},
 		{
+			name:        "Primlists",
+			witPath:     "testdata/wit/primlists.wit",
+			world:       "example:demo/primlistshost",
+			packageRoot: "github.com/partite-ai/wacogo/internal/witgen/testdata/genfixtures",
+		},
+		{
 			name:        "Sumlist",
 			witPath:     "testdata/wit/sumlist.wit",
 			world:       "example:demo/summer",

@@ -143,7 +143,12 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	//    step after h.core is set) also closes over these.
 	stubMemory := stubMod.Memory()
 	reallocAPI := stubMod.ExportedFunction("realloc")
-	stubRealloc := wrapRealloc(reallocAPI)
+	alloc, err := newStubAllocator(stubMod)
+	if err != nil {
+		_ = stubMod.Close(ctx)
+		_ = hostMod.Close(ctx)
+		return nil, err
+	}
 
 	// 4. Build a per-instance wasmparser ComponentType reflecting each
 	//    ResourceTypeRef's lender-supplied resource identity. The
@@ -183,7 +188,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 			}
 			// Exported funcs, flat across the tree and indexed parallel
 			// to c.allFuncs so wpFuncTypes[i] matches.
-			funcExports, err := c.buildFuncExports(inst, stubMod, stubMemory, reallocAPI, res.byComponentResourceTypeID)
+			funcExports, err := c.buildFuncExports(inst, h, stubMod, stubMemory, reallocAPI, alloc, res.byComponentResourceTypeID)
 			if err != nil {
 				return nil, err
 			}
@@ -208,7 +213,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	}
 
 	h.core = coreInst
-	h.hostCallCC = core.NewCallContext(h.core, nil, stubMemory, stubRealloc)
+	h.hostCallCC = core.NewCallContext(h.core, nil, stubMemory, alloc.realloc)
 
 	return h, nil
 }
@@ -218,9 +223,11 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 // enters inst.
 func (c *Component) buildFuncExports(
 	inst *core.ComponentInstance,
+	h *ComponentInstance,
 	stubMod api.Module,
 	stubMemory api.Memory,
 	reallocAPI api.Function,
+	alloc *stubAllocator,
 	trSlice []*core.TypeResource,
 ) ([]*core.ExportedFunc, error) {
 	funcExports := make([]*core.ExportedFunc, len(c.allFuncs))
@@ -238,9 +245,19 @@ func (c *Component) buildFuncExports(
 				Instance:       core.InstanceAsCanon(inst),
 				Memory:         stubMemory,
 				Realloc:        reallocAPI,
+				GoRealloc:      alloc.realloc,
 				StringEncoding: canon.EncUTF8,
 			},
 			CoreFunc: coreFn,
+			// What coreFn does - the stub wrapper resetting the bump
+			// allocator, then the host module's Go function - without
+			// going through wasm.
+			Direct: func(ctx context.Context, stack []uint64) {
+				alloc.reset()
+				instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
+					return fr.userFn(ctx, h.hostCallCC, h, stack)
+				})
+			},
 		}
 		binding := canon.NewCallBinding(
 			core.FuncTypeParamsAsCanon(coreFT),

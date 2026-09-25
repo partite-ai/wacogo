@@ -68,7 +68,9 @@ func TestEmitLiftFlat_ListU32(t *testing.T) {
 		"uint32(stack[0])",
 		"uint32(stack[1])",
 		"make([]uint32",
-		"ReadUint32Le(ptr_ + i_*4)",
+		// One bounds-checked view of the whole list, then a decode loop.
+		"callee.Memory().Read(ptr_, uint32(n_))",
+		"binary.LittleEndian.Uint32(buf_[o_:])",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("liftFlatListU32 body missing %q. Body:\n%s", want, body)
@@ -82,7 +84,8 @@ func TestEmitLowerFlat_ListU32(t *testing.T) {
 	for _, want := range []string{
 		`callee.Realloc(ctx,`,
 		"len(v)",
-		"WriteUint32Le(ptr_ + i_*4, v[i_])",
+		"callee.Memory().Read(ptr_, uint32(n_))",
+		"binary.LittleEndian.PutUint32(buf_[o_:], e_)",
 		"stack[0] = uint64(ptr_)",
 		"stack[1] = uint64(ln_)",
 	} {

@@ -1,6 +1,13 @@
 package canon
 
-import "github.com/tetratelabs/wazero/api"
+import (
+	"context"
+	"fmt"
+	"runtime"
+	"runtime/debug"
+
+	"github.com/tetratelabs/wazero/api"
+)
 
 // CallSide describes one side of a canonical-ABI call: a component instance
 // plus its memory/realloc/encoding options. Used by Callee and by transfer
@@ -14,6 +21,12 @@ type CallSide struct {
 	Memory         api.Memory
 	Realloc        api.Function
 	StringEncoding StringEncoding
+
+	// GoRealloc, when set, is used in place of Realloc: an allocator
+	// implemented in Go (a host component's staging memory), so that
+	// allocating does not call into wasm. Realloc may still be set, for
+	// callers that need a wasm function.
+	GoRealloc ReallocFunc
 
 	// ReallocModName is the wazero module name (set at instantiation time
 	// via WithName) of the module that exports Realloc. Used by
@@ -37,4 +50,61 @@ type Callee struct {
 	CallSide
 	CoreFunc   api.Function
 	PostReturn api.Function // optional; nil if the callee has no post-return
+
+	// Direct, when set, runs the callee in Go instead of calling CoreFunc:
+	// for host components, whose functions are implemented in Go, it
+	// skips the round trip through wazero (and, with close-on-context-done,
+	// the goroutine wazero starts for every call). It must behave as
+	// CoreFunc would.
+	Direct DirectFunc
+}
+
+// DirectFunc runs a Go-implemented core function. stack is the core
+// param/result stack, as for api.Function.CallWithStack. It reports
+// failure by panicking, as a wazero host function does.
+type DirectFunc func(ctx context.Context, stack []uint64)
+
+// CallWithStack runs d, turning a panic into the error wazero would have
+// returned for it.
+func (d DirectFunc) CallWithStack(ctx context.Context, stack []uint64) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = recoveredError(r)
+		}
+	}()
+	d(ctx, stack)
+	return nil
+}
+
+func recoveredError(r any) error {
+	switch e := r.(type) {
+	case runtime.Error:
+		// A bug in the host function: keep where it happened.
+		return fmt.Errorf("%w (recovered by wacogo)\n\nGo runtime stack trace:\n%s", e, debug.Stack())
+	case error:
+		return e
+	}
+	return fmt.Errorf("%v", r)
+}
+
+// coreCallable is what the run functions invoke for the callee's core
+// function: an api.Function, or a DirectFunc.
+type coreCallable interface {
+	CallWithStack(ctx context.Context, stack []uint64) error
+}
+
+// core returns what to invoke for c's core function.
+func (c *Callee) core() coreCallable {
+	if c.Direct != nil {
+		return c.Direct
+	}
+	return c.CoreFunc
+}
+
+// realloc returns s's allocator: GoRealloc, or Realloc wrapped.
+func (s *CallSide) realloc() ReallocFunc {
+	if s.GoRealloc != nil {
+		return s.GoRealloc
+	}
+	return wrapRealloc(s.Realloc)
 }

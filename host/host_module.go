@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync/atomic"
 
-	"github.com/partite-ai/wacogo/internal/core"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
@@ -134,21 +133,6 @@ func instrumentCall(
 		}
 	}()
 	callErr = fn()
-}
-
-// wrapRealloc adapts a wazero realloc export into a core.ReallocFunc.
-// Returns nil if fn is nil.
-func wrapRealloc(fn api.Function) core.ReallocFunc {
-	if fn == nil {
-		return nil
-	}
-	return func(ctx context.Context, origPtr, origSize, align, newSize uint32) (uint32, error) {
-		ret, err := fn.Call(ctx, uint64(origPtr), uint64(origSize), uint64(align), uint64(newSize))
-		if err != nil {
-			return 0, err
-		}
-		return uint32(ret[0]), nil
-	}
 }
 
 // valueTypesFromCoreBytes converts internal/wasm.ValI32/… bytes into

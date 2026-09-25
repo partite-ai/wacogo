@@ -176,6 +176,11 @@ func (p *fsPreopens) GetDirectories(_ context.Context) ([]TupleDescriptorString,
 type fsDescriptor struct {
 	file fs.File
 	deps Deps
+
+	// Whether file is a directory, once Read has asked. It cannot change
+	// while the file is open, and a Stat on every read is a syscall.
+	typeKnown bool
+	isDir     bool
 }
 
 func (d *fsDescriptor) Drop(_ context.Context) error {
@@ -269,11 +274,14 @@ func openFlagsToOSFlag(of types.OpenFlags, df types.DescriptorFlags) int {
 const maxReadPerCall = 64 * 1024 * 1024 // 64 MiB
 
 func (d *fsDescriptor) Read(_ context.Context, length uint64, offset uint64) (types.ResultTupleListU8BoolErrorCode, error) {
-	info, err := d.file.Stat()
-	if err != nil {
-		return types.ResultTupleListU8BoolErrorCodeErr{Value: fsErr(err)}, nil
+	if !d.typeKnown {
+		info, err := d.file.Stat()
+		if err != nil {
+			return types.ResultTupleListU8BoolErrorCodeErr{Value: fsErr(err)}, nil
+		}
+		d.typeKnown, d.isDir = true, info.IsDir()
 	}
-	if info.IsDir() {
+	if d.isDir {
 		return types.ResultTupleListU8BoolErrorCodeErr{Value: types.ErrorCodeIsDirectory}, nil
 	}
 	if length > maxReadPerCall {

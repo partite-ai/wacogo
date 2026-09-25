@@ -6,6 +6,7 @@ package udpcreatesocket
 import (
 	"context"
 	"fmt"
+	"math"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -151,13 +152,15 @@ func toGoFlatListU8(ctx context.Context, cc *host.CallContext, h *host.Component
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
 	out_ := make([]uint8, ln_)
-	for i_ := uint32(0); i_ < ln_; i_++ {
-		if tmp_, ok_ := cc.Memory().ReadByte(ptr_ + i_*1); !ok_ {
-			return nil, fmt.Errorf("wacogo/witgen: toGoFlatListU8: elem: bad memory read")
-		} else {
-			out_[i_] = tmp_
-		}
+	n_ := uint64(ln_) * 1
+	if n_ > math.MaxUint32 {
+		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListU8: elem: bad memory read")
 	}
+	buf_, ok_ := cc.Memory().Read(ptr_, uint32(n_))
+	if !ok_ {
+		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListU8: elem: bad memory read")
+	}
+	copy(out_, buf_)
 	return out_, nil
 }
 
@@ -177,13 +180,15 @@ func toGoMemListU8(ctx context.Context, cc *host.CallContext, h *host.ComponentI
 		ln_ = tmp_
 	}
 	out_ := make([]uint8, ln_)
-	for i_ := uint32(0); i_ < ln_; i_++ {
-		if tmp_, ok_ := cc.Memory().ReadByte(lptr_ + i_*1); !ok_ {
-			return nil, fmt.Errorf("wacogo/witgen: toGoMemListU8: list elem: bad memory read")
-		} else {
-			out_[i_] = tmp_
-		}
+	n_ := uint64(ln_) * 1
+	if n_ > math.MaxUint32 {
+		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU8: list elem: bad memory read")
 	}
+	buf_, ok_ := cc.Memory().Read(lptr_, uint32(n_))
+	if !ok_ {
+		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU8: list elem: bad memory read")
+	}
+	copy(out_, buf_)
 	return out_, nil
 }
 
@@ -193,11 +198,15 @@ func fromGoFlatListU8(ctx context.Context, cc *host.CallContext, h *host.Compone
 	if err_ != nil {
 		return fmt.Errorf("wacogo/witgen: fromGoFlatListU8: realloc failed: %w", err_)
 	}
-	for i_ := uint32(0); i_ < ln_; i_++ {
-		if ok_ := cc.Memory().WriteByte(ptr_+i_*1, v[i_]); !ok_ {
-			return fmt.Errorf("wacogo/witgen: fromGoFlatListU8: list elem: bad memory write")
-		}
+	n_ := uint64(ln_) * 1
+	if n_ > math.MaxUint32 {
+		return fmt.Errorf("wacogo/witgen: fromGoFlatListU8: list elem: bad memory write")
 	}
+	buf_, ok_ := cc.Memory().Read(ptr_, uint32(n_))
+	if !ok_ {
+		return fmt.Errorf("wacogo/witgen: fromGoFlatListU8: list elem: bad memory write")
+	}
+	copy(buf_, v)
 	stack[0] = uint64(ptr_)
 	stack[1] = uint64(ln_)
 	return nil
@@ -209,11 +218,15 @@ func fromGoMemListU8(ctx context.Context, cc *host.CallContext, h *host.Componen
 	if err_ != nil {
 		return fmt.Errorf("wacogo/witgen: fromGoMemListU8: realloc failed: %w", err_)
 	}
-	for i_ := uint32(0); i_ < ln_; i_++ {
-		if ok_ := cc.Memory().WriteByte(lptr_+i_*1, v[i_]); !ok_ {
-			return fmt.Errorf("wacogo/witgen: fromGoMemListU8: list elem: bad memory write")
-		}
+	n_ := uint64(ln_) * 1
+	if n_ > math.MaxUint32 {
+		return fmt.Errorf("wacogo/witgen: fromGoMemListU8: list elem: bad memory write")
 	}
+	buf_, ok_ := cc.Memory().Read(lptr_, uint32(n_))
+	if !ok_ {
+		return fmt.Errorf("wacogo/witgen: fromGoMemListU8: list elem: bad memory write")
+	}
+	copy(buf_, v)
 	if ok_ := cc.Memory().WriteUint32Le(ptr, lptr_); !ok_ {
 		return fmt.Errorf("wacogo/witgen: fromGoMemListU8: list ptr: bad memory write")
 	}
@@ -229,13 +242,15 @@ func liftFlatListU8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
 	out_ := make([]uint8, ln_)
-	for i_ := uint32(0); i_ < ln_; i_++ {
-		if tmp_, ok_ := callee.Memory().ReadByte(ptr_ + i_*1); !ok_ {
-			return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: elem: bad memory read")
-		} else {
-			out_[i_] = tmp_
-		}
+	n_ := uint64(ln_) * 1
+	if n_ > math.MaxUint32 {
+		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: elem: bad memory read")
 	}
+	buf_, ok_ := callee.Memory().Read(ptr_, uint32(n_))
+	if !ok_ {
+		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: elem: bad memory read")
+	}
+	copy(out_, buf_)
 	return out_, nil
 }
 
@@ -255,13 +270,15 @@ func liftMemListU8(ctx context.Context, caller, callee *host.CallContext, h *hos
 		ln_ = tmp_
 	}
 	out_ := make([]uint8, ln_)
-	for i_ := uint32(0); i_ < ln_; i_++ {
-		if tmp_, ok_ := callee.Memory().ReadByte(lptr_ + i_*1); !ok_ {
-			return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list elem: bad memory read")
-		} else {
-			out_[i_] = tmp_
-		}
+	n_ := uint64(ln_) * 1
+	if n_ > math.MaxUint32 {
+		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list elem: bad memory read")
 	}
+	buf_, ok_ := callee.Memory().Read(lptr_, uint32(n_))
+	if !ok_ {
+		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list elem: bad memory read")
+	}
+	copy(out_, buf_)
 	return out_, nil
 }
 
@@ -273,11 +290,15 @@ func lowerFlatListU8(ctx context.Context, caller, callee *host.CallContext, h *h
 	if err_ != nil {
 		return fmt.Errorf("wacogo/witgen: lowerFlatListU8: realloc failed: %w", err_)
 	}
-	for i_ := uint32(0); i_ < ln_; i_++ {
-		if ok_ := callee.Memory().WriteByte(ptr_+i_*1, v[i_]); !ok_ {
-			return fmt.Errorf("wacogo/witgen: lowerFlatListU8: list elem: bad memory write")
-		}
+	n_ := uint64(ln_) * 1
+	if n_ > math.MaxUint32 {
+		return fmt.Errorf("wacogo/witgen: lowerFlatListU8: list elem: bad memory write")
 	}
+	buf_, ok_ := callee.Memory().Read(ptr_, uint32(n_))
+	if !ok_ {
+		return fmt.Errorf("wacogo/witgen: lowerFlatListU8: list elem: bad memory write")
+	}
+	copy(buf_, v)
 	stack[0] = uint64(ptr_)
 	stack[1] = uint64(ln_)
 	return nil
@@ -291,11 +312,15 @@ func lowerMemListU8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if err_ != nil {
 		return fmt.Errorf("wacogo/witgen: lowerMemListU8: realloc failed: %w", err_)
 	}
-	for i_ := uint32(0); i_ < ln_; i_++ {
-		if ok_ := callee.Memory().WriteByte(lptr_+i_*1, v[i_]); !ok_ {
-			return fmt.Errorf("wacogo/witgen: lowerMemListU8: list elem: bad memory write")
-		}
+	n_ := uint64(ln_) * 1
+	if n_ > math.MaxUint32 {
+		return fmt.Errorf("wacogo/witgen: lowerMemListU8: list elem: bad memory write")
 	}
+	buf_, ok_ := callee.Memory().Read(lptr_, uint32(n_))
+	if !ok_ {
+		return fmt.Errorf("wacogo/witgen: lowerMemListU8: list elem: bad memory write")
+	}
+	copy(buf_, v)
 	if ok_ := callee.Memory().WriteUint32Le(ptr, lptr_); !ok_ {
 		return fmt.Errorf("wacogo/witgen: lowerMemListU8: list ptr: bad memory write")
 	}

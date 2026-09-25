@@ -57,6 +57,8 @@ func compileStubModule(ctx context.Context, rt wazero.Runtime, comp *Component) 
 
 	// 2. Bump global.
 	bumpGlobalIdx := mb.AddGlobal(wasm.ValI32, true /*mutable*/, stubBumpInitial)
+	// Exported so that the Go allocator (stubAllocator) shares it.
+	mb.AddExportGlobal("bump", bumpGlobalIdx)
 
 	// 3. Memory; export as "memory".
 	memIdx := mb.AddMemory(stubInitialPages, 0 /*no max*/)
@@ -249,4 +251,49 @@ func emitResetForwardBody(bumpGlobalIdx, importIdx uint32, sig wasm.FuncSig) []b
 	cb.Call(importIdx)
 	cb.End()
 	return cb.Bytes()
+}
+
+// stubAllocator is the Go implementation of the stub's realloc and of
+// the bump reset its function wrappers do, over the same memory and bump
+// global, so that host calls need not enter the stub at all.
+type stubAllocator struct {
+	mem  api.Memory
+	bump api.MutableGlobal
+}
+
+func newStubAllocator(stubMod api.Module) (*stubAllocator, error) {
+	bump, ok := stubMod.ExportedGlobal("bump").(api.MutableGlobal)
+	if !ok {
+		return nil, fmt.Errorf("wacogo/host: stub has no mutable bump global")
+	}
+	return &stubAllocator{mem: stubMod.Memory(), bump: bump}, nil
+}
+
+// reset starts a host call, as emitResetForwardBody does.
+func (a *stubAllocator) reset() { a.bump.Set(uint64(uint32(stubBumpInitial))) }
+
+// realloc is emitReallocBody in Go: the same bump allocation, growth, and
+// copy of the old block, and a null return when memory cannot grow.
+func (a *stubAllocator) realloc(_ context.Context, oldPtr, oldSize, align, newSize uint32) (uint32, error) {
+	const pageShift = 16
+	bump := uint32(a.bump.Get())
+	result := (bump + align - 1) & -align
+	newBump := result + newSize
+	if cur := a.mem.Size(); newBump > cur {
+		pages := (newBump - cur + (1<<pageShift - 1)) >> pageShift
+		if _, ok := a.mem.Grow(pages); !ok {
+			return 0, nil
+		}
+	}
+	a.bump.Set(uint64(newBump))
+	if oldSize > 0 {
+		n := min(oldSize, newSize)
+		old, ok1 := a.mem.Read(oldPtr, n)
+		dst, ok2 := a.mem.Read(result, n)
+		if !ok1 || !ok2 {
+			return 0, fmt.Errorf("wacogo/host: realloc: out of bounds memory access")
+		}
+		copy(dst, old)
+	}
+	return result, nil
 }

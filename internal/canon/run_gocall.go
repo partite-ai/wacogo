@@ -3,8 +3,6 @@ package canon
 import (
 	"context"
 	"fmt"
-
-	"github.com/tetratelabs/wazero/api"
 )
 
 // runGocallPlan executes a compiled gocallPlan for a Go→component call
@@ -15,7 +13,7 @@ func runGocallPlan(
 	plan *gocallPlan,
 	gcc *gocallContext,
 	args []Val,
-	calleeFn api.Function,
+	calleeFn coreCallable,
 	postReturn PostReturnFunc,
 ) (results []Val, err error) {
 	// Returns are named so the borrow-trap defer below can write err.

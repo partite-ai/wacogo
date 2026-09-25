@@ -356,9 +356,13 @@ return string(bs_), nil
 		fmt.Fprintf(w, "ptr_ := uint32(stack[0])\n")
 		fmt.Fprintf(w, "ln_ := uint32(stack[1])\n")
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
-		fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
-		emitElemReadIntoLift(w, v.Elem, "out_[i_]", fmt.Sprintf("ptr_ + i_*%d", elemSize), helperName, "elem", sink, "\t", "lstT_.Elem")
-		fmt.Fprintf(w, "}\n")
+		if p, ok := v.Elem.(Prim); ok {
+			emitBulkPrimListRead(w, p, "out_", "ptr_", "callee.Memory()", helperName, "elem", sink)
+		} else {
+			fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
+			emitElemReadIntoLift(w, v.Elem, "out_[i_]", fmt.Sprintf("ptr_ + i_*%d", elemSize), helperName, "elem", sink, "\t", "lstT_.Elem")
+			fmt.Fprintf(w, "}\n")
+		}
 		fmt.Fprintf(w, "return out_, nil\n")
 	case *TypeTuple:
 		fmt.Fprintf(w, "var v_ %s\n", GoTypeOf(t))
@@ -426,9 +430,13 @@ return string(bs_), nil
 		fmt.Fprintf(w, "var ln_ uint32\n")
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "ln_", "ptr + 4", "callee.Memory()", helperName, "list len", sink))
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
-		fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
-		emitElemReadIntoLift(w, v.Elem, "out_[i_]", fmt.Sprintf("lptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t", "lstT_.Elem")
-		fmt.Fprintf(w, "}\n")
+		if p, ok := v.Elem.(Prim); ok {
+			emitBulkPrimListRead(w, p, "out_", "lptr_", "callee.Memory()", helperName, "list elem", sink)
+		} else {
+			fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
+			emitElemReadIntoLift(w, v.Elem, "out_[i_]", fmt.Sprintf("lptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t", "lstT_.Elem")
+			fmt.Fprintf(w, "}\n")
+		}
 		fmt.Fprintf(w, "return out_, nil\n")
 	case *TypeTuple:
 		fmt.Fprintf(w, "var v_ %s\n", GoTypeOf(t))
@@ -502,9 +510,13 @@ stack[1] = uint64(len(bs_))
 		fmt.Fprintf(w, "ptr_, err_ := callee.Realloc(ctx, 0, 0, %d, ln_*%d)\n", elemAlign, elemSize)
 		fmt.Fprintf(w, "if err_ != nil {\n%s\n}\n",
 			sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: realloc failed: %%w", err_)`, helperName)))
-		fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
-		emitElemWriteFromLower(w, v.Elem, "v[i_]", fmt.Sprintf("ptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t", "lstT_.Elem")
-		fmt.Fprintf(w, "}\n")
+		if p, ok := v.Elem.(Prim); ok {
+			emitBulkPrimListWrite(w, p, "v", "ptr_", "callee.Memory()", helperName, "list elem", sink)
+		} else {
+			fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
+			emitElemWriteFromLower(w, v.Elem, "v[i_]", fmt.Sprintf("ptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t", "lstT_.Elem")
+			fmt.Fprintf(w, "}\n")
+		}
 		fmt.Fprintf(w, "stack[0] = uint64(ptr_)\n")
 		fmt.Fprintf(w, "stack[1] = uint64(ln_)\n")
 	case *TypeTuple:
@@ -570,9 +582,13 @@ if ok_ := callee.Memory().Write(sptr_, bs_); !ok_ {
 		fmt.Fprintf(w, "lptr_, err_ := callee.Realloc(ctx, 0, 0, %d, ln_*%d)\n", elemAlign, elemSize)
 		fmt.Fprintf(w, "if err_ != nil {\n%s\n}\n",
 			sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: realloc failed: %%w", err_)`, helperName)))
-		fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
-		emitElemWriteFromLower(w, v.Elem, "v[i_]", fmt.Sprintf("lptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t", "lstT_.Elem")
-		fmt.Fprintf(w, "}\n")
+		if p, ok := v.Elem.(Prim); ok {
+			emitBulkPrimListWrite(w, p, "v", "lptr_", "callee.Memory()", helperName, "list elem", sink)
+		} else {
+			fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
+			emitElemWriteFromLower(w, v.Elem, "v[i_]", fmt.Sprintf("lptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t", "lstT_.Elem")
+			fmt.Fprintf(w, "}\n")
+		}
 		fmt.Fprintf(w, "%s\n", primMemWriteStmtErr(PrimU32, "ptr", "lptr_", "callee.Memory()", helperName, "list ptr", sink))
 		fmt.Fprintf(w, "%s\n", primMemWriteStmtErr(PrimU32, "ptr + 4", "ln_", "callee.Memory()", helperName, "list len", sink))
 	case *TypeTuple:
@@ -1058,7 +1074,9 @@ func emitBindFile(iface *Interface, sourceFile string) ([]byte, error) {
 	// Superset import block; formatGoSource drops what isn't referenced.
 	buf.WriteString("import (\n")
 	buf.WriteString("\t\"context\"\n")
-	buf.WriteString("\t\"fmt\"\n\n")
+	buf.WriteString("\t\"encoding/binary\"\n")
+	buf.WriteString("\t\"fmt\"\n")
+	buf.WriteString("\t\"math\"\n\n")
 	buf.WriteString("\t\"github.com/partite-ai/wacogo\"\n")
 	buf.WriteString("\t\"github.com/partite-ai/wacogo/host\"\n")
 	for _, imp := range iface.Imports {
@@ -1253,9 +1271,13 @@ return string(bs_), nil
 		fmt.Fprintf(w, "ptr_ := uint32(stack[0])\n")
 		fmt.Fprintf(w, "ln_ := uint32(stack[1])\n")
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
-		fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
-		emitElemReadIntoToGo(w, v.Elem, "out_[i_]", fmt.Sprintf("ptr_ + i_*%d", elemSize), helperName, "elem", sink, "\t", "lstT_.Elem")
-		fmt.Fprintf(w, "}\n")
+		if p, ok := v.Elem.(Prim); ok {
+			emitBulkPrimListRead(w, p, "out_", "ptr_", "cc.Memory()", helperName, "elem", sink)
+		} else {
+			fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
+			emitElemReadIntoToGo(w, v.Elem, "out_[i_]", fmt.Sprintf("ptr_ + i_*%d", elemSize), helperName, "elem", sink, "\t", "lstT_.Elem")
+			fmt.Fprintf(w, "}\n")
+		}
 		fmt.Fprintf(w, "return out_, nil\n")
 	case *TypeTuple:
 		fmt.Fprintf(w, "var v_ %s\n", GoTypeOf(t))
@@ -1325,9 +1347,13 @@ return string(bs_), nil
 		fmt.Fprintf(w, "var ln_ uint32\n")
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "ln_", "ptr + 4", "cc.Memory()", helperName, "list len", sink))
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
-		fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
-		emitElemReadIntoToGo(w, v.Elem, "out_[i_]", fmt.Sprintf("lptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t", "lstT_.Elem")
-		fmt.Fprintf(w, "}\n")
+		if p, ok := v.Elem.(Prim); ok {
+			emitBulkPrimListRead(w, p, "out_", "lptr_", "cc.Memory()", helperName, "list elem", sink)
+		} else {
+			fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
+			emitElemReadIntoToGo(w, v.Elem, "out_[i_]", fmt.Sprintf("lptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t", "lstT_.Elem")
+			fmt.Fprintf(w, "}\n")
+		}
 		fmt.Fprintf(w, "return out_, nil\n")
 	case *TypeTuple:
 		fmt.Fprintf(w, "var v_ %s\n", GoTypeOf(t))
@@ -1398,9 +1424,13 @@ stack[1] = uint64(len(bs_))
 		fmt.Fprintf(w, "ptr_, err_ := cc.Realloc(ctx, 0, 0, %d, ln_*%d)\n", elemAlign, elemSize)
 		fmt.Fprintf(w, "if err_ != nil {\n%s\n}\n",
 			sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: realloc failed: %%w", err_)`, helperName)))
-		fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
-		emitElemWriteFromGo(w, v.Elem, "v[i_]", fmt.Sprintf("ptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t")
-		fmt.Fprintf(w, "}\n")
+		if p, ok := v.Elem.(Prim); ok {
+			emitBulkPrimListWrite(w, p, "v", "ptr_", "cc.Memory()", helperName, "list elem", sink)
+		} else {
+			fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
+			emitElemWriteFromGo(w, v.Elem, "v[i_]", fmt.Sprintf("ptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t")
+			fmt.Fprintf(w, "}\n")
+		}
 		fmt.Fprintf(w, "stack[0] = uint64(ptr_)\n")
 		fmt.Fprintf(w, "stack[1] = uint64(ln_)\n")
 	case *TypeTuple:
@@ -1460,9 +1490,13 @@ if ok_ := cc.Memory().Write(sptr_, bs_); !ok_ {
 		fmt.Fprintf(w, "lptr_, err_ := cc.Realloc(ctx, 0, 0, %d, ln_*%d)\n", elemAlign, elemSize)
 		fmt.Fprintf(w, "if err_ != nil {\n%s\n}\n",
 			sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: realloc failed: %%w", err_)`, helperName)))
-		fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
-		emitElemWriteFromGo(w, v.Elem, "v[i_]", fmt.Sprintf("lptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t")
-		fmt.Fprintf(w, "}\n")
+		if p, ok := v.Elem.(Prim); ok {
+			emitBulkPrimListWrite(w, p, "v", "lptr_", "cc.Memory()", helperName, "list elem", sink)
+		} else {
+			fmt.Fprintf(w, "for i_ := uint32(0); i_ < ln_; i_++ {\n")
+			emitElemWriteFromGo(w, v.Elem, "v[i_]", fmt.Sprintf("lptr_ + i_*%d", elemSize), helperName, "list elem", sink, "\t")
+			fmt.Fprintf(w, "}\n")
+		}
 		fmt.Fprintf(w, "%s\n", primMemWriteStmtErr(PrimU32, "ptr", "lptr_", "cc.Memory()", helperName, "list ptr", sink))
 		fmt.Fprintf(w, "%s\n", primMemWriteStmtErr(PrimU32, "ptr + 4", "ln_", "cc.Memory()", helperName, "list len", sink))
 	case *TypeTuple:
@@ -2755,4 +2789,86 @@ func emitLowerMemVariant(w *strings.Builder, v *TypeVariant, helperName string, 
 	fmt.Fprint(w, "default:\n")
 	fmt.Fprintf(w, "\t%s\n", sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: unknown variant case")`, helperName)))
 	fmt.Fprint(w, "}\n")
+}
+
+// bulkPrimCodec gives, for a primitive list element, its size in memory
+// and Go expressions converting between the value (e_) and its encoding
+// at buf_[o_:], matching primMemReadStmt and primMemWriteStmtErr.
+func bulkPrimCodec(p Prim) (size int, read, write string) {
+	le := func(bits int) (string, string) {
+		return fmt.Sprintf("binary.LittleEndian.Uint%d(buf_[o_:])", bits),
+			fmt.Sprintf("binary.LittleEndian.PutUint%d(buf_[o_:], %%s)", bits)
+	}
+	switch p {
+	case PrimBool:
+		return 1, "buf_[o_] != 0", "buf_[o_] = 0\nif e_ {\nbuf_[o_] = 1\n}"
+	case PrimU8:
+		return 1, "buf_[o_]", "buf_[o_] = e_"
+	case PrimS8:
+		return 1, "int8(buf_[o_])", "buf_[o_] = byte(e_)"
+	case PrimU16:
+		r, w := le(16)
+		return 2, r, fmt.Sprintf(w, "e_")
+	case PrimS16:
+		r, w := le(16)
+		return 2, "int16(" + r + ")", fmt.Sprintf(w, "uint16(e_)")
+	case PrimU32:
+		r, w := le(32)
+		return 4, r, fmt.Sprintf(w, "e_")
+	case PrimS32:
+		r, w := le(32)
+		return 4, "int32(" + r + ")", fmt.Sprintf(w, "uint32(e_)")
+	case PrimChar:
+		r, w := le(32)
+		return 4, "rune(" + r + ")", fmt.Sprintf(w, "uint32(e_)")
+	case PrimF32:
+		r, w := le(32)
+		return 4, "math.Float32frombits(" + r + ")", fmt.Sprintf(w, "math.Float32bits(e_)")
+	case PrimU64:
+		r, w := le(64)
+		return 8, r, fmt.Sprintf(w, "e_")
+	case PrimS64:
+		r, w := le(64)
+		return 8, "int64(" + r + ")", fmt.Sprintf(w, "uint64(e_)")
+	case PrimF64:
+		r, w := le(64)
+		return 8, "math.Float64frombits(" + r + ")", fmt.Sprintf(w, "math.Float64bits(e_)")
+	}
+	panic("witgen: bulkPrimCodec: unknown Prim")
+}
+
+// emitBulkPrimView emits buf_, a view of the list's ln_ elements at
+// baseVar in memExpr: one bounds check for the whole list, where the
+// per-element form checks (and calls through the Memory interface) for
+// every element.
+func emitBulkPrimView(w *strings.Builder, size int, baseVar, memExpr, helperName, op, dir string, sink errSink) {
+	errExpr := fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: %s: bad memory %s")`, helperName, op, dir)
+	fmt.Fprintf(w, "n_ := uint64(ln_) * %d\n", size)
+	fmt.Fprintf(w, "if n_ > math.MaxUint32 {\n%s\n}\n", sink.Emit(errExpr))
+	fmt.Fprintf(w, "buf_, ok_ := %s.Read(%s, uint32(n_))\n", memExpr, baseVar)
+	fmt.Fprintf(w, "if !ok_ {\n%s\n}\n", sink.Emit(errExpr))
+}
+
+// emitBulkPrimListRead fills dstVar (already made with ln_ elements)
+// from the list at baseVar.
+func emitBulkPrimListRead(w *strings.Builder, p Prim, dstVar, baseVar, memExpr, helperName, op string, sink errSink) {
+	size, read, _ := bulkPrimCodec(p)
+	emitBulkPrimView(w, size, baseVar, memExpr, helperName, op, "read", sink)
+	if p == PrimU8 {
+		fmt.Fprintf(w, "copy(%s, buf_)\n", dstVar)
+		return
+	}
+	fmt.Fprintf(w, "for i_ := range %s {\n\to_ := i_ * %d\n\t%s[i_] = %s\n}\n", dstVar, size, dstVar, read)
+}
+
+// emitBulkPrimListWrite writes srcVar (ln_ elements) to the list memory
+// at baseVar.
+func emitBulkPrimListWrite(w *strings.Builder, p Prim, srcVar, baseVar, memExpr, helperName, op string, sink errSink) {
+	size, _, write := bulkPrimCodec(p)
+	emitBulkPrimView(w, size, baseVar, memExpr, helperName, op, "write", sink)
+	if p == PrimU8 {
+		fmt.Fprintf(w, "copy(buf_, %s)\n", srcVar)
+		return
+	}
+	fmt.Fprintf(w, "for i_, e_ := range %s {\n\to_ := i_ * %d\n\t%s\n}\n", srcVar, size, write)
 }
