@@ -439,8 +439,10 @@ caller can later pass the same value back into `LendTo` /
 Invariants:
 
 - **Gocall is one-way Go→wasm.** Borrow Vals never appear as
-  results, and the gocall path never mints a fresh resource — Go
-  obtains an own only by lifting one out of a returned `Val`.
+  results. Go normally obtains an own by lifting one out of a returned
+  `Val`; a host that already owns a representation registered with the
+  resource's defining instance may explicitly construct an own with
+  `wacogo.NewValOwnHandle` and transfer it through `Func.Call`.
 - **State machine.** A `*ValOwnHandle` walks `empty → valid →
   {transferred, dropped}`. `Rep` / `Type` panic on `transferred`;
   `Drop` is idempotent on `dropped` and a no-op on `empty`. Methods
