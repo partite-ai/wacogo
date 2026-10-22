@@ -90,6 +90,7 @@ func (h *Host) BuildAdapter(
 		Realloc:        callee.realloc(),
 		StringEncoding: callee.StringEncoding,
 		ResourceTable:  callee.Instance.ResourceTable(),
+		Arguments:      callee.Arguments,
 	}
 	// caller.Memory is nil iff the corresponding canon-lower had no
 	// (memory ...) option — i.e. the signature doesn't transfer any

@@ -29,6 +29,7 @@ type ImportDesc struct {
 type CompiledModule struct {
 	module        wazero.CompiledModule
 	syntheticName string
+	tables        []CoreTable
 
 	// wpModuleType is the opaque wasmparser handle for this module's
 	// core-module type. Non-nil for modules defined inline in a loaded

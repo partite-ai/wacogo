@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -21,6 +22,18 @@ type EngineOption func(*engineConfig)
 
 type engineConfig struct {
 	runtimeConfig wazero.RuntimeConfig
+	liftLimits    canon.LiftLimits
+}
+
+type LiftLimits = canon.LiftLimits
+
+var ErrLiftLimit = canon.ErrLiftLimit
+
+// WithLiftLimits configures per-call canonical lifting budgets. Zero fields
+// are unlimited. CallRaw result decoders, including generated typed bindings,
+// remain the caller's responsibility and are not covered by these limits.
+func WithLiftLimits(limits LiftLimits) EngineOption {
+	return func(c *engineConfig) { c.liftLimits = limits }
 }
 
 // WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
@@ -32,10 +45,16 @@ func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
 
 // Engine owns the wazero runtime and is the entry point for loading components.
 type Engine struct {
-	runtime   wazero.Runtime
-	canonHost *canon.Host
-	features  wasmparser.FeatureSet
-	closed    atomic.Bool
+	runtime    wazero.Runtime
+	canonHost  *canon.Host
+	features   wasmparser.FeatureSet
+	closed     atomic.Bool
+	liftLimits canon.LiftLimits
+
+	lifecycleMu     sync.Mutex
+	runtimeClosed   bool
+	tableModules    map[uint64]*accountedModule
+	nextTableModule uint64
 
 	// bridges caches compiled instantiate-from-exports bridge modules by
 	// their bytes, which depend only on the component, not the instance.
@@ -55,10 +74,11 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 	}
 	rt := wazero.NewRuntimeWithConfig(ctx, cnf)
 	return &Engine{
-		runtime:   rt,
-		canonHost: canon.NewHost(rt),
-		features:  wasmparser.DefaultFeatures(),
-		bridges:   map[string]wazero.CompiledModule{},
+		runtime:    rt,
+		canonHost:  canon.NewHost(rt),
+		features:   wasmparser.DefaultFeatures(),
+		bridges:    map[string]wazero.CompiledModule{},
+		liftLimits: cfg.liftLimits,
 	}
 }
 
@@ -78,14 +98,39 @@ func (e *Engine) compiledBridge(ctx context.Context, bridgeWasm []byte) (wazero.
 	return cm, nil
 }
 
-// Close releases all resources held by the engine. Idempotent: subsequent
-// calls are no-ops returning nil. Once closed, the engine will not accept
-// further LoadComponent / Instantiate calls.
+// Close releases resources held by the engine and rejects further loading or
+// instantiation. Reentrant and repeated calls are no-ops. Callbacks may call
+// Close synchronously; reservations acquired or already being torn down by an
+// in-flight callback are released when that operation unwinds.
 func (e *Engine) Close(ctx context.Context) error {
+	e.lifecycleMu.Lock()
 	if !e.closed.CompareAndSwap(false, true) {
+		e.lifecycleMu.Unlock()
 		return nil
 	}
-	return e.runtime.Close(ctx)
+	e.lifecycleMu.Unlock()
+	runtimeErr := e.runtime.Close(ctx)
+	e.lifecycleMu.Lock()
+	e.runtimeClosed = true
+	ids := make([]uint64, 0, len(e.tableModules))
+	for id := range e.tableModules {
+		if m := e.tableModules[id]; m.phase != moduleClosing && m.owner.activeOperations == 0 {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	modules := make([]*accountedModule, 0, len(ids))
+	for _, id := range ids {
+		modules = append(modules, e.tableModules[id])
+	}
+	e.lifecycleMu.Unlock()
+	errs := []error{runtimeErr}
+	for i := len(modules) - 1; i >= 0; i-- {
+		if err := modules[i].refund(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // IsClosed reports whether the engine has been closed.
@@ -95,6 +140,9 @@ func (e *Engine) IsClosed() bool { return e.closed.Load() }
 // function (not a method) so the host-internal accessor doesn't promote
 // onto the public wacogo.Engine wrapper via embedding.
 func WazeroRuntime(e *Engine) wazero.Runtime { return e.runtime }
+
+// EngineLiftLimits exposes immutable engine policy to the host package.
+func EngineLiftLimits(e *Engine) LiftLimits { return e.liftLimits }
 
 // Features returns the engine's parser feature set. Package-level
 // function (not a method) for the same reason as WazeroRuntime.

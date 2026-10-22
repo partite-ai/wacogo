@@ -191,6 +191,10 @@ func (e *Engine) loadComponentFromParser(ctx context.Context, parser *wasmparser
 
 func (l *componentLoader) processModuleSection(ctx context.Context, sec *wasmparser.ValidatedModuleSectionPayload) error {
 	raw := sec.Raw()
+	tables, err := CoreModuleTables(raw.Data)
+	if err != nil {
+		return fmt.Errorf("wacogo: read core tables: %w", err)
+	}
 	rewritten, syntheticName, err := wasm.RewriteBlankImportNames(raw.Data)
 	if err != nil {
 		return fmt.Errorf("wacogo: rewrite blank imports: %w", err)
@@ -202,6 +206,7 @@ func (l *componentLoader) processModuleSection(ctx context.Context, sec *wasmpar
 	l.scope.compiledModules = append(l.scope.compiledModules, CompiledModule{
 		module:        compiled,
 		syntheticName: syntheticName,
+		tables:        tables,
 		wpModuleType:  sec.ModuleType(),
 	})
 	return nil

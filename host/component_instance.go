@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/partite-ai/wacogo/internal/canon"
 	"github.com/partite-ai/wacogo/internal/core"
 )
 
@@ -43,6 +44,7 @@ type ComponentInstance struct {
 	callListener CallListener
 	cleanups     []func()
 	hostCallCC   *core.CallContext
+	validateArgs map[*funcRuntime]*canon.LiftValidator
 }
 
 // Core returns the underlying *wacogo.ComponentInstance, suitable for

@@ -192,7 +192,7 @@ const maxDtorDepth = 32
 // A cumulative dtor-call depth carried on ctx caps recursion at
 // maxDtorDepth; exceeding the cap returns an error rather than risking
 // deadlock or stack overflow.
-func runDtor(ctx context.Context, tr *TypeResource, rep uint32, caller *ComponentInstance) error {
+func runDtor(ctx context.Context, tr *TypeResource, rep uint32, caller *ComponentInstance) (err error) {
 	if tr == nil {
 		return nil
 	}
@@ -215,7 +215,7 @@ func runDtor(ctx context.Context, tr *TypeResource, rep uint32, caller *Componen
 	if err := defining.Enter(ctx); err != nil {
 		return err
 	}
-	defer defining.Exit(ctx)
+	defer finishTableCleanup(&err, defining.finishCall)
 	return dtor(ctx, rep)
 }
 

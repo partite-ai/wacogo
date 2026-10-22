@@ -411,7 +411,7 @@ func sortName(s Sort) string {
 	}
 }
 
-func (step *planInstantiateModule) execute(ctx context.Context, s *instantiationState) error {
+func (step *planInstantiateModule) execute(ctx context.Context, s *instantiationState) (err error) {
 	if int(step.moduleIndex) >= len(s.compiledModules) {
 		return fmt.Errorf("wacogo: instantiate: module index %d out of range", step.moduleIndex)
 	}
@@ -451,13 +451,35 @@ func (step *planInstantiateModule) execute(ctx context.Context, s *instantiation
 	modName := fmt.Sprintf("__wacogo_inst_%d", instanceCounter.Add(1))
 	modCfg := wazero.NewModuleConfig().WithName(modName)
 
+	release, err := reserveCoreTables(ctx, cm.tables)
+	defer finishTableCleanup(&err, func() error {
+		if release != nil {
+			return releaseCoreTables(release)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("wacogo: core table allocation: %w", err)
+	}
 	inst, err := s.inst.engine.runtime.InstantiateModule(resolverCtx, cm.module, modCfg)
 	if err != nil {
 		return fmt.Errorf("wacogo: instantiate module %d: %w", step.moduleIndex, err)
 	}
 
 	s.coreInstances = append(s.coreInstances, inst)
-	s.inst.owned = append(s.inst.owned, inst)
+	if release != nil {
+		accounted, refundErr := s.inst.engine.accountModule(s.inst, inst, release)
+		s.inst.owned = append(s.inst.owned, accounted)
+		release = nil
+		if refundErr != nil {
+			return refundErr
+		}
+	} else {
+		s.inst.owned = append(s.inst.owned, inst)
+	}
+	if s.inst.engine.IsClosed() {
+		return ErrEngineClosed
+	}
 	return nil
 }
 
@@ -749,6 +771,7 @@ func (s *instantiationState) buildLiftedFunc(
 		},
 		CoreFunc:   coreFn,
 		PostReturn: postReturnFn,
+		LiftLimits: s.inst.engine.liftLimits,
 	}
 	fn := &Func{
 		funcType: funcType,

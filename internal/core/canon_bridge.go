@@ -21,11 +21,19 @@ import (
 type canonInstanceView struct{ i *ComponentInstance }
 
 func (v canonInstanceView) Enter(ctx context.Context) error { return v.i.Enter(ctx) }
-func (v canonInstanceView) Exit(ctx context.Context)        { v.i.Exit(ctx) }
-func (v canonInstanceView) CanLeave() bool                  { return v.i.CanLeave() }
-func (v canonInstanceView) SuspendLeave() bool              { return v.i.SuspendLeave() }
-func (v canonInstanceView) RestoreLeave(prev bool)          { v.i.RestoreLeave(prev) }
-func (v canonInstanceView) Poison(reason error)             { v.i.Poison(reason) }
+func (v canonInstanceView) Exit(ctx context.Context) {
+	// Canon defers this adapter, so recover here and rethrow through the
+	// directly deferred component Exit, which joins any refund failure.
+	original := recover()
+	defer v.i.Exit(ctx)
+	if original != nil {
+		panic(original)
+	}
+}
+func (v canonInstanceView) CanLeave() bool         { return v.i.CanLeave() }
+func (v canonInstanceView) SuspendLeave() bool     { return v.i.SuspendLeave() }
+func (v canonInstanceView) RestoreLeave(prev bool) { v.i.RestoreLeave(prev) }
+func (v canonInstanceView) Poison(reason error)    { v.i.Poison(reason) }
 func (v canonInstanceView) ResourceTable() canon.ResourceTable {
 	if v.i == nil || v.i.resources == nil {
 		return nil

@@ -23,7 +23,10 @@ type ComponentInstance struct {
 	// Populated during instantiation.
 	resources *ResourceTable
 	entered   bool
-	canLeave  bool
+	// activeOperations and refundPending are guarded by engine.lifecycleMu.
+	activeOperations uint32
+	refundPending    bool
+	canLeave         bool
 	// poisoned is set by Poison when a trap leaves the instance in an
 	// unreliable state. Non-nil makes Enter fail; nil means usable.
 	poisoned error
@@ -155,16 +158,26 @@ func (i *ComponentInstance) Enter(ctx context.Context) error {
 		return fmt.Errorf("cannot enter component instance (reentrance trap)")
 	}
 	i.entered = true
+	i.beginOperation()
 	return nil
 }
 
 // Exit releases the reentrance lock acquired by Enter. Idempotent on a nil
 // receiver. The caller MUST NOT call Exit unless a matching Enter succeeded.
 func (i *ComponentInstance) Exit(_ context.Context) {
+	original := recover()
+	defer finishTableCleanup(nil, i.finishCall)
+	if original != nil {
+		panic(original)
+	}
+}
+
+func (i *ComponentInstance) finishCall() error {
 	if i == nil {
-		return
+		return nil
 	}
 	i.entered = false
+	return i.endOperation()
 }
 
 // Poison marks the instance as unusable due to a trap. Subsequent Enter
@@ -233,11 +246,11 @@ func (i *ComponentInstance) RestoreLeave(prev bool) {
 
 // RunInComponent runs fn with the instance entered, releasing on return
 // regardless of whether fn errored.
-func (i *ComponentInstance) RunInComponent(ctx context.Context, fn func() error) error {
+func (i *ComponentInstance) RunInComponent(ctx context.Context, fn func() error) (err error) {
 	if err := i.Enter(ctx); err != nil {
 		return err
 	}
-	defer i.Exit(ctx)
+	defer finishTableCleanup(&err, i.finishCall)
 	return fn()
 }
 
@@ -247,12 +260,16 @@ func (i *ComponentInstance) RunInComponent(ctx context.Context, fn func() error)
 // Handles are retired before destruction; repeated and reentrant Close calls
 // are no-ops. Modules and adapters then close in reverse ownership order.
 // Errors are joined, and individual destructor failures do not stop cleanup.
-func (i *ComponentInstance) Close(ctx context.Context) error {
+func (i *ComponentInstance) Close(ctx context.Context) (err error) {
 	if i == nil || i.closed {
 		return nil
 	}
 	var teardown instanceTeardown
 	teardown.collect(i)
+	for _, instance := range teardown.instances {
+		instance.beginOperation()
+		defer finishTableCleanup(&err, instance.endOperation)
+	}
 	var errs []error
 	for {
 		dropped := false

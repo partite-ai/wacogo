@@ -125,6 +125,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 		extTable:     &externTable{},
 		userState:    iopts.userState,
 		callListener: iopts.callListener,
+		validateArgs: make(map[*funcRuntime]*canon.LiftValidator),
 	}
 
 	// 2. Per-instance host module + stub instantiation; closures capture h.
@@ -240,7 +241,15 @@ func (c *Component) buildFuncExports(
 		if err != nil {
 			return nil, fmt.Errorf("wacogo/host: func %q: %w", fr.exportName, err)
 		}
+		limits := core.EngineLiftLimits(c.engine)
+		var validator *canon.LiftValidator
+		if limits != (canon.LiftLimits{}) {
+			validator = canon.NewLiftValidator(core.FuncTypeParamsAsCanon(coreFT), limits)
+			h.validateArgs[fr] = validator
+		}
 		callee := canon.Callee{
+			LiftLimits: limits,
+			Arguments:  validator,
 			CallSide: canon.CallSide{
 				Instance:       core.InstanceAsCanon(inst),
 				Memory:         stubMemory,
@@ -255,6 +264,11 @@ func (c *Component) buildFuncExports(
 			Direct: func(ctx context.Context, stack []uint64) {
 				alloc.reset()
 				instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
+					if validator != nil {
+						if err := validator.Validate(ctx, stubMemory, canon.EncUTF8, stack); err != nil {
+							return err
+						}
+					}
 					return fr.userFn(ctx, h.hostCallCC, h, stack)
 				})
 			},

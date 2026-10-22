@@ -480,7 +480,7 @@ func (h *ValOwnHandle) TransferOwn(target TransferTarget) (ResourceHandle, error
 // instance Enter gating). Idempotent on already-dropped handles and
 // no-op on empty (never-populated) handles; errors on handles that
 // were transferred out by a prior call.
-func (h *ValOwnHandle) Drop(ctx context.Context) error {
+func (h *ValOwnHandle) Drop(ctx context.Context) (err error) {
 	if h == nil {
 		return nil
 	}
@@ -508,7 +508,7 @@ func (h *ValOwnHandle) Drop(ctx context.Context) error {
 	if err := defining.Enter(ctx); err != nil {
 		return err
 	}
-	defer defining.Exit(ctx)
+	defer exitWithError(ctx, defining, &err)
 	return dtor(ctx, rep)
 }
 
