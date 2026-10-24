@@ -45,6 +45,7 @@ func NewCallBinding(params, results []Type, callee Callee) *CallBinding {
 		core:       callee.core(),
 	}
 	cb.gcc.callee = side
+	cb.gcc.limits = callee.LiftLimits
 	return cb
 }
 

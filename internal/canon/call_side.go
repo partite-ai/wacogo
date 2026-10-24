@@ -50,6 +50,8 @@ type Callee struct {
 	CallSide
 	CoreFunc   api.Function
 	PostReturn api.Function // optional; nil if the callee has no post-return
+	LiftLimits LiftLimits
+	Arguments  *LiftValidator // optional host-argument preflight for component adapters
 
 	// Direct, when set, runs the callee in Go instead of calling CoreFunc:
 	// for host components, whose functions are implemented in Go, it

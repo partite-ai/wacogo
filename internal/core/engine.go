@@ -21,6 +21,18 @@ type EngineOption func(*engineConfig)
 
 type engineConfig struct {
 	runtimeConfig wazero.RuntimeConfig
+	liftLimits    canon.LiftLimits
+}
+
+type LiftLimits = canon.LiftLimits
+
+var ErrLiftLimit = canon.ErrLiftLimit
+
+// WithLiftLimits configures per-call canonical lifting budgets. Zero fields
+// are unlimited. CallRaw result decoders, including generated typed bindings,
+// remain the caller's responsibility and are not covered by these limits.
+func WithLiftLimits(limits LiftLimits) EngineOption {
+	return func(c *engineConfig) { c.liftLimits = limits }
 }
 
 // WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
@@ -32,10 +44,11 @@ func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
 
 // Engine owns the wazero runtime and is the entry point for loading components.
 type Engine struct {
-	runtime   wazero.Runtime
-	canonHost *canon.Host
-	features  wasmparser.FeatureSet
-	closed    atomic.Bool
+	runtime    wazero.Runtime
+	canonHost  *canon.Host
+	features   wasmparser.FeatureSet
+	closed     atomic.Bool
+	liftLimits canon.LiftLimits
 
 	// bridges caches compiled instantiate-from-exports bridge modules by
 	// their bytes, which depend only on the component, not the instance.
@@ -55,10 +68,11 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 	}
 	rt := wazero.NewRuntimeWithConfig(ctx, cnf)
 	return &Engine{
-		runtime:   rt,
-		canonHost: canon.NewHost(rt),
-		features:  wasmparser.DefaultFeatures(),
-		bridges:   map[string]wazero.CompiledModule{},
+		runtime:    rt,
+		canonHost:  canon.NewHost(rt),
+		features:   wasmparser.DefaultFeatures(),
+		bridges:    map[string]wazero.CompiledModule{},
+		liftLimits: cfg.liftLimits,
 	}
 }
 
@@ -95,6 +109,9 @@ func (e *Engine) IsClosed() bool { return e.closed.Load() }
 // function (not a method) so the host-internal accessor doesn't promote
 // onto the public wacogo.Engine wrapper via embedding.
 func WazeroRuntime(e *Engine) wazero.Runtime { return e.runtime }
+
+// EngineLiftLimits exposes immutable engine policy to the host package.
+func EngineLiftLimits(e *Engine) LiftLimits { return e.liftLimits }
 
 // Features returns the engine's parser feature set. Package-level
 // function (not a method) for the same reason as WazeroRuntime.

@@ -749,6 +749,7 @@ func (s *instantiationState) buildLiftedFunc(
 		},
 		CoreFunc:   coreFn,
 		PostReturn: postReturnFn,
+		LiftLimits: s.inst.engine.liftLimits,
 	}
 	fn := &Func{
 		funcType: funcType,
