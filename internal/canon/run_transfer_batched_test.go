@@ -2,6 +2,7 @@ package canon
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/partite-ai/wacogo/internal/wasm"
@@ -276,5 +277,85 @@ func TestRunPhasedTransfer_GrowsScratchForLargeN(t *testing.T) {
 	gotN := uint32(tc.registers[1])
 	if gotN != n {
 		t.Errorf("dst n = %d, want %d", gotN, n)
+	}
+}
+
+// TestRunPhasedTransfer_BatchedTranscodeExactSizes verifies that batched
+// cross-encoding string transfers reserve exactly the transcoded length:
+// with a bump allocator, each string's destination pointer must directly
+// follow the previous string's bytes.
+func TestRunPhasedTransfer_BatchedTranscodeExactSizes(t *testing.T) {
+	strs := []string{"aé", "\U0001F600", "x中"}
+	pairs := []struct{ src, dst StringEncoding }{
+		{EncUTF8, EncUTF16},
+		{EncUTF16, EncUTF8},
+		{EncUTF8, EncLatin1UTF16},
+		{EncLatin1UTF16, EncUTF8},
+	}
+	for i, p := range pairs {
+		t.Run(fmt.Sprintf("%v->%v", p.src, p.dst), func(t *testing.T) {
+			ctx := context.Background()
+			rt := wazero.NewRuntime(ctx)
+			t.Cleanup(func() { _ = rt.Close(ctx) })
+
+			const bumpStart uint32 = 1024
+			calleeMod := setupBumpCallee(t, rt, fmt.Sprintf("callee_transcode_%d", i), bumpStart)
+			var sb wasm.ModuleBuilder
+			sb.AddMemory(1, 0)
+			sb.AddExportMemory("memory", 0)
+			srcCompiled, err := rt.CompileModule(ctx, sb.Encode())
+			if err != nil {
+				t.Fatalf("compile src: %v", err)
+			}
+			srcMod, err := rt.InstantiateModule(ctx, srcCompiled, wazero.NewModuleConfig().WithName(fmt.Sprintf("src_transcode_%d", i)))
+			if err != nil {
+				t.Fatalf("instantiate src: %v", err)
+			}
+			t.Cleanup(func() { _ = srcMod.Close(ctx) })
+			helper, err := NewHost(rt).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+			if err != nil {
+				t.Fatalf("buildBatchReallocHelper: %v", err)
+			}
+			t.Cleanup(func() { _ = helper.close(ctx) })
+
+			srcMem := srcMod.Memory()
+			for j, s := range strs {
+				b, coded := encodeString(s, p.src)
+				ptr := uint32(100 * (j + 1))
+				srcMem.WriteUint32Le(uint32(j)*8, ptr)
+				srcMem.WriteUint32Le(uint32(j)*8+4, coded)
+				srcMem.Write(ptr, b)
+			}
+
+			v := &flatTransferVisitor{}
+			v.VisitList(testStringType{})
+			tc := &transferContext{
+				caller: &transferSide{Instance: &testInstance{name: "caller"}, Memory: srcMem, StringEncoding: p.src},
+				callee: &transferSide{
+					Instance:       &testInstance{name: "callee"},
+					Memory:         calleeMod.Memory(),
+					Realloc:        reallocFromExport(calleeMod.ExportedFunction("realloc")),
+					StringEncoding: p.dst,
+					BatchHelper:    helper,
+				},
+				registers: []uint64{0, uint64(len(strs))},
+			}
+			runPhasedTransfer(ctx, tc, v.out, 0, 0)
+
+			dstMem := calleeMod.Memory()
+			listPtr := uint32(tc.registers[0])
+			next := bumpStart + uint32(len(strs))*8
+			for j, s := range strs {
+				gotPtr, _ := dstMem.ReadUint32Le(listPtr + uint32(j)*8)
+				gotCoded, _ := dstMem.ReadUint32Le(listPtr + uint32(j)*8 + 4)
+				if gotPtr != next {
+					t.Errorf("string[%d] dst ptr = %d, want %d", j, gotPtr, next)
+				}
+				if got := decodeString(memShim{dstMem}, gotPtr, gotCoded, p.dst); got != s {
+					t.Errorf("string[%d] = %q, want %q", j, got, s)
+				}
+				next = gotPtr + uint32(stringByteLen(gotCoded, p.dst))
+			}
+		})
 	}
 }

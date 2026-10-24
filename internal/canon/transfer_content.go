@@ -13,12 +13,12 @@ func transferStringContent(ctx context.Context, tc *transferContext, srcPtr, src
 	dstEnc := tc.callee.StringEncoding
 
 	byteLen := stringByteLen(srcCoded, srcEnc)
-	if byteLen > maxStringByteLength {
+	if byteLen > uint64(maxStringByteLength) {
 		panic(&Trap{msg: "string byte length exceeds max"})
 	}
 	mustTransfer(checkAlignment(srcPtr, stringAlign(srcEnc)))
 
-	srcBytes, ok := tc.caller.Memory.Read(srcPtr, byteLen)
+	srcBytes, ok := tc.caller.Memory.Read(srcPtr, uint32(byteLen))
 	if !ok {
 		panic(&Trap{msg: fmt.Sprintf("string content out-of-bounds: ptr=%d len=%d", srcPtr, byteLen)})
 	}
@@ -51,10 +51,8 @@ func transferStringContent(ctx context.Context, tc *transferContext, srcPtr, src
 		outBytes, outCoded = encodeString(s, dstEnc)
 	}
 
-	// The discovery walk requested a buffer sized to the worst-case under
-	// stringEncoderUpperBound. The actual output length (len(outBytes)) is
-	// always ≤ that bound. The destination pointer reserves at least that
-	// many bytes; we only write the actual outBytes.
+	// In batched mode the discovery walk (stringContentSizeStep) already
+	// reserved exactly len(outBytes); src.next checks the sizes agree.
 	dstPtr := src.next(ctx, tc, uint32(len(outBytes)), stringAlign(dstEnc))
 	if !tc.callee.Memory.Write(dstPtr, outBytes) {
 		panic(&Trap{msg: "string oob write"})
@@ -62,16 +60,24 @@ func transferStringContent(ctx context.Context, tc *transferContext, srcPtr, src
 	return dstPtr, outCoded
 }
 
-// stringContentSizeStep is the discovery walk for a string transfer.
-// Given the source coded length, it computes the upper-bound byte count
-// under the applicable encoding conversion and reports a single allocation.
-// Source bytes themselves are not needed for sizing.
-func stringContentSizeStep(tc *transferContext, srcCoded uint32, sink *allocSink) {
+// stringContentSizeStep is the discovery walk for a string transfer. It
+// reports a single allocation of exactly the byte length the transfer step
+// will write. Same-encoding transfers copy verbatim, so the size follows
+// from srcCoded alone; cross-encoding transfers read and validate the
+// source to count its transcoded length.
+func stringContentSizeStep(tc *transferContext, srcPtr, srcCoded uint32, sink *allocSink) {
 	srcEnc := tc.caller.StringEncoding
 	dstEnc := tc.callee.StringEncoding
-	byteLen := stringByteLen(srcCoded, srcEnc)
-	upper := byteLen * stringEncoderUpperBoundMultiplier(srcEnc, dstEnc)
-	sink.add(upper, stringAlign(dstEnc))
+	if srcEnc == dstEnc {
+		byteLen := stringByteLen(srcCoded, srcEnc)
+		if byteLen > uint64(maxStringByteLength) {
+			panic(&Trap{msg: "string byte length exceeds max"})
+		}
+		sink.add(uint32(byteLen), stringAlign(dstEnc))
+		return
+	}
+	srcBytes := readStringBytes(memShim{tc.caller.Memory}, srcPtr, srcCoded, srcEnc)
+	sink.add(transcodedByteLen(srcBytes, srcCoded, srcEnc, dstEnc), stringAlign(dstEnc))
 }
 
 // transferListBulk is the fast path for lists whose element type's

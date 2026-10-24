@@ -34,6 +34,9 @@ func (s *allocSource) next(ctx context.Context, tc *transferContext, size, align
 	if s.idx >= s.n {
 		panic(fmt.Sprintf("allocSource: cursor %d >= count %d (size discovery missed an alloc)", s.idx, s.n))
 	}
+	if want := s.helper.readSize(s.idx); want != size {
+		panic(fmt.Sprintf("allocSource: alloc %d requested %d bytes, discovery reserved %d", s.idx, size, want))
+	}
 	p := s.helper.readPtr(s.n, s.idx)
 	s.idx++
 	return p
