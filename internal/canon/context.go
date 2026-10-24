@@ -38,6 +38,10 @@ type transferContext struct {
 	// build time, not once per call.
 	allocSrc  allocSource
 	allocSink allocSink
+
+	// budget bounds each lift (the params phase, then the results phase);
+	// reset at the start of each phase by runPhasedTransfer.
+	budget liftBudget
 }
 
 // endTaskOrTrap is the per-call End-of-task hook used as a method-bound
@@ -60,6 +64,9 @@ type gocallContext struct {
 	callee    *transferSide
 	registers []uint64 // core args/results slice
 	Task      Task
+
+	// budget bounds the result lift; reset before each one.
+	budget liftBudget
 }
 
 // endTask is the per-call End-of-task hook used as a method-bound defer

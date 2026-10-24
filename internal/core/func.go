@@ -83,6 +83,7 @@ func (f *Func) CallRaw(
 		callee.Memory,
 		realloc,
 	)
+	calleeCC.liftLimit = f.binding.MaxLiftBytes()
 
 	defer func() {
 		if endErr := task.End(); endErr != nil && err == nil {

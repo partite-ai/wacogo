@@ -12,6 +12,20 @@ func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
 	return core.WithRuntimeConfig(cfg)
 }
 
+// WithMaxLiftBytes bounds how much data a component can pass out of its
+// memory in one go: the combined size of the lists and strings in one
+// call's arguments, or in one call's results, measured in canonical-ABI
+// bytes. A call that exceeds it fails with an error wrapping
+// ErrLiftLimitExceeded, and a component whose results exceed it becomes
+// unusable as though it had trapped. 0, the default, means unlimited.
+func WithMaxLiftBytes(n uint64) EngineOption {
+	return core.WithMaxLiftBytes(n)
+}
+
+// ErrLiftLimitExceeded is wrapped by errors reported when a call's
+// arguments or results exceed the limit set by WithMaxLiftBytes.
+var ErrLiftLimitExceeded = core.ErrLiftLimitExceeded
+
 // WithFuncImport satisfies a named func import with the given *ExportedFunc.
 func WithFuncImport(name string, f *ExportedFunc) InstantiateOption {
 	return core.WithFuncImport(name, f)

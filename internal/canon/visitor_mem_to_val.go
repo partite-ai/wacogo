@@ -192,6 +192,9 @@ func (v *memToValVisitor) VisitString() {
 			return nil, fmt.Errorf("oob string len read")
 		}
 		enc := gcc.callee.StringEncoding
+		if err := gcc.budget.charge(stringByteLen(coded, enc)); err != nil {
+			return nil, err
+		}
 		s := decodeString(memShim{gcc.callee.Memory}, ptr, coded, enc)
 		return ValString(s), nil
 	})
@@ -219,13 +222,8 @@ func (v *memToValVisitor) VisitList(elem Type) {
 		if !ok {
 			return nil, fmt.Errorf("oob list len read")
 		}
-		if err := checkListLen(n, elemSize); err != nil {
+		if err := checkLiftedList(gcc, ptr, n, elemSize, elemAlign); err != nil {
 			return nil, err
-		}
-		if n > 0 && elemAlign > 1 {
-			if err := checkAlignment(ptr, elemAlign); err != nil {
-				return nil, err
-			}
 		}
 
 		out := make([]Val, n)

@@ -17,6 +17,7 @@ func TestFuncBindingCompiles(t *testing.T) {
 		FuncTypeParamsAsCanon(ft),
 		FuncTypeResultsAsCanon(ft),
 		canon.Callee{CallSide: canon.CallSide{Instance: canonInstanceView{i: &ComponentInstance{}}}},
+		0,
 	)
 	if cb == nil {
 		t.Fatal("NewCallBinding returned nil")

@@ -143,6 +143,7 @@ func (h *Host) BuildAdapter(
 		core:              callee.core(),
 	}
 	af.tc.callee = calleeSide
+	af.tc.budget.limit = h.maxLiftBytes
 
 	// 6. Register the adapterFunc as a host module and use its export
 	// directly as the adapter's core function. Compile and instantiate in

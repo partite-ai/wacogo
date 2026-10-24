@@ -20,11 +20,15 @@ type allocSource struct {
 	helper *batchReallocHelper
 	n      uint32 // pre-allocated count in batched mode; 0 in serial
 	idx    uint32 // batched cursor
+	budget *liftBudget
 }
 
 func (s *allocSource) next(ctx context.Context, tc *transferContext, size, align uint32) uint32 {
 	if s.helper == nil {
-		// Serial fallback: directly invoke target's cabi_realloc.
+		// Serial fallback: directly invoke target's cabi_realloc. Charge
+		// first so an over-budget request never reaches the allocator. In
+		// batched mode the discovery walk already charged via allocSink.
+		s.budget.mustCharge(uint64(size))
 		p, err := callRealloc(ctx, tc.callee.Realloc, tc.callee.Memory, 0, 0, align, size)
 		if err != nil {
 			panic(&Trap{msg: err.Error()})
@@ -50,9 +54,11 @@ func (s *allocSource) next(ctx context.Context, tc *transferContext, size, align
 type allocSink struct {
 	helper *batchReallocHelper
 	n      uint32
+	budget *liftBudget
 }
 
 func (s *allocSink) add(size, align uint32) {
+	s.budget.mustCharge(uint64(size))
 	s.helper.ensureRoomFor(s.n + 1)
 	s.helper.writeSizeAlign(s.n, size, align)
 	s.n++

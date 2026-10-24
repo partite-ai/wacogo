@@ -19,12 +19,19 @@ type Host struct {
 	// a single helper module instead of one per adapter.
 	mu               sync.Mutex
 	batchHelperCache map[string]wazero.CompiledModule
+
+	// maxLiftBytes bounds each lift performed by adapters this Host
+	// builds; 0 means unlimited.
+	maxLiftBytes uint64
 }
 
-// NewHost wraps a wazero.Runtime in a canon Host.
-func NewHost(runtime wazero.Runtime) *Host {
+// NewHost wraps a wazero.Runtime in a canon Host. maxLiftBytes bounds the
+// bytes any single lift performed by the Host's adapters may materialize
+// (0 means unlimited).
+func NewHost(runtime wazero.Runtime, maxLiftBytes uint64) *Host {
 	return &Host{
 		runtime:          runtime,
 		batchHelperCache: make(map[string]wazero.CompiledModule),
+		maxLiftBytes:     maxLiftBytes,
 	}
 }

@@ -92,7 +92,7 @@ func TestRunPhasedTransfer_BatchedListString(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = srcMod.Close(ctx) })
 
-	helper, err := NewHost(rt).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestRunPhasedTransfer_GrowsScratchForLargeN(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = srcMod.Close(ctx) })
 
-	helper, err := NewHost(rt).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestRunPhasedTransfer_BatchedTranscodeExactSizes(t *testing.T) {
 				t.Fatalf("instantiate src: %v", err)
 			}
 			t.Cleanup(func() { _ = srcMod.Close(ctx) })
-			helper, err := NewHost(rt).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+			helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
 			if err != nil {
 				t.Fatalf("buildBatchReallocHelper: %v", err)
 			}

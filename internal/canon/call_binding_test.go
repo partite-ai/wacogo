@@ -3,7 +3,7 @@ package canon
 import "testing"
 
 func TestCallBinding_Construction(t *testing.T) {
-	cb := NewCallBinding(nil, nil, Callee{CallSide: CallSide{Instance: &testInstance{}}})
+	cb := NewCallBinding(nil, nil, Callee{CallSide: CallSide{Instance: &testInstance{}}}, 0)
 	if cb == nil {
 		t.Fatal("NewCallBinding returned nil")
 	}
@@ -15,7 +15,7 @@ func TestCallBinding_Construction(t *testing.T) {
 func TestCallBinding_CalleeGetter(t *testing.T) {
 	inst := &testInstance{name: "inst"}
 	want := Callee{CallSide: CallSide{Instance: inst, StringEncoding: EncUTF8}}
-	cb := NewCallBinding(nil, nil, want)
+	cb := NewCallBinding(nil, nil, want, 0)
 	got := cb.Callee()
 	if got.Instance != want.Instance || got.StringEncoding != want.StringEncoding {
 		t.Fatalf("Callee() = %+v, want %+v", got, want)

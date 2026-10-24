@@ -130,6 +130,9 @@ func (v *flatToValVisitor) VisitString() {
 		ptr := uint32(gcc.registers[ptrSlot])
 		coded := uint32(gcc.registers[lenSlot])
 		enc := gcc.callee.StringEncoding
+		if err := gcc.budget.charge(stringByteLen(coded, enc)); err != nil {
+			return nil, err
+		}
 		s := decodeString(memShim{gcc.callee.Memory}, ptr, coded, enc)
 		return ValString(s), nil
 	})
@@ -153,13 +156,8 @@ func (v *flatToValVisitor) VisitList(elem Type) {
 	v.emit(func(ctx context.Context, gcc *gocallContext, _ uint32) (Val, error) {
 		ptr := uint32(gcc.registers[ptrSlot])
 		n := uint32(gcc.registers[lenSlot])
-		if err := checkListLen(n, elemSize); err != nil {
+		if err := checkLiftedList(gcc, ptr, n, elemSize, elemAlign); err != nil {
 			return nil, err
-		}
-		if n > 0 && elemAlign > 1 {
-			if err := checkAlignment(ptr, elemAlign); err != nil {
-				return nil, err
-			}
 		}
 
 		out := make([]Val, n)

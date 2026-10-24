@@ -21,6 +21,7 @@ type EngineOption func(*engineConfig)
 
 type engineConfig struct {
 	runtimeConfig wazero.RuntimeConfig
+	maxLiftBytes  uint64
 }
 
 // WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
@@ -30,12 +31,27 @@ func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
 	return func(c *engineConfig) { c.runtimeConfig = cfg }
 }
 
+// WithMaxLiftBytes bounds how much data a component can pass out of its
+// memory in one go: the combined size of the lists and strings in one
+// call's arguments, or in one call's results, measured in canonical-ABI
+// bytes. A call that exceeds it fails with an error wrapping
+// ErrLiftLimitExceeded, and a component whose results exceed it becomes
+// unusable as though it had trapped. 0, the default, means unlimited.
+func WithMaxLiftBytes(n uint64) EngineOption {
+	return func(c *engineConfig) { c.maxLiftBytes = n }
+}
+
+// ErrLiftLimitExceeded is wrapped by errors reported when a call's
+// arguments or results exceed the limit set by WithMaxLiftBytes.
+var ErrLiftLimitExceeded = canon.ErrLiftLimitExceeded
+
 // Engine owns the wazero runtime and is the entry point for loading components.
 type Engine struct {
-	runtime   wazero.Runtime
-	canonHost *canon.Host
-	features  wasmparser.FeatureSet
-	closed    atomic.Bool
+	runtime      wazero.Runtime
+	canonHost    *canon.Host
+	features     wasmparser.FeatureSet
+	maxLiftBytes uint64
+	closed       atomic.Bool
 
 	// bridges caches compiled instantiate-from-exports bridge modules by
 	// their bytes, which depend only on the component, not the instance.
@@ -55,10 +71,11 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 	}
 	rt := wazero.NewRuntimeWithConfig(ctx, cnf)
 	return &Engine{
-		runtime:   rt,
-		canonHost: canon.NewHost(rt),
-		features:  wasmparser.DefaultFeatures(),
-		bridges:   map[string]wazero.CompiledModule{},
+		runtime:      rt,
+		canonHost:    canon.NewHost(rt, cfg.maxLiftBytes),
+		features:     wasmparser.DefaultFeatures(),
+		maxLiftBytes: cfg.maxLiftBytes,
+		bridges:      map[string]wazero.CompiledModule{},
 	}
 }
 

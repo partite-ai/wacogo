@@ -214,13 +214,17 @@ func runPhasedTransfer(ctx context.Context, tc *transferContext, steps []transfe
 	// allocSrc and allocSink live on the (heap-allocated, per-adapter)
 	// transferContext so their addresses can be safely shared with the
 	// indirect closures the discovery and transfer walks invoke — no per-
-	// call escape allocation.
+	// call escape allocation. Each call of runPhasedTransfer is one lift,
+	// so the budget starts fresh here.
+	tc.budget.reset()
 	tc.allocSrc.helper = nil
 	tc.allocSrc.n = 0
 	tc.allocSrc.idx = 0
+	tc.allocSrc.budget = &tc.budget
 	if helper != nil {
 		tc.allocSink.helper = helper
 		tc.allocSink.n = 0
+		tc.allocSink.budget = &tc.budget
 		for _, step := range steps {
 			if step.sizes != nil {
 				step.sizes(tc, srcBase, &tc.allocSink)

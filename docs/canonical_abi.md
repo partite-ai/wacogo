@@ -319,6 +319,41 @@ only `defer`s are the always-fire `Exit` and `Task.End`. (The
 `Call`-level entry on `*CallBinding` recovers any `*Trap` panic into
 an error so it never leaks out.)
 
+### Failures between return and post-return
+
+Post-return runs only after the callee's results have been fully
+lifted; it is how the callee frees its result buffers. If anything
+fails in that window (a result step trap, a lift-limit overrun, a
+caller-side realloc failure, a `CallRaw` read callback error, or
+post-return itself), post-return is skipped and the original callee
+is poisoned as though it had trapped. Both runners and
+`CallBinding.CallRaw` wrap the window in `poisonOnPanic` and poison
+on error returns.
+
+### Lift limits
+
+`WithMaxLiftBytes` bounds each lift: one call's params, or one call's
+results. The unit is canonical-ABI bytes: `n*elemSize` per list and
+the byte length per string, summed over the whole value tree. Values
+in guest memory can alias each other (many list entries pointing at
+the same buffer), so this total is not bounded by the source's memory
+size. The accounting lives in `liftBudget` (`lift_budget.go`) and is
+charged before anything is allocated:
+
+- **Transfer.** Every list or string buffer goes through the
+  receiver's realloc, so `allocSink.add` (batched discovery walk) and
+  serial `allocSource.next` charge the requested size. The budget is
+  reset per `runPhasedTransfer` call. Cross-encoding strings are
+  charged their exact transcoded length: the discovery walk counts it
+  (`transcodedByteLen`), and batched `allocSource.next` asserts that
+  the transfer step requests the same size.
+- **Gocall.** `memToVal` / `flatToVal` list and string steps charge
+  after reading the header and before `make` or decode
+  (`checkLiftedList` also bounds-checks the list against memory).
+- **Direct memory readers.** `CallContext.ChargeLift` exposes the
+  budget to code that lifts straight from `Memory()`. witgen-generated
+  result lifts call it before each allocation.
+
 ## Zero-allocation transfer
 
 The component→component path through `runTransferPlan` performs **no

@@ -2,7 +2,6 @@ package canon
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/tetratelabs/wazero/api"
 )
@@ -26,10 +25,11 @@ type CallBinding struct {
 }
 
 // NewCallBinding compiles a gocall plan for params/results and captures the
-// Callee it will always dispatch against. The transferSide and wrapped
-// post-return are precomputed here so each Call avoids those per-invocation
-// allocations.
-func NewCallBinding(params, results []Type, callee Callee) *CallBinding {
+// Callee it will always dispatch against. maxLiftBytes bounds the bytes
+// each result lift may materialize (0 means unlimited). The transferSide
+// and wrapped post-return are precomputed here so each Call avoids those
+// per-invocation allocations.
+func NewCallBinding(params, results []Type, callee Callee, maxLiftBytes uint64) *CallBinding {
 	side := &transferSide{
 		Instance:       callee.Instance,
 		Memory:         callee.Memory,
@@ -45,8 +45,13 @@ func NewCallBinding(params, results []Type, callee Callee) *CallBinding {
 		core:       callee.core(),
 	}
 	cb.gcc.callee = side
+	cb.gcc.budget.limit = maxLiftBytes
 	return cb
 }
+
+// MaxLiftBytes returns the per-lift byte limit this binding enforces, or 0
+// when unlimited.
+func (cb *CallBinding) MaxLiftBytes() uint64 { return cb.gcc.budget.limit }
 
 // Callee returns the captured callee descriptor by value. Used by root-side
 // code that needs the underlying memory/realloc/CoreFunc (e.g. adapter
@@ -60,7 +65,7 @@ func (cb *CallBinding) Call(ctx context.Context, args []Val) (results []Val, err
 	defer func() {
 		if r := recover(); r != nil {
 			if t, ok := r.(*Trap); ok {
-				err = fmt.Errorf("%s", t.Error())
+				err = t.asError()
 				return
 			}
 			panic(r)
@@ -87,7 +92,7 @@ func (cb *CallBinding) CallRaw(
 	defer func() {
 		if r := recover(); r != nil {
 			if t, ok := r.(*Trap); ok {
-				err = fmt.Errorf("%s", t.Error())
+				err = t.asError()
 				return
 			}
 			panic(r)

@@ -550,6 +550,9 @@ func fromGoMemString(ctx context.Context, cc *host.CallContext, h *host.Componen
 func liftFlatString(ctx context.Context, caller, callee *host.CallContext, h *host.ComponentInstance, ty wacogo.Type, stack []uint64) (string, error) {
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	if err_ := callee.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
+	}
 	bs_, ok_ := callee.Memory().Read(ptr_, ln_)
 	if !ok_ {
 		return "", fmt.Errorf("wacogo/witgen: liftFlatString: bad memory read")
@@ -569,6 +572,9 @@ func liftMemString(ctx context.Context, caller, callee *host.CallContext, h *hos
 		return "", fmt.Errorf("wacogo/witgen: liftMemString: string len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	if err_ := callee.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
 	}
 	bs_, ok_ := callee.Memory().Read(sptr_, ln_)
 	if !ok_ {
