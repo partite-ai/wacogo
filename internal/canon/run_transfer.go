@@ -57,6 +57,14 @@ func runTransferPlan(
 	// on the caller's stack frame.
 	defer tc.endTaskOrTrap()
 
+	// Host decoders run after transfer. Bound their source graph first, before
+	// transcoding strings or allocating transfer scratch and destination data.
+	if validator := tc.callee.Arguments; validator != nil {
+		if err := validator.ValidateTransfer(ctx, tc.caller.Memory, tc.caller.StringEncoding, tc.registers); err != nil {
+			panic(&Trap{msg: err.Error()})
+		}
+	}
+
 	// 2-4. Lower params into the callee under may_leave=false. The callee's
 	// realloc may be invoked here (param block, plus string/list buffers);
 	// spec requires that realloc cannot make outgoing calls (resource.new,

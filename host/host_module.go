@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync/atomic"
 
+	"github.com/partite-ai/wacogo/internal/canon"
 	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
@@ -36,6 +37,11 @@ func buildPerInstanceHostMod(
 		resultTypes := valueTypesFromCoreBytes(fr.flatResults)
 		fn := api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
 			instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
+				if validator := h.validateArgs[fr]; validator != nil {
+					if err := validator.Validate(ctx, h.hostCallCC.Memory(), canon.EncUTF8, stack); err != nil {
+						return err
+					}
+				}
 				return fr.userFn(ctx, h.hostCallCC, h, stack)
 			})
 		})

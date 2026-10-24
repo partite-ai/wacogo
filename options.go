@@ -5,6 +5,21 @@ import (
 	"github.com/tetratelabs/wazero"
 )
 
+// LiftLimits bounds Func.Call, CallRaw/generated results, and host arguments.
+// Zero fields are unlimited. Limits reset independently for every invocation.
+type LiftLimits = core.LiftLimits
+
+// ErrLiftLimit reports exhausted canonical lifting budgets.
+var ErrLiftLimit = core.ErrLiftLimit
+
+// WithLiftLimits sets canonical lifting budgets before host allocation.
+// Host arguments and CallRaw results, including existing generated bindings, are
+// preflighted before decoding with conservative charges for generated Go layouts.
+// Custom callback allocations beyond the declared representation are not measured.
+func WithLiftLimits(limits LiftLimits) EngineOption {
+	return core.WithLiftLimits(limits)
+}
+
 // WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
 // engine's runtime. If unset, wacogo uses a default config with
 // CoreFeaturesV2 and the extended-const proposal enabled.

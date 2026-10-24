@@ -2,6 +2,7 @@ package canon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/tetratelabs/wazero/api"
@@ -45,6 +46,7 @@ func NewCallBinding(params, results []Type, callee Callee) *CallBinding {
 		core:       callee.core(),
 	}
 	cb.gcc.callee = side
+	cb.gcc.limits = callee.LiftLimits
 	return cb
 }
 
@@ -106,10 +108,37 @@ func (cb *CallBinding) CallRaw(
 		return err
 	}
 
-	readResult(stack)
-
 	if cb.postReturn != nil {
-		if err = cb.postReturn(ctx, stack); err != nil {
+		defer func() {
+			prev := cb.callee.Instance.SuspendLeave()
+			defer cb.callee.Instance.RestoreLeave(prev)
+			err = errors.Join(err, cb.postReturn(ctx, stack[:cb.plan.nResultRegs]))
+		}()
+	}
+	if err := cb.preflightRawResults(ctx, stack); err != nil {
+		return err
+	}
+	readResult(stack)
+	return nil
+}
+
+// preflightRawResults visits the complete result before a generated or custom
+// decoder can allocate. It shares Call's compiled layout but never transfers
+// resources or materializes collections. The budget is local to this invocation.
+func (cb *CallBinding) preflightRawResults(ctx context.Context, stack []uint64) error {
+	gcc := gocallContext{
+		callee: cb.side, registers: stack, validateOnly: true, generatedStorage: true,
+		lift: liftBudget{limits: cb.callee.LiftLimits},
+	}
+	var base uint32
+	if cb.plan.returnMem {
+		base = uint32(stack[0])
+		if err := checkAlignment(base, cb.plan.resultMaxAlign); err != nil {
+			return err
+		}
+	}
+	for _, step := range cb.plan.resultSteps {
+		if _, err := step(ctx, &gcc, base); err != nil {
 			return err
 		}
 	}

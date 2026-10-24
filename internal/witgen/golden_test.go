@@ -18,6 +18,12 @@ func TestGolden(t *testing.T) {
 		packageRoot string
 	}{
 		{
+			name:        "Allocation",
+			witPath:     "testdata/wit/allocation.wit",
+			world:       "example:demo/allocationhost",
+			packageRoot: "github.com/partite-ai/wacogo/internal/witgen/testdata/genfixtures",
+		},
+		{
 			name:        "Add",
 			witPath:     "testdata/wit/add.wit",
 			world:       "example:demo/arith",

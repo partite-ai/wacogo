@@ -12,10 +12,8 @@ import (
 
 // oobJoinWAT is a component that exports a join function whose core
 // implementation always returns 0xFFFF0000 as the result pointer — a
-// value well past any realistic wasm memory size. When the witgen wrap
-// method tries to lift the string from that address, the Memory.Read
-// call on the host stub's memory (which has only 64 KB) will fail and
-// the wrapper must return a non-nil error.
+// value past the callee's 64 KB memory. CallRaw must reject that result
+// before the generated decoder reads it, returning a memory-bounds error.
 const oobJoinWAT = `(component
   (core module $m
     (memory (export "memory") 1)
@@ -42,16 +40,14 @@ func (stubConcat) Join(ctx context.Context, parts []string, sep string) (string,
 }
 
 // TestJoinOOBMemoryRead verifies that when a wasm callee returns an
-// out-of-bounds memory pointer, the witgen-generated lift helper
-// surfaces a descriptive error rather than panicking or returning zero
-// data.
+// out-of-bounds memory pointer, the generated wrapper surfaces a
+// descriptive error rather than panicking or returning zero data.
 func TestJoinOOBMemoryRead(t *testing.T) {
 	ctx := context.Background()
 	e := wacogo.NewEngine(ctx)
 	defer e.Close(ctx)
 
-	// Build a host instance that provides the concat interface. This
-	// instance also supplies the stub memory that the wrap lift reads from.
+	// Build the caller-side instance for the generated concat wrapper.
 	fac, err := concat.NewFactory(ctx, e)
 	if err != nil {
 		t.Fatalf("NewFactory: %v", err)
@@ -77,9 +73,9 @@ func TestJoinOOBMemoryRead(t *testing.T) {
 	defer oobInst.Close(ctx)
 
 	// WrapInstance wires the OOB component's join export to the caller
-	// host instance. The wrap method's lift closure reads the returned
-	// pointer against the caller's stub memory (64 KB). 0xFFFF0000 is
-	// far past that boundary, so the Memory.ReadUint32Le call fails.
+	// host instance. CallRaw preflights the returned string against the
+	// callee's memory before invoking the generated decoder. Reading its
+	// pointer at 0xFFFF0000 must fail with a memory-bounds diagnostic.
 	wrapped := concat.WrapInstance(callerInst, oobInst)
 	_, err = wrapped.Join(ctx, []string{"a"}, ",")
 	if err == nil {

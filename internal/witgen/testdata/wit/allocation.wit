@@ -1,0 +1,14 @@
+package example:demo;
+
+interface allocation {
+    record wide {
+        a: u64, b: u64, c: u64, d: u64,
+        e: u64, f: u64, g: u64, h: u64,
+    }
+    nested: func(xs: list<list<u8>>);
+    absent: func(xs: list<option<wide>>);
+}
+
+world allocationhost {
+    import allocation;
+}

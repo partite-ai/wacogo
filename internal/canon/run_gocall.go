@@ -2,6 +2,7 @@ package canon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -25,7 +26,19 @@ func runGocallPlan(
 	if err := gcc.callee.Instance.Enter(ctx); err != nil {
 		return nil, err
 	}
-	defer gcc.callee.Instance.Exit(ctx)
+	defer func() {
+		panicked := recover()
+		// Destructors can call this same binding after Exit. Detach its tracker
+		// first so the nested call cannot consume or clear this call's owns.
+		owned := gcc.owned
+		gcc.owned = nil
+		gcc.callee.Instance.Exit(ctx)
+		finishLift(ctx, owned, &results, &err, panicked != nil)
+		if panicked != nil {
+			panic(panicked)
+		}
+	}()
+	gcc.lift = liftBudget{limits: gcc.limits}
 
 	// Borrow-trap & release defer. gcc.Task.End() drains per-call release
 	// closures (caller-side unlends from LendTo) and returns an error if
@@ -81,6 +94,17 @@ func runGocallPlan(
 		gcc.callee.Instance.Poison(cerr)
 		return nil, cerr
 	}
+	// A successful core call owns its return allocation even if lifting fails.
+	if postReturn != nil {
+		defer func() {
+			prev := gcc.callee.Instance.SuspendLeave()
+			defer gcc.callee.Instance.RestoreLeave(prev)
+			if cleanupErr := postReturn(ctx, stack[:plan.nResultRegs]); cleanupErr != nil {
+				err = errors.Join(err, cleanupErr)
+				results = nil
+			}
+		}()
+	}
 
 	// 5. Lift results. Flat-mode steps read gcc.registers (= stack);
 	// mem-mode steps read callee.Memory at base+off.
@@ -93,6 +117,12 @@ func runGocallPlan(
 			return nil, err
 		}
 	}
+	if err := gcc.lift.reserveValues(uint64(len(plan.resultSteps))); err != nil {
+		return nil, err
+	}
+	if err := gcc.lift.storage(uint64(len(plan.resultSteps)) * valStorage); err != nil {
+		return nil, err
+	}
 	results = make([]Val, len(plan.resultSteps))
 	for i, step := range plan.resultSteps {
 		v, err := step(ctx, gcc, resultBase)
@@ -102,17 +132,6 @@ func runGocallPlan(
 		results[i] = v
 	}
 
-	// 6. Post-return hook. Runs callee wasm under may_leave=false per spec
-	// (post-return is a cleanup-only window, no outgoing calls allowed).
-	if postReturn != nil {
-		prev := gcc.callee.Instance.SuspendLeave()
-		err = postReturn(ctx, stack[:plan.nResultRegs])
-		gcc.callee.Instance.RestoreLeave(prev)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	// 7. Exit callee — fires via defer above.
+	// Post-return and callee exit fire via the defers above.
 	return results, nil
 }

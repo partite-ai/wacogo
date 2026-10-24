@@ -28,7 +28,7 @@ func (v *memToValVisitor) assignBytes(size, align uint32) uint32 {
 	return off
 }
 
-func (v *memToValVisitor) emit(s gocallLiftStep) { v.out = append(v.out, s) }
+func (v *memToValVisitor) emit(s gocallLiftStep) { v.out = append(v.out, liftStep(s)) }
 
 // --- Primitives ---
 
@@ -185,14 +185,22 @@ func (v *memToValVisitor) VisitString() {
 		}()
 		ptr, ok := gcc.callee.Memory.ReadUint32Le(base + ptrOff)
 		if !ok {
-			return nil, fmt.Errorf("oob string ptr read")
+			return nil, fmt.Errorf("guest memory out of bounds reading string pointer at %#x", base+ptrOff)
 		}
 		coded, ok := gcc.callee.Memory.ReadUint32Le(base + lenOff)
 		if !ok {
-			return nil, fmt.Errorf("oob string len read")
+			return nil, fmt.Errorf("guest memory out of bounds reading string length at %#x", base+lenOff)
 		}
 		enc := gcc.callee.StringEncoding
-		s := decodeString(memShim{gcc.callee.Memory}, ptr, coded, enc)
+		data := stringBytes(memShim{gcc.callee.Memory}, ptr, coded, enc)
+		if err := gcc.lift.stringStorage(data, coded, enc, gcc.transferToHost); err != nil {
+			return nil, err
+		}
+		if gcc.validateOnly {
+			validateStringBytes(data, coded, enc)
+			return nil, nil
+		}
+		s := decodeStringBytes(data, coded, enc)
 		return ValString(s), nil
 	})
 }
@@ -209,6 +217,7 @@ func (v *memToValVisitor) VisitList(elem Type) {
 		elemAlign = 1
 	}
 	elemStep := child.out[0]
+	generatedSize := generatedInlineStorage(elem)
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, base uint32) (Val, error) {
 		ptr, ok := gcc.callee.Memory.ReadUint32Le(base + ptrOff)
@@ -219,7 +228,7 @@ func (v *memToValVisitor) VisitList(elem Type) {
 		if !ok {
 			return nil, fmt.Errorf("oob list len read")
 		}
-		if err := checkListLen(n, elemSize); err != nil {
+		if err := gcc.listStorage(ptr, n, elemSize, generatedSize); err != nil {
 			return nil, err
 		}
 		if n > 0 && elemAlign > 1 {
@@ -228,13 +237,21 @@ func (v *memToValVisitor) VisitList(elem Type) {
 			}
 		}
 
-		out := make([]Val, n)
+		var out []Val
+		if !gcc.validateOnly {
+			out = make([]Val, n)
+		}
 		for i := range n {
 			ev, err := elemStep(ctx, gcc, ptr+i*elemSize)
 			if err != nil {
 				return nil, err
 			}
-			out[i] = ev
+			if !gcc.validateOnly {
+				out[i] = ev
+			}
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return newValListFromSlice(out), nil
 	})
@@ -262,13 +279,24 @@ func (v *memToValVisitor) VisitRecord(fields []RecordField) {
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, base uint32) (Val, error) {
 		recBase := base + recordOff
-		recFields := make([]Field, len(fieldSteps))
+		if err := gcc.recordStorage(len(fieldSteps)); err != nil {
+			return nil, err
+		}
+		var recFields []Field
+		if !gcc.validateOnly {
+			recFields = make([]Field, len(fieldSteps))
+		}
 		for i, step := range fieldSteps {
 			fv, err := step(ctx, gcc, recBase)
 			if err != nil {
 				return nil, err
 			}
-			recFields[i] = Field{Name: fieldNames[i], Val: fv}
+			if !gcc.validateOnly {
+				recFields[i] = Field{Name: fieldNames[i], Val: fv}
+			}
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return NewValRecord(recFields...), nil
 	})
@@ -295,13 +323,24 @@ func (v *memToValVisitor) VisitTuple(types []Type) {
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, base uint32) (Val, error) {
 		recBase := base + recordOff
-		recFields := make([]Field, len(fieldSteps))
+		if err := gcc.recordStorage(len(fieldSteps)); err != nil {
+			return nil, err
+		}
+		var recFields []Field
+		if !gcc.validateOnly {
+			recFields = make([]Field, len(fieldSteps))
+		}
 		for i, step := range fieldSteps {
 			fv, err := step(ctx, gcc, recBase)
 			if err != nil {
 				return nil, err
 			}
-			recFields[i] = Field{Name: fieldNames[i], Val: fv}
+			if !gcc.validateOnly {
+				recFields[i] = Field{Name: fieldNames[i], Val: fv}
+			}
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return NewValRecord(recFields...), nil
 	})
@@ -327,6 +366,9 @@ func (v *memToValVisitor) VisitFlags(names []string) {
 		if numLabels < 32 {
 			bits &= (uint32(1) << numLabels) - 1
 		}
+		if gcc.validateOnly {
+			return nil, nil
+		}
 		return newLiftedValFlags(names, index, bits), nil
 	})
 }
@@ -351,19 +393,14 @@ func (v *memToValVisitor) VisitEnum(numCases uint32) {
 func (v *memToValVisitor) VisitOwn(rt ResourceType) {
 	off := v.assignBytes(4, 4)
 	v.emit(func(_ context.Context, gcc *gocallContext, base uint32) (Val, error) {
+		if gcc.validateOnly {
+			return nil, nil
+		}
 		h, ok := gcc.callee.Memory.ReadUint32Le(base + off)
 		if !ok {
 			return nil, fmt.Errorf("oob own read")
 		}
-		srcH, err := gcc.callee.ResourceTable.LookupOwn(rt, h)
-		if err != nil {
-			return nil, err
-		}
-		val := newValOwnHandleEmpty()
-		if _, err := srcH.TransferOwn(val); err != nil {
-			return nil, err
-		}
-		return val, nil
+		return gcc.takeOwn(rt, h)
 	})
 }
 
@@ -371,7 +408,11 @@ func (v *memToValVisitor) VisitOwn(rt ResourceType) {
 // well-typed canonical-ABI programs: borrow handles cannot appear as
 // function results per the spec. See flatToValVisitor.VisitBorrow.
 func (v *memToValVisitor) VisitBorrow(rt ResourceType) {
-	v.emit(func(_ context.Context, _ *gocallContext, _ uint32) (Val, error) {
+	v.assignBytes(4, 4)
+	v.emit(func(_ context.Context, gcc *gocallContext, _ uint32) (Val, error) {
+		if gcc.validateOnly {
+			return nil, nil
+		}
 		panic("borrow as result is not permitted by canon ABI")
 	})
 }
@@ -428,6 +469,9 @@ func (v *memToValVisitor) VisitVariant(cases []VariantCase) {
 			}
 			payload = pv
 		}
+		if gcc.validateOnly {
+			return nil, nil
+		}
 		return NewValVariant(disc, payload), nil
 	})
 }
@@ -459,6 +503,9 @@ func (v *memToValVisitor) VisitOption(inner Type) {
 			return nil, err
 		}
 		if disc == 0 {
+			if gcc.validateOnly {
+				return nil, nil
+			}
 			return ValOptionNone(), nil
 		}
 		if disc != 1 {
@@ -468,6 +515,9 @@ func (v *memToValVisitor) VisitOption(inner Type) {
 		pv, err := childStep(ctx, gcc, payloadBase)
 		if err != nil {
 			return nil, err
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return ValOptionSome(pv), nil
 	})
@@ -519,12 +569,18 @@ func (v *memToValVisitor) VisitResult(okT, errT Type) {
 			step = okStep
 			wrap = ValResultOk
 			if okT == nil {
+				if gcc.validateOnly {
+					return nil, nil
+				}
 				return ValResultOk(nil), nil
 			}
 		case 1:
 			step = errStep
 			wrap = ValResultErr
 			if errT == nil {
+				if gcc.validateOnly {
+					return nil, nil
+				}
 				return ValResultErr(nil), nil
 			}
 		default:
@@ -534,6 +590,9 @@ func (v *memToValVisitor) VisitResult(okT, errT Type) {
 		pv, err := step(ctx, gcc, payloadBase)
 		if err != nil {
 			return nil, err
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return wrap(pv), nil
 	})

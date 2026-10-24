@@ -19,7 +19,7 @@ type flatToValVisitor struct {
 }
 
 func (v *flatToValVisitor) assignSlot() uint32    { s := v.slot; v.slot++; return s }
-func (v *flatToValVisitor) emit(s gocallLiftStep) { v.out = append(v.out, s) }
+func (v *flatToValVisitor) emit(s gocallLiftStep) { v.out = append(v.out, liftStep(s)) }
 
 // --- Primitives ---
 
@@ -130,7 +130,15 @@ func (v *flatToValVisitor) VisitString() {
 		ptr := uint32(gcc.registers[ptrSlot])
 		coded := uint32(gcc.registers[lenSlot])
 		enc := gcc.callee.StringEncoding
-		s := decodeString(memShim{gcc.callee.Memory}, ptr, coded, enc)
+		data := stringBytes(memShim{gcc.callee.Memory}, ptr, coded, enc)
+		if err := gcc.lift.stringStorage(data, coded, enc, gcc.transferToHost); err != nil {
+			return nil, err
+		}
+		if gcc.validateOnly {
+			validateStringBytes(data, coded, enc)
+			return nil, nil
+		}
+		s := decodeStringBytes(data, coded, enc)
 		return ValString(s), nil
 	})
 }
@@ -149,11 +157,12 @@ func (v *flatToValVisitor) VisitList(elem Type) {
 		elemAlign = 1
 	}
 	elemStep := child.out[0]
+	generatedSize := generatedInlineStorage(elem)
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, _ uint32) (Val, error) {
 		ptr := uint32(gcc.registers[ptrSlot])
 		n := uint32(gcc.registers[lenSlot])
-		if err := checkListLen(n, elemSize); err != nil {
+		if err := gcc.listStorage(ptr, n, elemSize, generatedSize); err != nil {
 			return nil, err
 		}
 		if n > 0 && elemAlign > 1 {
@@ -162,13 +171,21 @@ func (v *flatToValVisitor) VisitList(elem Type) {
 			}
 		}
 
-		out := make([]Val, n)
+		var out []Val
+		if !gcc.validateOnly {
+			out = make([]Val, n)
+		}
 		for i := range n {
 			ev, err := elemStep(ctx, gcc, ptr+i*elemSize)
 			if err != nil {
 				return nil, err
 			}
-			out[i] = ev
+			if !gcc.validateOnly {
+				out[i] = ev
+			}
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return newValListFromSlice(out), nil
 	})
@@ -190,13 +207,24 @@ func (v *flatToValVisitor) VisitRecord(fields []RecordField) {
 	}
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, base uint32) (Val, error) {
-		recFields := make([]Field, len(fieldSteps))
+		if err := gcc.recordStorage(len(fieldSteps)); err != nil {
+			return nil, err
+		}
+		var recFields []Field
+		if !gcc.validateOnly {
+			recFields = make([]Field, len(fieldSteps))
+		}
 		for i, step := range fieldSteps {
 			fv, err := step(ctx, gcc, base)
 			if err != nil {
 				return nil, err
 			}
-			recFields[i] = Field{Name: fieldNames[i], Val: fv}
+			if !gcc.validateOnly {
+				recFields[i] = Field{Name: fieldNames[i], Val: fv}
+			}
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return NewValRecord(recFields...), nil
 	})
@@ -217,13 +245,24 @@ func (v *flatToValVisitor) VisitTuple(types []Type) {
 	}
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, base uint32) (Val, error) {
-		recFields := make([]Field, len(fieldSteps))
+		if err := gcc.recordStorage(len(fieldSteps)); err != nil {
+			return nil, err
+		}
+		var recFields []Field
+		if !gcc.validateOnly {
+			recFields = make([]Field, len(fieldSteps))
+		}
 		for i, step := range fieldSteps {
 			fv, err := step(ctx, gcc, base)
 			if err != nil {
 				return nil, err
 			}
-			recFields[i] = Field{Name: fieldNames[i], Val: fv}
+			if !gcc.validateOnly {
+				recFields[i] = Field{Name: fieldNames[i], Val: fv}
+			}
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return NewValRecord(recFields...), nil
 	})
@@ -245,6 +284,9 @@ func (v *flatToValVisitor) VisitFlags(names []string) {
 		if numLabels < 32 {
 			bits &= (uint32(1) << numLabels) - 1
 		}
+		if gcc.validateOnly {
+			return nil, nil
+		}
 		return newLiftedValFlags(names, index, bits), nil
 	})
 }
@@ -265,16 +307,11 @@ func (v *flatToValVisitor) VisitEnum(numCases uint32) {
 func (v *flatToValVisitor) VisitOwn(rt ResourceType) {
 	slot := v.assignSlot()
 	v.emit(func(_ context.Context, gcc *gocallContext, _ uint32) (Val, error) {
+		if gcc.validateOnly {
+			return nil, nil
+		}
 		h := uint32(gcc.registers[slot])
-		srcH, err := gcc.callee.ResourceTable.LookupOwn(rt, h)
-		if err != nil {
-			return nil, err
-		}
-		val := newValOwnHandleEmpty()
-		if _, err := srcH.TransferOwn(val); err != nil {
-			return nil, err
-		}
-		return val, nil
+		return gcc.takeOwn(rt, h)
 	})
 }
 
@@ -285,7 +322,11 @@ func (v *flatToValVisitor) VisitOwn(rt ResourceType) {
 // obvious failure rather than silently lifting something that has no
 // well-defined drop semantics.
 func (v *flatToValVisitor) VisitBorrow(rt ResourceType) {
-	v.emit(func(_ context.Context, _ *gocallContext, _ uint32) (Val, error) {
+	v.assignSlot()
+	v.emit(func(_ context.Context, gcc *gocallContext, _ uint32) (Val, error) {
+		if gcc.validateOnly {
+			return nil, nil
+		}
 		panic("borrow as result is not permitted by canon ABI")
 	})
 }
@@ -331,6 +372,9 @@ func (v *flatToValVisitor) VisitVariant(cases []VariantCase) {
 			}
 			payload = pv
 		}
+		if gcc.validateOnly {
+			return nil, nil
+		}
 		return NewValVariant(disc, payload), nil
 	})
 }
@@ -347,6 +391,9 @@ func (v *flatToValVisitor) VisitOption(inner Type) {
 	v.emit(func(ctx context.Context, gcc *gocallContext, base uint32) (Val, error) {
 		disc := uint32(gcc.registers[discSlot])
 		if disc == 0 {
+			if gcc.validateOnly {
+				return nil, nil
+			}
 			return ValOptionNone(), nil
 		}
 		if disc != 1 {
@@ -355,6 +402,9 @@ func (v *flatToValVisitor) VisitOption(inner Type) {
 		pv, err := childStep(ctx, gcc, base)
 		if err != nil {
 			return nil, err
+		}
+		if gcc.validateOnly {
+			return nil, nil
 		}
 		return ValOptionSome(pv), nil
 	})
@@ -392,20 +442,32 @@ func (v *flatToValVisitor) VisitResult(okT, errT Type) {
 		switch disc {
 		case 0:
 			if okStep == nil {
+				if gcc.validateOnly {
+					return nil, nil
+				}
 				return ValResultOk(nil), nil
 			}
 			pv, err := okStep(ctx, gcc, base)
 			if err != nil {
 				return nil, err
 			}
+			if gcc.validateOnly {
+				return nil, nil
+			}
 			return ValResultOk(pv), nil
 		case 1:
 			if errStep == nil {
+				if gcc.validateOnly {
+					return nil, nil
+				}
 				return ValResultErr(nil), nil
 			}
 			pv, err := errStep(ctx, gcc, base)
 			if err != nil {
 				return nil, err
+			}
+			if gcc.validateOnly {
+				return nil, nil
 			}
 			return ValResultErr(pv), nil
 		default:

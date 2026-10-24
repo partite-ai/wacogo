@@ -117,6 +117,11 @@ func stringByteLen(codedLen uint32, enc StringEncoding) uint32 {
 }
 
 func decodeString(mem fakeOrRealMemory, ptr, codedLen uint32, enc StringEncoding) string {
+	return decodeStringBytes(stringBytes(mem, ptr, codedLen, enc), codedLen, enc)
+}
+
+// stringBytes validates the entire guest span without copying it.
+func stringBytes(mem fakeOrRealMemory, ptr, codedLen uint32, enc StringEncoding) []byte {
 	// Compute byteLen with explicit overflow check for the multiplication.
 	var byteLen uint32
 	switch enc {
@@ -150,6 +155,10 @@ func decodeString(mem fakeOrRealMemory, ptr, codedLen uint32, enc StringEncoding
 	if !ok {
 		trapf("string pointer/length out of bounds of memory: ptr=%d len=%d", ptr, byteLen)
 	}
+	return bytes
+}
+
+func decodeStringBytes(bytes []byte, codedLen uint32, enc StringEncoding) string {
 	switch enc {
 	case EncUTF8:
 		if msg := validateUTF8(bytes); msg != "" {
@@ -166,6 +175,23 @@ func decodeString(mem fakeOrRealMemory, ptr, codedLen uint32, enc StringEncoding
 	}
 	trapf("unknown string encoding")
 	return ""
+}
+
+// validateStringBytes is the allocation-free host-argument preflight path.
+func validateStringBytes(bytes []byte, codedLen uint32, enc StringEncoding) {
+	if enc == EncUTF8 {
+		if msg := validateUTF8(bytes); msg != "" {
+			trapf("%s", msg)
+		}
+		return
+	}
+	if enc == EncUTF16 {
+		validateUTF16Bytes(bytes)
+		return
+	}
+	if _, utf16 := latin1UTF16Decode(codedLen); utf16 {
+		validateUTF16Bytes(bytes)
+	}
 }
 
 // decodeLatin1 decodes ISO-8859-1 (each byte = code point) into a Go string.
