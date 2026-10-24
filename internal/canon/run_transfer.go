@@ -133,9 +133,14 @@ func runTransferPlan(
 	// 7-8. Lower results into the original caller under may_leave=false.
 	// Post-swap, tc.callee == original caller — its realloc is the one
 	// that may fire here (string/list result buffers).
+	//
+	// Any failure from here until post-return completes poisons the
+	// original callee: it returned expecting its post-return to run, and
+	// that can no longer happen, whichever side caused the failure.
 	func() {
 		prev := tc.callee.Instance.SuspendLeave()
 		defer tc.callee.Instance.RestoreLeave(prev)
+		defer poisonOnPanic(calleeInst)
 
 		var resultSrcBase, resultDstBase uint32
 		if plan.returnMem {
@@ -180,6 +185,7 @@ func runTransferPlan(
 		err := postReturn(ctx, calleeStack[:plan.nResultRegs])
 		tc.caller.Instance.RestoreLeave(prev)
 		if err != nil {
+			calleeInst.Poison(err)
 			panic(&Trap{msg: err.Error()})
 		}
 	}

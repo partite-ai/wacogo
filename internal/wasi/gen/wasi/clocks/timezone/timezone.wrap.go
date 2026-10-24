@@ -42,20 +42,21 @@ func (w *timezoneWrapper) Display(ctx context.Context, when wallclock.Datetime) 
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemTimezoneDisplay(ctx, caller, callee, w.callerInst, w.fnDisplay.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return TimezoneDisplay{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return TimezoneDisplay{}, resErr_
+		}
+		if callErr_ != nil {
+			return TimezoneDisplay{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -73,15 +74,16 @@ func (w *timezoneWrapper) UtcOffset(ctx context.Context, when wallclock.Datetime
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = int32(int64(stack[0]))
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return 0, resErr_
+		}
+		if callErr_ != nil {
+			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil

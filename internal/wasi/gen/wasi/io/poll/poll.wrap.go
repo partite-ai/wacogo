@@ -44,20 +44,21 @@ func (w *pollWrapper) Poll(ctx context.Context, in []*PollableHandle) ([]uint32,
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListU32(ctx, caller, callee, w.callerInst, w.fnPoll.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil

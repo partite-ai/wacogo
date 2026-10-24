@@ -35,20 +35,21 @@ func (w *terminalStdoutWrapper) GetTerminalStdout(ctx context.Context) (OptionTe
 		callErr_ := w.fnGetTerminalStdout.CallRaw(ctx, w.callerInst,
 			func(caller, callee *host.CallContext, stack []uint64) {
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemOptionTerminalOutputResource(ctx, caller, callee, w.callerInst, w.fnGetTerminalStdout.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return OptionTerminalOutputResource{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return OptionTerminalOutputResource{}, resErr_
+		}
+		if callErr_ != nil {
+			return OptionTerminalOutputResource{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil

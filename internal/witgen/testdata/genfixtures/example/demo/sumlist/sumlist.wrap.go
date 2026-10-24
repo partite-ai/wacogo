@@ -39,15 +39,16 @@ func (w *sumlistWrapper) Sum(ctx context.Context, xs []uint32) (uint32, error) {
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = uint32(stack[0])
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return 0, resErr_
+		}
+		if callErr_ != nil {
+			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil

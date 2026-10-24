@@ -73,7 +73,8 @@ func (cb *CallBinding) Call(ctx context.Context, args []Val) (results []Val, err
 
 // CallRaw invokes the function using caller-supplied flat-stack closures,
 // bypassing the gocall plan's Val lift/lower steps. writeArgs populates the
-// stack before the wasm call; readResult reads from it after.
+// stack before the wasm call; readResult reads from it after. If
+// readResult fails, post-return is skipped and the callee is poisoned.
 //
 // The reentrance gate and post-return hook are still honoured. No resource
 // table or realloc operations are performed — the caller is responsible for
@@ -81,7 +82,7 @@ func (cb *CallBinding) Call(ctx context.Context, args []Val) (results []Val, err
 func (cb *CallBinding) CallRaw(
 	ctx context.Context,
 	writeArgs func(stack []uint64),
-	readResult func(stack []uint64),
+	readResult func(stack []uint64) error,
 ) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -103,15 +104,27 @@ func (cb *CallBinding) CallRaw(
 	writeArgs(stack)
 
 	if err = cb.core.CallWithStack(ctx, stack); err != nil {
+		cb.callee.Instance.Poison(err)
 		return err
 	}
 
-	readResult(stack)
+	if err = cb.readResultAndPostReturn(ctx, stack, readResult); err != nil {
+		cb.callee.Instance.Poison(err)
+		return err
+	}
+	return nil
+}
 
+// readResultAndPostReturn runs readResult and then the callee's
+// post-return. A panic escaping either poisons the callee before
+// propagating; error returns are poisoned by the caller.
+func (cb *CallBinding) readResultAndPostReturn(ctx context.Context, stack []uint64, readResult func(stack []uint64) error) error {
+	defer poisonOnPanic(cb.callee.Instance)
+	if err := readResult(stack); err != nil {
+		return err
+	}
 	if cb.postReturn != nil {
-		if err = cb.postReturn(ctx, stack); err != nil {
-			return err
-		}
+		return cb.postReturn(ctx, stack)
 	}
 	return nil
 }

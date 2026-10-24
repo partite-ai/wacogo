@@ -159,20 +159,21 @@ func (w *typesWrapper) HTTPErrorCode(ctx context.Context, err *wioerror.ErrorRes
 					stack[0] = uint64(dstH_.HandleID())
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemOptionErrorCode(ctx, caller, callee, w.callerInst, w.fnHTTPErrorCode.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return OptionErrorCode{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return OptionErrorCode{}, resErr_
+		}
+		if callErr_ != nil {
+			return OptionErrorCode{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -185,19 +186,19 @@ func (w *typesWrapper) NewFields(ctx context.Context) (*FieldsHandle, error) {
 		callErr_ := w.fnNewFields.CallRaw(ctx, w.callerInst,
 			func(caller, callee *host.CallContext, stack []uint64) {
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnNewFields.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					var impl_ Fields
 					if obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {
@@ -207,13 +208,14 @@ func (w *typesWrapper) NewFields(ctx context.Context) (*FieldsHandle, error) {
 					}
 					resVal_ = NewFieldsHandleFrom(dstH_, impl_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -231,20 +233,21 @@ func (w *typesWrapper) FieldsFromList(ctx context.Context, entries []TupleString
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemResultFieldsHeaderError(ctx, caller, callee, w.callerInst, w.fnFieldsFromList.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -278,19 +281,19 @@ func (w *typesWrapper) NewOutgoingRequest(ctx context.Context, headers *FieldsHa
 					arg0_.Invalidate()
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnNewOutgoingRequest.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					var impl_ OutgoingRequest
 					if obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {
@@ -300,13 +303,14 @@ func (w *typesWrapper) NewOutgoingRequest(ctx context.Context, headers *FieldsHa
 					}
 					resVal_ = NewOutgoingRequestHandleFrom(dstH_, impl_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -319,19 +323,19 @@ func (w *typesWrapper) NewRequestOptions(ctx context.Context) (*RequestOptionsHa
 		callErr_ := w.fnNewRequestOptions.CallRaw(ctx, w.callerInst,
 			func(caller, callee *host.CallContext, stack []uint64) {
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnNewRequestOptions.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					var impl_ RequestOptions
 					if obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {
@@ -341,13 +345,14 @@ func (w *typesWrapper) NewRequestOptions(ctx context.Context) (*RequestOptionsHa
 					}
 					resVal_ = NewRequestOptionsHandleFrom(dstH_, impl_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -385,14 +390,15 @@ func (w *typesWrapper) ResponseOutparamSet(ctx context.Context, param *ResponseO
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return resErr_
+		}
+		if callErr_ != nil {
+			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return nil
@@ -426,19 +432,19 @@ func (w *typesWrapper) IncomingBodyFinish(ctx context.Context, this *IncomingBod
 					arg0_.Invalidate()
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnIncomingBodyFinish.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					var impl_ FutureTrailers
 					if obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {
@@ -448,13 +454,14 @@ func (w *typesWrapper) IncomingBodyFinish(ctx context.Context, this *IncomingBod
 					}
 					resVal_ = NewFutureTrailersHandleFrom(dstH_, impl_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -488,19 +495,19 @@ func (w *typesWrapper) NewOutgoingResponse(ctx context.Context, headers *FieldsH
 					arg0_.Invalidate()
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnNewOutgoingResponse.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					var impl_ OutgoingResponse
 					if obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {
@@ -510,13 +517,14 @@ func (w *typesWrapper) NewOutgoingResponse(ctx context.Context, headers *FieldsH
 					}
 					resVal_ = NewOutgoingResponseHandleFrom(dstH_, impl_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -555,20 +563,21 @@ func (w *typesWrapper) OutgoingBodyFinish(ctx context.Context, this *OutgoingBod
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemResult_ErrorCode(ctx, caller, callee, w.callerInst, w.fnOutgoingBodyFinish.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil

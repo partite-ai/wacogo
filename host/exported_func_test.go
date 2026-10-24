@@ -62,13 +62,14 @@ func TestExportedFunc_CallRaw_TwoCallbacks(t *testing.T) {
 			stack[0] = 7
 			stack[1] = 35
 		},
-		func(caller, callee *CallContext, stack []uint64) {
+		func(caller, callee *CallContext, stack []uint64) error {
 			if caller == nil || callee == nil {
 				t.Fatal("read callback got nil context")
 			}
 			readCallerInst = caller.Instance()
 			readCalleeInst = callee.Instance()
 			readGot = uint32(stack[0])
+			return nil
 		},
 	)
 	if err != nil {

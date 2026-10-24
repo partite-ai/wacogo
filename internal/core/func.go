@@ -41,7 +41,9 @@ func (f *Func) Call(ctx context.Context, args ...Val) ([]Val, error) {
 // instance according to the canonical ABI. write is invoked once with
 // a freshly-sized stack slice into which the caller writes the flat
 // encoding of the args; read is invoked once with the post-call stack
-// to decode the flat results. Both callbacks receive a caller-side
+// to decode the flat results. If read returns an error, the callee's
+// post-return is skipped, the callee instance is poisoned, and CallRaw
+// returns that error. Both callbacks receive a caller-side
 // CallContext (bound to the supplied caller instance) and a
 // callee-side CallContext (bound to the instance exporting this
 // function).
@@ -59,7 +61,7 @@ func (f *Func) CallRaw(
 	ctx context.Context,
 	caller *ComponentInstance,
 	write func(caller, callee *CallContext, stack []uint64),
-	read func(caller, callee *CallContext, stack []uint64),
+	read func(caller, callee *CallContext, stack []uint64) error,
 ) (err error) {
 	if f.funcType == nil {
 		return fmt.Errorf("wacogo: CallRaw: function has no type information")
@@ -90,7 +92,7 @@ func (f *Func) CallRaw(
 
 	return f.binding.CallRaw(ctx,
 		func(stack []uint64) { write(callerCC, calleeCC, stack) },
-		func(stack []uint64) { read(callerCC, calleeCC, stack) },
+		func(stack []uint64) error { return read(callerCC, calleeCC, stack) },
 	)
 }
 

@@ -82,8 +82,34 @@ func runGocallPlan(
 		return nil, cerr
 	}
 
-	// 5. Lift results. Flat-mode steps read gcc.registers (= stack);
-	// mem-mode steps read callee.Memory at base+off.
+	// 5-6. Lift results and run post-return. Any failure in this window
+	// poisons the callee: it returned expecting its post-return to run,
+	// and that can no longer happen.
+	results, err = liftResultsAndPostReturn(ctx, plan, gcc, stack, postReturn)
+	if err != nil {
+		gcc.callee.Instance.Poison(err)
+		return nil, err
+	}
+
+	// 7. Exit callee — fires via defer above.
+	return results, nil
+}
+
+// liftResultsAndPostReturn lifts the callee's results out of stack (flat
+// mode) or callee memory (mem mode), then runs the callee's post-return
+// hook. A panic escaping a lift step poisons the callee before
+// propagating; error returns are poisoned by the caller.
+func liftResultsAndPostReturn(
+	ctx context.Context,
+	plan *gocallPlan,
+	gcc *gocallContext,
+	stack []uint64,
+	postReturn PostReturnFunc,
+) ([]Val, error) {
+	defer poisonOnPanic(gcc.callee.Instance)
+
+	// Flat-mode steps read gcc.registers (= stack); mem-mode steps read
+	// callee.Memory at base+off.
 	var resultBase uint32
 	if plan.nResultRegs > 0 {
 		resultBase = uint32(stack[0])
@@ -93,7 +119,7 @@ func runGocallPlan(
 			return nil, err
 		}
 	}
-	results = make([]Val, len(plan.resultSteps))
+	results := make([]Val, len(plan.resultSteps))
 	for i, step := range plan.resultSteps {
 		v, err := step(ctx, gcc, resultBase)
 		if err != nil {
@@ -102,17 +128,15 @@ func runGocallPlan(
 		results[i] = v
 	}
 
-	// 6. Post-return hook. Runs callee wasm under may_leave=false per spec
+	// Post-return runs callee wasm under may_leave=false per spec
 	// (post-return is a cleanup-only window, no outgoing calls allowed).
 	if postReturn != nil {
 		prev := gcc.callee.Instance.SuspendLeave()
-		err = postReturn(ctx, stack[:plan.nResultRegs])
+		err := postReturn(ctx, stack[:plan.nResultRegs])
 		gcc.callee.Instance.RestoreLeave(prev)
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	// 7. Exit callee — fires via defer above.
 	return results, nil
 }

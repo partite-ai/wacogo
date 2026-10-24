@@ -3400,7 +3400,8 @@ func (f *pollPollableForwarder) Block(ctx context.Context) error {
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
 		if callErr_ != nil {
@@ -3417,8 +3418,9 @@ func (f *pollPollableForwarder) Ready(ctx context.Context) (bool, error) {
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = stack[0] != 0
+				return nil
 			},
 		)
 		if callErr_ != nil {
@@ -3462,8 +3464,9 @@ func (f *udpUdpSocketForwarder) AddressFamily(ctx context.Context) (network.IpAd
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = network.IpAddressFamily(stack[0])
+				return nil
 			},
 		)
 		if callErr_ != nil {
@@ -3481,20 +3484,21 @@ func (f *udpUdpSocketForwarder) FinishBind(ctx context.Context) (udp.Result_Netw
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResult_NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnFinishBind.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3508,20 +3512,21 @@ func (f *udpUdpSocketForwarder) LocalAddress(ctx context.Context) (udp.ResultNet
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultNetworkIpSocketAddressNetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnLocalAddress.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3535,20 +3540,21 @@ func (f *udpUdpSocketForwarder) ReceiveBufferSize(ctx context.Context) (udp.Resu
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultU64NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnReceiveBufferSize.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3562,20 +3568,21 @@ func (f *udpUdpSocketForwarder) RemoteAddress(ctx context.Context) (udp.ResultNe
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultNetworkIpSocketAddressNetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnRemoteAddress.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3589,20 +3596,21 @@ func (f *udpUdpSocketForwarder) SendBufferSize(ctx context.Context) (udp.ResultU
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultU64NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnSendBufferSize.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3618,20 +3626,21 @@ func (f *udpUdpSocketForwarder) SetReceiveBufferSize(ctx context.Context, value 
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResult_NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnSetReceiveBufferSize.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3647,20 +3656,21 @@ func (f *udpUdpSocketForwarder) SetSendBufferSize(ctx context.Context, value uin
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResult_NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnSetSendBufferSize.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3676,20 +3686,21 @@ func (f *udpUdpSocketForwarder) SetUnicastHopLimit(ctx context.Context, value ui
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = uint64(arg0_)
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResult_NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnSetUnicastHopLimit.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3728,20 +3739,21 @@ func (f *udpUdpSocketForwarder) StartBind(ctx context.Context, p_network *networ
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResult_NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnStartBind.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3760,20 +3772,21 @@ func (f *udpUdpSocketForwarder) Stream(ctx context.Context, remoteAddress udp.Op
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultUdpTupleIncomingDatagramStreamOutgoingDatagramStreamNetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnStream.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3787,31 +3800,32 @@ func (f *udpUdpSocketForwarder) Subscribe(ctx context.Context) (*poll.PollableHa
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := f.fns.fnSubscribe.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					state_ := f.caller.UserState().(*instanceState)
 					fwd_ := &pollPollableForwarder{caller: f.caller, rh: dstH_, fns: state_.pollPollableFwdFns}
 					resVal_ = poll.NewPollableHandleFrom(dstH_, fwd_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3825,20 +3839,21 @@ func (f *udpUdpSocketForwarder) UnicastHopLimit(ctx context.Context) (udp.Result
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultU8NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnUnicastHopLimit.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3870,20 +3885,21 @@ func (f *udpIncomingDatagramStreamForwarder) Receive(ctx context.Context, maxRes
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultListUdpIncomingDatagramNetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnReceive.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3897,31 +3913,32 @@ func (f *udpIncomingDatagramStreamForwarder) Subscribe(ctx context.Context) (*po
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := f.fns.fnSubscribe.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					state_ := f.caller.UserState().(*instanceState)
 					fwd_ := &pollPollableForwarder{caller: f.caller, rh: dstH_, fns: state_.pollPollableFwdFns}
 					resVal_ = poll.NewPollableHandleFrom(dstH_, fwd_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3952,20 +3969,21 @@ func (f *udpOutgoingDatagramStreamForwarder) CheckSend(ctx context.Context) (udp
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultU64NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnCheckSend.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -3984,20 +4002,21 @@ func (f *udpOutgoingDatagramStreamForwarder) Send(ctx context.Context, datagrams
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemUdpResultU64NetworkErrorCode(ctx, caller, callee, f.caller, f.fns.fnSend.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil
@@ -4011,31 +4030,32 @@ func (f *udpOutgoingDatagramStreamForwarder) Subscribe(ctx context.Context) (*po
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := f.fns.fnSubscribe.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					state_ := f.caller.UserState().(*instanceState)
 					fwd_ := &pollPollableForwarder{caller: f.caller, rh: dstH_, fns: state_.pollPollableFwdFns}
 					resVal_ = poll.NewPollableHandleFrom(dstH_, fwd_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil

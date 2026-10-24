@@ -35,31 +35,32 @@ func (w *stdinWrapper) GetStdin(ctx context.Context) (*streams.InputStreamHandle
 		callErr_ := w.fnGetStdin.CallRaw(ctx, w.callerInst,
 			func(caller, callee *host.CallContext, stack []uint64) {
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnGetStdin.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
 						resErr_ = srcErr_
-						return
+						return resErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
 						resErr_ = dstErr_
-						return
+						return resErr_
 					}
 					state_ := w.callerInst.UserState().(*instanceState)
 					fwd_ := &streamsInputStreamForwarder{caller: w.callerInst, rh: dstH_, fns: state_.streamsInputStreamFwdFns}
 					resVal_ = streams.NewInputStreamHandleFrom(dstH_, fwd_)
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return nil, resErr_
+		}
+		if callErr_ != nil {
+			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil

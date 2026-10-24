@@ -35,8 +35,9 @@ func (w *aclWrapper) Grant(ctx context.Context, p Perms) (Perms, error) {
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(arg0_)
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = Perms(stack[0])
+				return nil
 			},
 		)
 		if callErr_ != nil {

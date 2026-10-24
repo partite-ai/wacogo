@@ -203,7 +203,8 @@ func (f *pollPollableForwarder) Block(ctx context.Context) error {
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
 		if callErr_ != nil {
@@ -220,8 +221,9 @@ func (f *pollPollableForwarder) Ready(ctx context.Context) (bool, error) {
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = stack[0] != 0
+				return nil
 			},
 		)
 		if callErr_ != nil {

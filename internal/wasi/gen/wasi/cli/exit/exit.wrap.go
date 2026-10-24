@@ -40,14 +40,15 @@ func (w *exitWrapper) Exit(ctx context.Context, status Result__) error {
 					return
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return resErr_
+		}
+		if callErr_ != nil {
+			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return nil
@@ -60,7 +61,8 @@ func (w *exitWrapper) ExitWithCode(ctx context.Context, statusCode uint8) error 
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(arg0_)
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
 		if callErr_ != nil {

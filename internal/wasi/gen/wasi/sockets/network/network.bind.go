@@ -1000,20 +1000,21 @@ func (f *wioerrorErrorResourceForwarder) ToDebugString(ctx context.Context) (str
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemString(ctx, caller, callee, f.caller, f.fns.fnToDebugString.ResultType(0), uint32(stack[0])); err_ != nil {
 					resErr_ = err_
-					return
+					return resErr_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return "", fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return "", resErr_
+		}
+		if callErr_ != nil {
+			return "", fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return resVal_, nil

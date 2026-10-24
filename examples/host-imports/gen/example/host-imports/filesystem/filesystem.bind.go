@@ -132,8 +132,9 @@ func (f *streamsDataStreamForwarder) Read(ctx context.Context) (uint32, error) {
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(f.rh.HandleID())
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = uint32(stack[0])
+				return nil
 			},
 		)
 		if callErr_ != nil {
@@ -151,7 +152,8 @@ func (f *streamsDataStreamForwarder) Write(ctx context.Context, v uint32) error 
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = uint64(arg0_)
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
 		if callErr_ != nil {

@@ -35,8 +35,9 @@ func (w *compassWrapper) Reverse(ctx context.Context, d Direction) (Direction, e
 			func(caller, callee *host.CallContext, stack []uint64) {
 				stack[0] = uint64(arg0_)
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = Direction(stack[0])
+				return nil
 			},
 		)
 		if callErr_ != nil {

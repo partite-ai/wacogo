@@ -77,14 +77,15 @@ func (w *incomingHandlerWrapper) Handle(ctx context.Context, request *types.Inco
 					arg1_.Invalidate()
 				}
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
-		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
 		if resErr_ != nil {
 			return resErr_
+		}
+		if callErr_ != nil {
+			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
 		}
 	}
 	return nil

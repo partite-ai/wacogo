@@ -1225,16 +1225,17 @@ func emitForwarderBody(w *strings.Builder, ir ImportedResource, m ResourceMethod
 	}
 	fmt.Fprint(w, "\t\t\t},\n")
 	// read closure: result lift
-	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) {\n")
+	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) error {\n")
 	if m.Result != nil {
 		emitWrapResultRead(w, m.Result, "f", "f.caller", fnExpr)
 	}
+	fmt.Fprint(w, "\t\t\t\treturn nil\n")
 	fmt.Fprint(w, "\t\t\t},\n")
 	fmt.Fprint(w, "\t\t)\n")
-	fmt.Fprintf(w, "\t\tif callErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "fmt.Errorf(\"wacogo/witgen: CallRaw failed: %w\", callErr_)"))
 	if needsResErr {
 		fmt.Fprintf(w, "\t\tif resErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "resErr_"))
 	}
+	fmt.Fprintf(w, "\t\tif callErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "fmt.Errorf(\"wacogo/witgen: CallRaw failed: %w\", callErr_)"))
 	fmt.Fprint(w, "\t}\n")
 	if m.Result == nil {
 		fmt.Fprint(w, "\treturn nil\n")
