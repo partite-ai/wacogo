@@ -14,10 +14,9 @@ const (
 	stubInitialPages uint32 = 1
 
 	// stubBumpInitial is the starting value of the bump allocator.
-	// Must be non-zero because the canonical ABI treats pointer 0 as
-	// null and traps on realloc-returns-null. Must be a multiple of
-	// the maximum alignment we'll see (8 for u64/f64). The first
-	// stubBumpInitial bytes of stub memory are reserved.
+	// Must be a multiple of the maximum alignment we'll see (8 for
+	// u64/f64). The first stubBumpInitial bytes of stub memory are
+	// reserved.
 	stubBumpInitial int32 = 16
 )
 
@@ -169,6 +168,19 @@ func emitReallocBody(bumpGlobalIdx uint32) ([]byte, []wasm.LocalEntry) {
 	cb.I32Add()
 	cb.LocalSet(localNewBump)
 
+	// Trap if aligning the bump or adding new_size wrapped past 2^32:
+	// result < bump || new_bump < result.
+	cb.LocalGet(localResult)
+	cb.GlobalGet(bumpGlobalIdx)
+	cb.I32LtU()
+	cb.LocalGet(localNewBump)
+	cb.LocalGet(localResult)
+	cb.I32LtU()
+	cb.I32Or()
+	cb.If(wasm.BlockTypeEmpty)
+	cb.Unreachable()
+	cb.End()
+
 	// Grow memory if new_bump > memory.size * 64KiB.
 	cb.LocalGet(localNewBump)
 	cb.MemorySize(0)
@@ -190,8 +202,7 @@ func emitReallocBody(bumpGlobalIdx uint32) ([]byte, []wasm.LocalEntry) {
 	cb.I32Const(-1)
 	cb.I32Eq()
 	cb.If(wasm.BlockTypeEmpty)
-	cb.I32Const(0) // signal failure to canon ABI (traps on null)
-	cb.Return()
+	cb.Unreachable() // out of memory traps, as the canonical ABI expects
 	cb.End()
 	cb.End()
 
@@ -273,16 +284,20 @@ func newStubAllocator(stubMod api.Module) (*stubAllocator, error) {
 func (a *stubAllocator) reset() { a.bump.Set(uint64(uint32(stubBumpInitial))) }
 
 // realloc is emitReallocBody in Go: the same bump allocation, growth, and
-// copy of the old block, and a null return when memory cannot grow.
+// copy of the old block, failing where the wasm version traps (an
+// allocation past 4 GiB, or memory that cannot grow).
 func (a *stubAllocator) realloc(_ context.Context, oldPtr, oldSize, align, newSize uint32) (uint32, error) {
 	const pageShift = 16
 	bump := uint32(a.bump.Get())
 	result := (bump + align - 1) & -align
 	newBump := result + newSize
+	if result < bump || newBump < result {
+		return 0, fmt.Errorf("wacogo/host: realloc: %d bytes overflow the address space", newSize)
+	}
 	if cur := a.mem.Size(); newBump > cur {
 		pages := (newBump - cur + (1<<pageShift - 1)) >> pageShift
 		if _, ok := a.mem.Grow(pages); !ok {
-			return 0, nil
+			return 0, fmt.Errorf("wacogo/host: realloc: out of memory")
 		}
 	}
 	a.bump.Set(uint64(newBump))

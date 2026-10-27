@@ -95,10 +95,10 @@ func trapf(format string, args ...any) {
 	panic(&Trap{msg: fmtSprintf(format, args...)})
 }
 
-// callRealloc invokes a ReallocFunc with runtime safety checks: nil func,
-// null return for a non-zero size, misalignment, and out-of-bounds pointer
-// all trap. A null pointer satisfies a zero-size request, as the canonical
-// ABI only checks alignment and bounds and TinyGo returns nil for size 0.
+// callRealloc invokes a ReallocFunc with runtime safety checks: a nil
+// func, a misaligned pointer and an out-of-bounds pointer all trap. These
+// are the canonical ABI's checks; address 0 is a valid pointer, so a null
+// return is not rejected.
 func callRealloc(ctx context.Context, r ReallocFunc, mem api.Memory, origPtr, origSize, align, newSize uint32) (uint32, error) {
 	if r == nil {
 		trapf("realloc required but not provided")
@@ -106,9 +106,6 @@ func callRealloc(ctx context.Context, r ReallocFunc, mem api.Memory, origPtr, or
 	ptr, err := r(ctx, origPtr, origSize, align, newSize)
 	if err != nil {
 		return 0, err
-	}
-	if ptr == 0 && newSize != 0 {
-		trapf("realloc returned null")
 	}
 	if align != 0 && ptr%align != 0 {
 		trapf("realloc returned unaligned pointer %d (align %d)", ptr, align)

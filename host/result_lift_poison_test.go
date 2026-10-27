@@ -235,13 +235,13 @@ func TestCallRaw_ReallocMayNotLeave(t *testing.T) {
 
 // TestCallRaw_ReallocFailurePoisonsCallee checks that a write callback's
 // call to the callee's realloc fails, and poisons the callee, when the
-// realloc traps or returns a pointer the canonical ABI rejects.
+// realloc traps or returns a pointer the canonical ABI rejects. Address 0
+// is valid, so a null pointer is not rejected.
 func TestCallRaw_ReallocFailurePoisonsCallee(t *testing.T) {
 	for _, tc := range []struct{ name, body string }{
 		{"traps", "unreachable"},
 		{"out of bounds", "i32.const 0x10000"},
 		{"misaligned", "i32.const 3"},
-		{"null", "i32.const 0"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()

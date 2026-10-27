@@ -3,6 +3,7 @@ package host
 import (
 	"bytes"
 	"context"
+	"math"
 	"testing"
 
 	"github.com/partite-ai/wacogo/internal/core"
@@ -99,6 +100,21 @@ func TestStubAllocator_MatchesWasmRealloc(t *testing.T) {
 		bg, _ := mg.Read(0, mg.Size())
 		if !bytes.Equal(bw, bg) {
 			t.Fatalf("op %d: memory contents differ", i)
+		}
+	}
+
+	// Requests that would wrap past 4 GiB fail in both, without moving
+	// the bump.
+	for _, o := range []op{{align: 1, size: 0xFFFFFFF0}, {align: 8, size: math.MaxUint32}} {
+		before := alloc.bump.Get()
+		if _, err := wasmRealloc.Call(ctx, 0, 0, uint64(o.align), uint64(o.size)); err == nil {
+			t.Fatalf("%+v: wasm realloc succeeded, want a trap", o)
+		}
+		if _, err := alloc.realloc(ctx, 0, 0, o.align, o.size); err == nil {
+			t.Fatalf("%+v: Go realloc succeeded, want an error", o)
+		}
+		if gw, gg := bumpW.Get(), alloc.bump.Get(); gw != before || gg != before {
+			t.Fatalf("%+v: bump moved: Go %d, wasm %d, want %d", o, gg, gw, before)
 		}
 	}
 }
