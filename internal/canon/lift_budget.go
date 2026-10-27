@@ -10,23 +10,26 @@ import (
 // than the engine's configured maximum.
 var ErrLiftLimitExceeded = errors.New("lift size limit exceeded")
 
-// liftBudget bounds the bytes one lift may materialize in its receiver.
+// LiftBudget bounds the bytes one lift may materialize in its receiver.
 // Each lift path charges what it allocates: a transfer charges the bytes
 // it reallocs in the receiver's memory (strings post-transcoding), and a
 // lift into Go Vals charges each list's and string's estimated Go
 // footprint (see valFootprint). A zero limit disables accounting.
-type liftBudget struct {
+//
+// Code outside canon receives a *LiftBudget from CallBinding.CallRaw and
+// charges it through Charge.
+type LiftBudget struct {
 	limit uint64
 	used  uint64
 }
 
 // reset starts a new lift.
-func (b *liftBudget) reset() { b.used = 0 }
+func (b *LiftBudget) reset() { b.used = 0 }
 
-// charge records n more lifted bytes, returning an error wrapping
+// Charge records n more lifted bytes, returning an error wrapping
 // ErrLiftLimitExceeded if the lift's total would exceed the limit. A nil
 // budget accepts everything.
-func (b *liftBudget) charge(n uint64) error {
+func (b *LiftBudget) Charge(n uint64) error {
 	if b == nil || b.limit == 0 {
 		return nil
 	}
@@ -39,8 +42,8 @@ func (b *liftBudget) charge(n uint64) error {
 }
 
 // mustCharge is charge for trap-based call paths.
-func (b *liftBudget) mustCharge(n uint64) {
-	if err := b.charge(n); err != nil {
+func (b *LiftBudget) mustCharge(n uint64) {
+	if err := b.Charge(n); err != nil {
 		panic(&Trap{msg: err.Error(), err: err})
 	}
 }
@@ -62,5 +65,5 @@ func checkLiftedList(gcc *gocallContext, ptr, n, elemSize, elemAlign uint32, ele
 	if uint64(ptr)+byteLen > uint64(gcc.callee.Memory.Size()) {
 		return fmt.Errorf("list pointer/length out of bounds of memory: ptr=%d len=%d", ptr, byteLen)
 	}
-	return gcc.budget.charge(listElemCharge(n, elemFootprint))
+	return gcc.budget.Charge(listElemCharge(n, elemFootprint))
 }

@@ -84,7 +84,6 @@ func (f *Func) CallRaw(
 		callee.Memory,
 		realloc,
 	)
-	calleeCC.liftLimit = f.binding.MaxLiftBytes()
 
 	defer func() {
 		if endErr := task.End(); endErr != nil && err == nil {
@@ -94,7 +93,12 @@ func (f *Func) CallRaw(
 
 	return f.binding.CallRaw(ctx,
 		func(stack []uint64) error { return write(callerCC, calleeCC, stack) },
-		func(stack []uint64) error { return read(callerCC, calleeCC, stack) },
+		func(stack []uint64, budget *canon.LiftBudget) error {
+			// Only result reads lift out of the callee, so only they
+			// charge the budget.
+			calleeCC.budget = budget
+			return read(callerCC, calleeCC, stack)
+		},
 	)
 }
 

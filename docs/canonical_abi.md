@@ -344,9 +344,12 @@ accounting lives in `liftBudget` (`lift_budget.go`).
   realloc, so `allocSink.add` (batched discovery walk) and serial
   `allocSource.next` charge the requested size. The budget is reset per
   `runPhasedTransfer` call. Cross-encoding strings are charged their
-  exact transcoded length: the discovery walk counts it
-  (`transcodedByteLen`), and batched `allocSource.next` asserts that the
-  transfer step requests the same size.
+  exact transcoded length (`transcodedByteLen`, counted by the discovery
+  walk in batched mode and by the transfer step itself in serial mode)
+  before anything is allocated, and are then transcoded straight into
+  the receiver's buffer (`transcodeInto`), so no Go-side copy of the
+  string is made. Batched `allocSource.next` traps if a transfer step
+  requests a size other than the one discovery reserved.
 - **Gocall.** The receiver is Go, and the cost is Go heap. Canonical
   sizes understate it badly: a `list<record { a: u8 }>` element is one
   canonical byte but a `Val` slot, a `*ValRecord` and a one-entry
@@ -357,7 +360,8 @@ accounting lives in `liftBudget` (`lift_budget.go`).
   against memory). `valFootprint` is computed once per list at plan
   compile time from the `Val` struct sizes, excluding nested list
   contents and string bytes, which their own steps charge. String steps
-  charge the decoded byte length.
+  (`liftString`) charge the UTF-8 length of the Go string, its only
+  allocation, before decoding into it.
 - **Direct memory readers.** `CallContext.ChargeLift` exposes the budget
   to code that lifts straight from `Memory()`. witgen-generated result
   lifts charge each list `ln_ * goFootprintExpr(elem)`: a constant

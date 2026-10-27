@@ -20,7 +20,7 @@ type allocSource struct {
 	helper *batchReallocHelper
 	n      uint32 // pre-allocated count in batched mode; 0 in serial
 	idx    uint32 // batched cursor
-	budget *liftBudget
+	budget *LiftBudget
 }
 
 func (s *allocSource) next(ctx context.Context, tc *transferContext, size, align uint32) uint32 {
@@ -36,14 +36,23 @@ func (s *allocSource) next(ctx context.Context, tc *transferContext, size, align
 		return p
 	}
 	if s.idx >= s.n {
-		panic(fmt.Sprintf("allocSource: cursor %d >= count %d (size discovery missed an alloc)", s.idx, s.n))
+		panic(&Trap{msg: fmt.Sprintf("allocSource: cursor %d >= count %d (size discovery missed an alloc)", s.idx, s.n)})
 	}
 	if want := s.helper.readSize(s.idx); want != size {
-		panic(fmt.Sprintf("allocSource: alloc %d requested %d bytes, discovery reserved %d", s.idx, size, want))
+		panic(&Trap{msg: fmt.Sprintf("allocSource: alloc %d requested %d bytes, discovery reserved %d", s.idx, size, want)})
 	}
 	p := s.helper.readPtr(s.n, s.idx)
 	s.idx++
 	return p
+}
+
+// reservedSize returns the size the discovery walk reserved for the next
+// allocation. Serial mode reserves nothing and reports false.
+func (s *allocSource) reservedSize() (uint32, bool) {
+	if s.helper == nil || s.idx >= s.n {
+		return 0, false
+	}
+	return s.helper.readSize(s.idx), true
 }
 
 // allocSink records each (size, align) request during the discovery walk.
@@ -54,7 +63,7 @@ func (s *allocSource) next(ctx context.Context, tc *transferContext, size, align
 type allocSink struct {
 	helper *batchReallocHelper
 	n      uint32
-	budget *liftBudget
+	budget *LiftBudget
 }
 
 func (s *allocSink) add(size, align uint32) {

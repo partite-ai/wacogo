@@ -124,3 +124,50 @@ func TestResultLiftFailure_CallRawPoisonsCallee(t *testing.T) {
 	}
 	assertPoisonedWithoutPostReturn(t, err, callee)
 }
+
+// leavingPostReturnWAT exports get: func() -> u32 whose post-return calls
+// resource.new, which may_leave forbids during post-return.
+const leavingPostReturnWAT = `(component
+  (type $r (resource (rep i32)))
+  (core func $new (canon resource.new $r))
+  (core module $m
+    (import "r" "new" (func $new (param i32) (result i32)))
+    (func (export "get") (result i32) i32.const 7)
+    (func (export "post") (param i32) (drop (call $new (i32.const 1)))))
+  (core instance $i (instantiate $m (with "r" (instance (export "new" (func $new))))))
+  (func (export "get") (result u32)
+    (canon lift (core func $i "get") (post-return (func $i "post"))))
+)`
+
+// TestPostReturn_MayNotLeave checks post-return runs under may_leave=false
+// on both the Call and CallRaw paths.
+func TestPostReturn_MayNotLeave(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+
+	callee := instantiateWAT(t, e, leavingPostReturnWAT)
+	if _, err := callee.ExportedFunc("get").Call(ctx); err == nil || !strings.Contains(err.Error(), "may_leave") {
+		t.Fatalf("Call: err = %v, want a may_leave violation", err)
+	}
+
+	hc, err := e.NewHostBuilder("caller").Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer hc.Close(ctx)
+	callerInst, err := hc.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer callerInst.Close(ctx)
+
+	callee = instantiateWAT(t, e, leavingPostReturnWAT)
+	err = callee.ExportedFunc("get").CallRaw(ctx, callerInst.Core(),
+		func(_, _ *host.CallContext, _ []uint64) error { return nil },
+		func(_, _ *core.CallContext, _ []uint64) error { return nil },
+	)
+	if err == nil || !strings.Contains(err.Error(), "may_leave") {
+		t.Fatalf("CallRaw: err = %v, want a may_leave violation", err)
+	}
+}

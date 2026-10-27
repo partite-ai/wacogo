@@ -191,11 +191,10 @@ func (v *memToValVisitor) VisitString() {
 		if !ok {
 			return nil, fmt.Errorf("oob string len read")
 		}
-		enc := gcc.callee.StringEncoding
-		if err := gcc.budget.charge(stringByteLen(coded, enc)); err != nil {
+		s, err := liftString(memShim{gcc.callee.Memory}, ptr, coded, gcc.callee.StringEncoding, &gcc.budget)
+		if err != nil {
 			return nil, err
 		}
-		s := decodeString(memShim{gcc.callee.Memory}, ptr, coded, enc)
 		return ValString(s), nil
 	})
 }

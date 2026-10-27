@@ -31,10 +31,8 @@ type CallContext struct {
 	memory  api.Memory
 	realloc ReallocFunc
 
-	// liftLimit and lifted account ChargeLift calls; liftLimit 0 means
-	// unlimited.
-	liftLimit uint64
-	lifted    uint64
+	// budget accounts ChargeLift calls; nil means unlimited.
+	budget *canon.LiftBudget
 }
 
 // NewCallContext returns a CallContext for the given instance, task,
@@ -66,14 +64,7 @@ func (cc *CallContext) Realloc(ctx context.Context, origPtr, origSize, align, ne
 // It returns an error wrapping ErrLiftLimitExceeded once the call's total
 // exceeds the engine's WithMaxLiftBytes limit.
 func (cc *CallContext) ChargeLift(n uint64) error {
-	if cc.liftLimit == 0 {
-		return nil
-	}
-	if n > cc.liftLimit-cc.lifted {
-		return fmt.Errorf("%w: lifted value exceeds %d bytes", ErrLiftLimitExceeded, cc.liftLimit)
-	}
-	cc.lifted += n
-	return nil
+	return cc.budget.Charge(n)
 }
 
 // Instance returns the *ComponentInstance this context is bound to.

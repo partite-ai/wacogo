@@ -3,6 +3,7 @@ package canon
 import (
 	"unicode/utf16"
 	"unicode/utf8"
+	"unsafe"
 )
 
 // validateUTF8 is the fast path for UTF-8 validation: returns "" if b is
@@ -128,61 +129,38 @@ func readStringBytes(mem fakeOrRealMemory, ptr, codedLen uint32, enc StringEncod
 	return bytes
 }
 
+// decodeString reads the string at (ptr, codedLen) in enc out of mem into a
+// Go string. Traps on malformed input.
 func decodeString(mem fakeOrRealMemory, ptr, codedLen uint32, enc StringEncoding) string {
-	bytes := readStringBytes(mem, ptr, codedLen, enc)
-	switch enc {
-	case EncUTF8:
-		if msg := validateUTF8(bytes); msg != "" {
+	s, _ := liftString(mem, ptr, codedLen, enc, nil)
+	return s
+}
+
+// liftString is decodeString for a lift: it charges budget the string's
+// UTF-8 length, the only allocation it makes, before allocating it, and
+// returns the charge's error. Malformed input traps.
+func liftString(mem fakeOrRealMemory, ptr, codedLen uint32, enc StringEncoding, budget *LiftBudget) (string, error) {
+	src := readStringBytes(mem, ptr, codedLen, enc)
+	if enc == EncUTF8 {
+		if msg := validateUTF8(src); msg != "" {
 			trapf("%s", msg)
 		}
-		return string(bytes)
-	case EncUTF16:
-		return decodeUTF16(bytes)
-	case EncLatin1UTF16:
-		if _, isUTF16 := latin1UTF16Decode(codedLen); isUTF16 {
-			return decodeUTF16(bytes)
+		if err := budget.Charge(uint64(len(src))); err != nil {
+			return "", err
 		}
-		return decodeLatin1(bytes)
+		return string(src), nil
 	}
-	trapf("unknown string encoding")
-	return ""
-}
-
-// decodeLatin1 decodes ISO-8859-1 (each byte = code point) into a Go string.
-// Every byte is a valid code point so no validation is needed.
-func decodeLatin1(bytes []byte) string {
-	runes := make([]rune, len(bytes))
-	for i, b := range bytes {
-		runes[i] = rune(b)
+	n := transcodedByteLen(src, codedLen, enc, EncUTF8)
+	if err := budget.Charge(uint64(n)); err != nil {
+		return "", err
 	}
-	return string(runes)
-}
-
-func decodeUTF16(bytes []byte) string {
-	if len(bytes)%2 != 0 {
-		trapf("UTF-16 byte length must be even")
+	if n == 0 {
+		return "", nil
 	}
-	units := make([]uint16, len(bytes)/2)
-	for i := range units {
-		units[i] = uint16(bytes[2*i]) | uint16(bytes[2*i+1])<<8
-	}
-	for i := 0; i < len(units); i++ {
-		u := units[i]
-		if u >= 0xD800 && u <= 0xDBFF {
-			if i+1 >= len(units) {
-				trapf("unpaired high surrogate at %d", i)
-			}
-			low := units[i+1]
-			if low < 0xDC00 || low > 0xDFFF {
-				trapf("high surrogate not followed by low surrogate")
-			}
-			i++
-		} else if u >= 0xDC00 && u <= 0xDFFF {
-			trapf("unpaired low surrogate at %d", i)
-		}
-	}
-	runes := utf16.Decode(units)
-	return string(runes)
+	buf := make([]byte, n)
+	transcodeInto(buf, src, codedLen, enc, EncUTF8)
+	// buf is not retained, so the string can take it over without a copy.
+	return unsafe.String(unsafe.SliceData(buf), len(buf)), nil
 }
 
 type fakeOrRealMemory interface {
@@ -381,4 +359,104 @@ func fitsLatin1(src []byte, srcEnc StringEncoding, srcUTF16 bool) bool {
 	default: // Latin-1
 		return true
 	}
+}
+
+// transcodeInto writes src, a string in srcEnc with coded length srcCoded,
+// into dst in dstEnc and returns the destination coded length. dst must be
+// exactly the transcoded size (see transcodedByteLen). Traps if src is
+// malformed in srcEnc or does not fill dst exactly. Does not allocate.
+func transcodeInto(dst, src []byte, srcCoded uint32, srcEnc, dstEnc StringEncoding) uint32 {
+	srcUTF16 := srcEnc == EncUTF16
+	if srcEnc == EncLatin1UTF16 {
+		_, srcUTF16 = latin1UTF16Decode(srcCoded)
+	}
+	if srcUTF16 && len(src)%2 != 0 {
+		trapf("UTF-16 byte length must be even")
+	}
+	dstLatin1 := dstEnc == EncLatin1UTF16 && fitsLatin1(src, srcEnc, srcUTF16)
+	o := 0
+	for i := 0; i < len(src); {
+		r, size := decodeRune(src, i, srcEnc, srcUTF16)
+		i += size
+		switch {
+		case dstEnc == EncUTF8:
+			if utf8.RuneLen(r) > len(dst)-o {
+				trapTranscodedOverflow(len(dst))
+			}
+			o += utf8.EncodeRune(dst[o:], r)
+		case dstLatin1:
+			if o >= len(dst) {
+				trapTranscodedOverflow(len(dst))
+			}
+			dst[o] = byte(r)
+			o++
+		case r >= 0x10000:
+			if len(dst)-o < 4 {
+				trapTranscodedOverflow(len(dst))
+			}
+			hi, lo := utf16.EncodeRune(r)
+			putUTF16Unit(dst[o:], hi)
+			putUTF16Unit(dst[o+2:], lo)
+			o += 4
+		default:
+			if len(dst)-o < 2 {
+				trapTranscodedOverflow(len(dst))
+			}
+			putUTF16Unit(dst[o:], r)
+			o += 2
+		}
+	}
+	if o != len(dst) {
+		trapf("transcoded string is %d bytes, %d reserved", o, len(dst))
+	}
+	switch {
+	case dstEnc == EncUTF8 || dstLatin1:
+		return uint32(o)
+	case dstEnc == EncUTF16:
+		return uint32(o / 2)
+	}
+	return uint32(o/2) | latin1UTF16HighBit
+}
+
+// decodeRune decodes the code point starting at src[i] and returns it with
+// its encoded size. srcUTF16 selects UTF-16 for EncUTF16 and for the tagged
+// half of EncLatin1UTF16; otherwise a non-UTF-8 source is Latin-1. Traps on
+// malformed input with the same messages as the validators.
+func decodeRune(src []byte, i int, srcEnc StringEncoding, srcUTF16 bool) (rune, int) {
+	switch {
+	case srcEnc == EncUTF8:
+		r, size := utf8.DecodeRune(src[i:])
+		if r == utf8.RuneError && size <= 1 {
+			// The first malformed sequence starts here, so classifying
+			// the tail gives the message validateUTF8 would.
+			trapf("%s", classifyUTF8(src[i:]))
+		}
+		return r, size
+	case srcUTF16:
+		u := uint16(src[i]) | uint16(src[i+1])<<8
+		switch {
+		case u >= 0xD800 && u <= 0xDBFF:
+			if i+4 > len(src) {
+				trapf("unpaired high surrogate at %d", i/2)
+			}
+			low := uint16(src[i+2]) | uint16(src[i+3])<<8
+			if low < 0xDC00 || low > 0xDFFF {
+				trapf("high surrogate not followed by low surrogate")
+			}
+			return utf16.DecodeRune(rune(u), rune(low)), 4
+		case u >= 0xDC00 && u <= 0xDFFF:
+			trapf("unpaired low surrogate at %d", i/2)
+		}
+		return rune(u), 2
+	}
+	return rune(src[i]), 1
+}
+
+func putUTF16Unit(dst []byte, r rune) {
+	dst[0] = byte(r)
+	dst[1] = byte(r >> 8)
+}
+
+func trapTranscodedOverflow(reserved int) {
+	trapf("transcoded string exceeds the %d bytes reserved", reserved)
 }

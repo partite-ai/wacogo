@@ -129,11 +129,10 @@ func (v *flatToValVisitor) VisitString() {
 		}()
 		ptr := uint32(gcc.registers[ptrSlot])
 		coded := uint32(gcc.registers[lenSlot])
-		enc := gcc.callee.StringEncoding
-		if err := gcc.budget.charge(stringByteLen(coded, enc)); err != nil {
+		s, err := liftString(memShim{gcc.callee.Memory}, ptr, coded, gcc.callee.StringEncoding, &gcc.budget)
+		if err != nil {
 			return nil, err
 		}
-		s := decodeString(memShim{gcc.callee.Memory}, ptr, coded, enc)
 		return ValString(s), nil
 	})
 }

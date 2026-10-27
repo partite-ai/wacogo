@@ -49,10 +49,6 @@ func NewCallBinding(params, results []Type, callee Callee, maxLiftBytes uint64) 
 	return cb
 }
 
-// MaxLiftBytes returns the per-lift byte limit this binding enforces, or 0
-// when unlimited.
-func (cb *CallBinding) MaxLiftBytes() uint64 { return cb.gcc.budget.limit }
-
 // Callee returns the captured callee descriptor by value. Used by root-side
 // code that needs the underlying memory/realloc/CoreFunc (e.g. adapter
 // construction that treats this Func as a target in a cross-component call).
@@ -78,9 +74,9 @@ func (cb *CallBinding) Call(ctx context.Context, args []Val) (results []Val, err
 
 // CallRaw invokes the function using caller-supplied flat-stack closures,
 // bypassing the gocall plan's Val lift/lower steps. writeArgs populates the
-// stack before the wasm call; readResult reads from it after. If
-// writeArgs fails, the call is not made. If readResult fails, post-return
-// is skipped and the callee is poisoned.
+// stack before the wasm call; readResult reads from it after, charging
+// budget for what it lifts. If writeArgs fails, the call is not made. If
+// readResult fails, post-return is skipped and the callee is poisoned.
 //
 // The reentrance gate and post-return hook are still honoured. No resource
 // table or realloc operations are performed — the caller is responsible for
@@ -88,7 +84,7 @@ func (cb *CallBinding) Call(ctx context.Context, args []Val) (results []Val, err
 func (cb *CallBinding) CallRaw(
 	ctx context.Context,
 	writeArgs func(stack []uint64) error,
-	readResult func(stack []uint64) error,
+	readResult func(stack []uint64, budget *LiftBudget) error,
 ) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -126,15 +122,22 @@ func (cb *CallBinding) CallRaw(
 // readResultAndPostReturn runs readResult and then the callee's
 // post-return. A panic escaping either poisons the callee before
 // propagating; error returns are poisoned by the caller.
-func (cb *CallBinding) readResultAndPostReturn(ctx context.Context, stack []uint64, readResult func(stack []uint64) error) error {
+func (cb *CallBinding) readResultAndPostReturn(ctx context.Context, stack []uint64, readResult func(stack []uint64, budget *LiftBudget) error) error {
 	defer poisonOnPanic(cb.callee.Instance)
-	if err := readResult(stack); err != nil {
+	// The binding is single-threaded per callee, like the Call path that
+	// shares gcc, so its budget can be reused.
+	cb.gcc.budget.reset()
+	if err := readResult(stack, &cb.gcc.budget); err != nil {
 		return err
 	}
-	if cb.postReturn != nil {
-		return cb.postReturn(ctx, stack)
+	if cb.postReturn == nil {
+		return nil
 	}
-	return nil
+	// Post-return is cleanup only: it runs under may_leave=false, as in
+	// runGocallPlan and runTransferPlan.
+	prev := cb.callee.Instance.SuspendLeave()
+	defer cb.callee.Instance.RestoreLeave(prev)
+	return cb.postReturn(ctx, stack)
 }
 
 // wrapRealloc adapts an api.Function realloc into ReallocFunc, or nil.

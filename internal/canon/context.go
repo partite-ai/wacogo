@@ -41,7 +41,7 @@ type transferContext struct {
 
 	// budget bounds each lift (the params phase, then the results phase);
 	// reset at the start of each phase by runPhasedTransfer.
-	budget liftBudget
+	budget LiftBudget
 }
 
 // endTaskOrTrap is the per-call End-of-task hook used as a method-bound
@@ -66,7 +66,7 @@ type gocallContext struct {
 	Task      Task
 
 	// budget bounds the result lift; reset before each one.
-	budget liftBudget
+	budget LiftBudget
 }
 
 // endTask is the per-call End-of-task hook used as a method-bound defer

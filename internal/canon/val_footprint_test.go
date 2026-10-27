@@ -134,7 +134,7 @@ func TestListLift_FootprintExceedsLimit(t *testing.T) {
 			gcc := &gocallContext{
 				callee:    &transferSide{Memory: mem, StringEncoding: EncUTF8},
 				registers: []uint64{0, n},
-				budget:    liftBudget{limit: tc.limit},
+				budget:    LiftBudget{limit: tc.limit},
 			}
 			_, err := v.out[0](context.Background(), gcc, 0)
 			if tc.ok {
