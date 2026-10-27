@@ -116,7 +116,7 @@ func TestResultLiftFailure_CallRawPoisonsCallee(t *testing.T) {
 	callee := instantiateWAT(t, e, badResultCalleeWAT)
 	wantErr := errors.New("read failed")
 	err = callee.ExportedFunc("get").CallRaw(ctx, callerInst.Core(),
-		func(_, _ *host.CallContext, _ []uint64) {},
+		func(_, _ *host.CallContext, _ []uint64) error { return nil },
 		func(_, _ *core.CallContext, _ []uint64) error { return wantErr },
 	)
 	if !errors.Is(err, wantErr) {

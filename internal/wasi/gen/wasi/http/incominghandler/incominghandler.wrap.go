@@ -6,7 +6,6 @@ package incominghandler
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -30,28 +29,24 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 	return w_
 }
 func (w *incomingHandlerWrapper) Handle(ctx context.Context, request *types.IncomingRequestHandle, responseOut *types.ResponseOutparamHandle) error {
-	var resErr_ error
 	arg0_ := request
 	arg1_ := responseOut
 	{
 		callErr_ := w.fnHandle.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnHandle.ParamType(0).(wacogo.TypeOwn).ResourceType
 					callerH_, err_ := types.HandleValueFor(caller, w.callerInst, arg0_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					srcH_, err_ := caller.LookupOwn(tr_, callerH_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					dstH_, err_ := srcH_.TransferOwn(callee.TransferTarget())
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					stack[0] = uint64(dstH_.HandleID())
 					arg0_.Invalidate()
@@ -60,32 +55,27 @@ func (w *incomingHandlerWrapper) Handle(ctx context.Context, request *types.Inco
 					tr_ := w.fnHandle.ParamType(1).(wacogo.TypeOwn).ResourceType
 					callerH_, err_ := types.HandleValueFor(caller, w.callerInst, arg1_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					srcH_, err_ := caller.LookupOwn(tr_, callerH_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					dstH_, err_ := srcH_.TransferOwn(callee.TransferTarget())
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					stack[1] = uint64(dstH_.HandleID())
 					arg1_.Invalidate()
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return resErr_
-		}
 		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return callErr_
 		}
 	}
 	return nil

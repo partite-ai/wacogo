@@ -18,7 +18,6 @@ package wallclock
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -44,26 +43,22 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *wallClockWrapper) Now(ctx context.Context) (Datetime, error) {
 	var resVal_ Datetime
-	var resErr_ error
 	{
 		callErr_ := w.fnNow.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemDatetime(ctx, caller, callee, w.callerInst, w.fnNow.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return Datetime{}, resErr_
-		}
 		if callErr_ != nil {
-			return Datetime{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return Datetime{}, callErr_
 		}
 	}
 	return resVal_, nil
@@ -71,26 +66,22 @@ func (w *wallClockWrapper) Now(ctx context.Context) (Datetime, error) {
 
 func (w *wallClockWrapper) Resolution(ctx context.Context) (Datetime, error) {
 	var resVal_ Datetime
-	var resErr_ error
 	{
 		callErr_ := w.fnResolution.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemDatetime(ctx, caller, callee, w.callerInst, w.fnResolution.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return Datetime{}, resErr_
-		}
 		if callErr_ != nil {
-			return Datetime{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return Datetime{}, callErr_
 		}
 	}
 	return resVal_, nil

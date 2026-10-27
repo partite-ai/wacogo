@@ -5,7 +5,6 @@ package calc
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -37,9 +36,10 @@ func (w *calcWrapper) Add(ctx context.Context, a uint32, b uint32) (uint32, erro
 	arg1_ := b
 	{
 		callErr_ := w.fnAdd.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
 				stack[1] = uint64(arg1_)
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = uint32(stack[0])
@@ -47,7 +47,7 @@ func (w *calcWrapper) Add(ctx context.Context, a uint32, b uint32) (uint32, erro
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil
@@ -59,9 +59,10 @@ func (w *calcWrapper) Multiply(ctx context.Context, a uint32, b uint32) (uint32,
 	arg1_ := b
 	{
 		callErr_ := w.fnMultiply.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
 				stack[1] = uint64(arg1_)
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = uint32(stack[0])
@@ -69,7 +70,7 @@ func (w *calcWrapper) Multiply(ctx context.Context, a uint32, b uint32) (uint32,
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil
@@ -81,9 +82,10 @@ func (w *calcWrapper) Subtract(ctx context.Context, a uint32, b uint32) (uint32,
 	arg1_ := b
 	{
 		callErr_ := w.fnSubtract.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
 				stack[1] = uint64(arg1_)
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = uint32(stack[0])
@@ -91,7 +93,7 @@ func (w *calcWrapper) Subtract(ctx context.Context, a uint32, b uint32) (uint32,
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil

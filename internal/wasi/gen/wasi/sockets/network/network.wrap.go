@@ -5,7 +5,6 @@ package network
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -30,46 +29,39 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *networkWrapper) NetworkErrorCode(ctx context.Context, err *wioerror.ErrorResourceHandle) (OptionErrorCode, error) {
 	var resVal_ OptionErrorCode
-	var resErr_ error
 	arg0_ := err
 	{
 		callErr_ := w.fnNetworkErrorCode.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnNetworkErrorCode.ParamType(0).(wacogo.TypeBorrow).ResourceType
 					callerH_, err_ := wioerror.HandleValueFor(caller, w.callerInst, arg0_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					srcH_, err_ := caller.LookupBorrowable(tr_, callerH_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					dstH_, err_ := srcH_.LendTo(callee.TransferTarget(), callee.Task())
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					stack[0] = uint64(dstH_.HandleID())
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemOptionErrorCode(ctx, caller, callee, w.callerInst, w.fnNetworkErrorCode.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return OptionErrorCode{}, resErr_
-		}
 		if callErr_ != nil {
-			return OptionErrorCode{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return OptionErrorCode{}, callErr_
 		}
 	}
 	return resVal_, nil

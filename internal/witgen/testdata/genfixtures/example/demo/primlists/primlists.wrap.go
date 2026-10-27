@@ -6,7 +6,6 @@ package primlists
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -52,31 +51,26 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *primlistsWrapper) RevBool(ctx context.Context, xs []bool) ([]bool, error) {
 	var resVal_ []bool
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevBool.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListBool(ctx, caller, callee, w.callerInst, w.fnRevBool.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListBool(ctx, caller, callee, w.callerInst, w.fnRevBool.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -84,31 +78,26 @@ func (w *primlistsWrapper) RevBool(ctx context.Context, xs []bool) ([]bool, erro
 
 func (w *primlistsWrapper) RevChar(ctx context.Context, xs []rune) ([]rune, error) {
 	var resVal_ []rune
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevChar.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListChar(ctx, caller, callee, w.callerInst, w.fnRevChar.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListChar(ctx, caller, callee, w.callerInst, w.fnRevChar.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -116,31 +105,26 @@ func (w *primlistsWrapper) RevChar(ctx context.Context, xs []rune) ([]rune, erro
 
 func (w *primlistsWrapper) RevF32(ctx context.Context, xs []float32) ([]float32, error) {
 	var resVal_ []float32
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevF32.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListF32(ctx, caller, callee, w.callerInst, w.fnRevF32.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListF32(ctx, caller, callee, w.callerInst, w.fnRevF32.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -148,31 +132,26 @@ func (w *primlistsWrapper) RevF32(ctx context.Context, xs []float32) ([]float32,
 
 func (w *primlistsWrapper) RevF64(ctx context.Context, xs []float64) ([]float64, error) {
 	var resVal_ []float64
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevF64.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListF64(ctx, caller, callee, w.callerInst, w.fnRevF64.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListF64(ctx, caller, callee, w.callerInst, w.fnRevF64.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -180,31 +159,26 @@ func (w *primlistsWrapper) RevF64(ctx context.Context, xs []float64) ([]float64,
 
 func (w *primlistsWrapper) RevS16(ctx context.Context, xs []int16) ([]int16, error) {
 	var resVal_ []int16
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevS16.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListS16(ctx, caller, callee, w.callerInst, w.fnRevS16.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListS16(ctx, caller, callee, w.callerInst, w.fnRevS16.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -212,31 +186,26 @@ func (w *primlistsWrapper) RevS16(ctx context.Context, xs []int16) ([]int16, err
 
 func (w *primlistsWrapper) RevS32(ctx context.Context, xs []int32) ([]int32, error) {
 	var resVal_ []int32
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevS32.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListS32(ctx, caller, callee, w.callerInst, w.fnRevS32.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListS32(ctx, caller, callee, w.callerInst, w.fnRevS32.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -244,31 +213,26 @@ func (w *primlistsWrapper) RevS32(ctx context.Context, xs []int32) ([]int32, err
 
 func (w *primlistsWrapper) RevS64(ctx context.Context, xs []int64) ([]int64, error) {
 	var resVal_ []int64
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevS64.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListS64(ctx, caller, callee, w.callerInst, w.fnRevS64.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListS64(ctx, caller, callee, w.callerInst, w.fnRevS64.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -276,31 +240,26 @@ func (w *primlistsWrapper) RevS64(ctx context.Context, xs []int64) ([]int64, err
 
 func (w *primlistsWrapper) RevS8(ctx context.Context, xs []int8) ([]int8, error) {
 	var resVal_ []int8
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevS8.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListS8(ctx, caller, callee, w.callerInst, w.fnRevS8.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListS8(ctx, caller, callee, w.callerInst, w.fnRevS8.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -308,31 +267,26 @@ func (w *primlistsWrapper) RevS8(ctx context.Context, xs []int8) ([]int8, error)
 
 func (w *primlistsWrapper) RevU16(ctx context.Context, xs []uint16) ([]uint16, error) {
 	var resVal_ []uint16
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevU16.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListU16(ctx, caller, callee, w.callerInst, w.fnRevU16.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListU16(ctx, caller, callee, w.callerInst, w.fnRevU16.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -340,31 +294,26 @@ func (w *primlistsWrapper) RevU16(ctx context.Context, xs []uint16) ([]uint16, e
 
 func (w *primlistsWrapper) RevU32(ctx context.Context, xs []uint32) ([]uint32, error) {
 	var resVal_ []uint32
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevU32.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListU32(ctx, caller, callee, w.callerInst, w.fnRevU32.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListU32(ctx, caller, callee, w.callerInst, w.fnRevU32.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -372,31 +321,26 @@ func (w *primlistsWrapper) RevU32(ctx context.Context, xs []uint32) ([]uint32, e
 
 func (w *primlistsWrapper) RevU64(ctx context.Context, xs []uint64) ([]uint64, error) {
 	var resVal_ []uint64
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevU64.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListU64(ctx, caller, callee, w.callerInst, w.fnRevU64.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListU64(ctx, caller, callee, w.callerInst, w.fnRevU64.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -404,31 +348,26 @@ func (w *primlistsWrapper) RevU64(ctx context.Context, xs []uint64) ([]uint64, e
 
 func (w *primlistsWrapper) RevU8(ctx context.Context, xs []uint8) ([]uint8, error) {
 	var resVal_ []uint8
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnRevU8.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListU8(ctx, caller, callee, w.callerInst, w.fnRevU8.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListU8(ctx, caller, callee, w.callerInst, w.fnRevU8.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil

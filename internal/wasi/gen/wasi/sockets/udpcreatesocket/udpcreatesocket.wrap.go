@@ -5,7 +5,6 @@ package udpcreatesocket
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -30,28 +29,24 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *udpCreateSocketWrapper) CreateUdpSocket(ctx context.Context, addressFamily network.IpAddressFamily) (ResultUdpSocketNetworkErrorCode, error) {
 	var resVal_ ResultUdpSocketNetworkErrorCode
-	var resErr_ error
 	arg0_ := addressFamily
 	{
 		callErr_ := w.fnCreateUdpSocket.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemResultUdpSocketNetworkErrorCode(ctx, caller, callee, w.callerInst, w.fnCreateUdpSocket.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil

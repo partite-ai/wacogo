@@ -8,7 +8,6 @@ package random
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -34,28 +33,24 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *randomWrapper) GetRandomBytes(ctx context.Context, len uint64) ([]uint8, error) {
 	var resVal_ []uint8
-	var resErr_ error
 	arg0_ := len
 	{
 		callErr_ := w.fnGetRandomBytes.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = arg0_
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListU8(ctx, caller, callee, w.callerInst, w.fnGetRandomBytes.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -65,7 +60,8 @@ func (w *randomWrapper) GetRandomU64(ctx context.Context) (uint64, error) {
 	var resVal_ uint64
 	{
 		callErr_ := w.fnGetRandomU64.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = stack[0]
@@ -73,7 +69,7 @@ func (w *randomWrapper) GetRandomU64(ctx context.Context) (uint64, error) {
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil

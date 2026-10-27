@@ -1208,10 +1208,6 @@ func emitForwarderBody(w *strings.Builder, ir ImportedResource, m ResourceMethod
 	if m.Result != nil {
 		fmt.Fprintf(w, "\tvar resVal_ %s\n", goTypeForSide(m.Result, false))
 	}
-	needsResErr := bodyWritesResErr(m.Params, m.Result)
-	if needsResErr {
-		fmt.Fprint(w, "\tvar resErr_ error\n")
-	}
 	for i, p := range m.Params {
 		paramName := p.GoName
 		if reserved[paramName] {
@@ -1222,7 +1218,7 @@ func emitForwarderBody(w *strings.Builder, ir ImportedResource, m ResourceMethod
 	fmt.Fprint(w, "\t{\n")
 	fmt.Fprintf(w, "\t\tcallErr_ := f.fns.fn%s.CallRaw(ctx, f.caller,\n", m.GoName)
 	// write closure: self + params
-	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) {\n")
+	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) error {\n")
 	fmt.Fprint(w, "\t\t\t\tstack[0] = uint64(f.rh.HandleID())\n")
 	off := 1
 	fnExpr := "f.fns.fn" + m.GoName
@@ -1231,6 +1227,7 @@ func emitForwarderBody(w *strings.Builder, ir ImportedResource, m ResourceMethod
 		emitWrapArgWrite(w, p, fmt.Sprintf("arg%d_", i), off, "\t\t\t\t", "f.caller", fnExpr, 1+i)
 		off += FlatSlots(p.Type)
 	}
+	fmt.Fprint(w, "\t\t\t\treturn nil\n")
 	fmt.Fprint(w, "\t\t\t},\n")
 	// read closure: result lift
 	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) error {\n")
@@ -1240,10 +1237,7 @@ func emitForwarderBody(w *strings.Builder, ir ImportedResource, m ResourceMethod
 	fmt.Fprint(w, "\t\t\t\treturn nil\n")
 	fmt.Fprint(w, "\t\t\t},\n")
 	fmt.Fprint(w, "\t\t)\n")
-	if needsResErr {
-		fmt.Fprintf(w, "\t\tif resErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "resErr_"))
-	}
-	fmt.Fprintf(w, "\t\tif callErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "fmt.Errorf(\"wacogo/witgen: CallRaw failed: %w\", callErr_)"))
+	fmt.Fprintf(w, "\t\tif callErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "callErr_"))
 	fmt.Fprint(w, "\t}\n")
 	if m.Result == nil {
 		fmt.Fprint(w, "\treturn nil\n")

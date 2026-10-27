@@ -195,7 +195,7 @@ func TestCallContextChargeLift(t *testing.T) {
 
 	callee := instantiateWAT(t, e, aliasedCalleeWAT)
 	err = callee.ExportedFunc("get").CallRaw(ctx, callerInst.Core(),
-		func(_, _ *host.CallContext, _ []uint64) {},
+		func(_, _ *host.CallContext, _ []uint64) error { return nil },
 		func(_, callee *core.CallContext, _ []uint64) error {
 			if err := callee.ChargeLift(limit); err != nil {
 				return fmt.Errorf("charge up to limit: %w", err)

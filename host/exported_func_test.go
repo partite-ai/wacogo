@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/partite-ai/wacogo/internal/core"
@@ -53,7 +54,7 @@ func TestExportedFunc_CallRaw_TwoCallbacks(t *testing.T) {
 		readGot                          uint32
 	)
 	err = wrapped.CallRaw(ctx, callerInst,
-		func(caller, callee *CallContext, stack []uint64) {
+		func(caller, callee *CallContext, stack []uint64) error {
 			if caller == nil || callee == nil {
 				t.Fatal("write callback got nil context")
 			}
@@ -61,6 +62,7 @@ func TestExportedFunc_CallRaw_TwoCallbacks(t *testing.T) {
 			writeCalleeInst = callee.Instance()
 			stack[0] = 7
 			stack[1] = 35
+			return nil
 		},
 		func(caller, callee *CallContext, stack []uint64) error {
 			if caller == nil || callee == nil {
@@ -92,5 +94,44 @@ func TestExportedFunc_CallRaw_TwoCallbacks(t *testing.T) {
 	}
 	if writeCallerInst == writeCalleeInst {
 		t.Error("caller and callee Instance() coincide; want distinct when caller != calleeInst")
+	}
+}
+
+// TestExportedFunc_CallRaw_WriteErrorSkipsCall verifies that a failing
+// write callback stops the call: the function never runs, read is not
+// invoked, the callee is not poisoned, and the error is returned.
+func TestExportedFunc_CallRaw_WriteErrorSkipsCall(t *testing.T) {
+	ctx := context.Background()
+	b, _ := newTestBuilder(t)
+	called := false
+	b.AddFunction("f", &FuncType{}, func(context.Context, *CallContext, *ComponentInstance, []uint64) error {
+		called = true
+		return nil
+	})
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	inst, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+
+	wantErr := errors.New("write failed")
+	readCalled := false
+	err = WrapExportedFunc(inst.Core().ExportedFunc("f")).CallRaw(ctx, inst,
+		func(_, _ *CallContext, _ []uint64) error { return wantErr },
+		func(_, _ *CallContext, _ []uint64) error { readCalled = true; return nil },
+	)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("CallRaw err = %v, want %v", err, wantErr)
+	}
+	if called || readCalled {
+		t.Fatalf("function called = %v, read called = %v; want neither", called, readCalled)
+	}
+	if perr := inst.Core().Poisoned(); perr != nil {
+		t.Fatalf("callee poisoned by a write failure: %v", perr)
 	}
 }

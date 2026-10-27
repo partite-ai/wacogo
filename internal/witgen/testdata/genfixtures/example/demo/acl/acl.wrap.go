@@ -5,7 +5,6 @@ package acl
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -32,8 +31,9 @@ func (w *aclWrapper) Grant(ctx context.Context, p Perms) (Perms, error) {
 	arg0_ := p
 	{
 		callErr_ := w.fnGrant.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = Perms(stack[0])
@@ -41,7 +41,7 @@ func (w *aclWrapper) Grant(ctx context.Context, p Perms) (Perms, error) {
 			},
 		)
 		if callErr_ != nil {
-			return Perms(0), fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return Perms(0), callErr_
 		}
 	}
 	return resVal_, nil

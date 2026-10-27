@@ -217,19 +217,14 @@ func buildMethodSignature(goName string, params []*Param, result Type, reserved 
 // any locally declared helper can shadow the original parameter name
 // without conflict.
 //
-// Error handling: every helper invocation inside the CallRaw closures
-// captures into a body-local `resErr_` and short-circuits the closure
-// via early return; the read closure also returns it so CallRaw skips
-// post-return and poisons the callee. After CallRaw the body checks
-// `resErr_` (lift/lower failure) and then `callErr_` (CallRaw trap) and returns the
-// appropriate zero value plus error. A success path returns the
-// captured `resVal_` along with nil.
+// Error handling: each CallRaw closure returns the first helper error
+// it hits. A write-closure error stops the call before it is made; a
+// read-closure error makes CallRaw skip post-return and poison the
+// callee. Either way CallRaw returns it as callErr_, which the body
+// returns alongside the zero value. A success path returns the captured
+// `resVal_` along with nil.
 func emitWrapBody(w *strings.Builder, fnExpr, callerInstExpr, recv string, params []*Param, result Type, selfRT *TypeResource, reserved ...map[string]bool) {
 	emitWrapResultDecls(w, result)
-	needsResErr := bodyWritesResErr(params, result)
-	if needsResErr {
-		fmt.Fprint(w, "\tvar resErr_ error\n")
-	}
 
 	// Build the reserved set from the optional parameter.
 	res := map[string]bool{}
@@ -256,7 +251,7 @@ func emitWrapBody(w *strings.Builder, fnExpr, callerInstExpr, recv string, param
 	fmt.Fprintf(w, "\t\tcallErr_ := %s.CallRaw(ctx, %s,\n", fnExpr, callerInstExpr)
 
 	// write closure: caller-side lift of params, callee-side lower.
-	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) {\n")
+	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) error {\n")
 	off := 0
 	paramBase := 0
 	if selfRT != nil {
@@ -271,6 +266,7 @@ func emitWrapBody(w *strings.Builder, fnExpr, callerInstExpr, recv string, param
 		emitWrapArgWrite(w, p, fmt.Sprintf("arg%d_", i), off, "\t\t\t\t", callerInstExpr, fnExpr, paramBase+i)
 		off += FlatSlots(p.Type)
 	}
+	fmt.Fprint(w, "\t\t\t\treturn nil\n")
 	fmt.Fprint(w, "\t\t\t},\n")
 
 	// read closure: callee-side lift of result.
@@ -282,60 +278,11 @@ func emitWrapBody(w *strings.Builder, fnExpr, callerInstExpr, recv string, param
 	fmt.Fprint(w, "\t\t\t},\n")
 
 	fmt.Fprint(w, "\t\t)\n")
-	// resErr_ first: a read-closure lift failure also surfaces as
-	// callErr_, and the unwrapped lift error is the more useful one.
-	if needsResErr {
-		fmt.Fprintf(w, "\t\tif resErr_ != nil { %s }\n", returnWithErrExpr(result, "resErr_"))
-	}
-	fmt.Fprintf(w, "\t\tif callErr_ != nil { %s }\n", returnWithErrExpr(result, "fmt.Errorf(\"wacogo/witgen: CallRaw failed: %w\", callErr_)"))
+	fmt.Fprintf(w, "\t\tif callErr_ != nil { %s }\n", returnWithErrExpr(result, "callErr_"))
 
 	fmt.Fprint(w, "\t}\n")
 
 	emitWrapReturn(w, result)
-}
-
-// bodyWritesResErr reports whether the params lower + result lift will
-// emit any closure-internal step that can fail and store into resErr_.
-// Pure primitive/enum/flags traffic in both directions has no error
-// path, so the resErr_ declaration and post-call check are dead and
-// would trip "impossible condition" linters.
-func bodyWritesResErr(params []*Param, result Type) bool {
-	for _, p := range params {
-		if typeWritesResErrLower(p.Type) {
-			return true
-		}
-	}
-	return typeWritesResErrLift(result)
-}
-
-// typeWritesResErrLower reports whether emitWrapArgWrite for t can
-// store into resErr_. Mirrors the dispatch in emitWrapArgWrite: only
-// Prim, *TypeEnum, and *TypeFlags lower with a single inline assignment
-// and never fail.
-func typeWritesResErrLower(t Type) bool {
-	switch t.(type) {
-	case Prim, *TypeEnum, *TypeFlags:
-		return false
-	}
-	return true
-}
-
-// typeWritesResErrLift reports whether emitWrapResultRead for t can
-// store into resErr_. nil result emits nothing; mem-mode results
-// always go through liftMem<Name> which is fallible; otherwise only
-// Prim, *TypeEnum, and *TypeFlags lift with a single inline assignment.
-func typeWritesResErrLift(t Type) bool {
-	if t == nil {
-		return false
-	}
-	if FlatSlots(t) > 1 {
-		return true
-	}
-	switch t.(type) {
-	case Prim, *TypeEnum, *TypeFlags:
-		return false
-	}
-	return true
 }
 
 // returnWithErrExpr emits a return statement that propagates errExpr
@@ -367,7 +314,7 @@ func emitWrapResultDecls(w *strings.Builder, result Type) {
 // resource-typed args the spec's caller-lift / callee-lower pattern
 // applies. For compound types we delegate to the lowerFlat<Name>
 // helper, passing the callee CallContext (callee memory + realloc).
-// On helper failure the closure stores into resErr_ and short-circuits.
+// On helper failure the closure returns the error.
 //
 // argName is the canonical body-local reference to the param value
 // (e.g. "arg0"); the original WIT-derived name is reachable only via
@@ -395,7 +342,7 @@ func emitWrapArgWrite(w *strings.Builder, p *Param, argName string, slotOffset i
 		emitWrapBorrowArgWrite(w, argName, ty.Resource, slotExpr, indent, callerInstExpr, fnExpr, paramIdx)
 	default:
 		// Compound flat lower goes through callee memory + callee realloc.
-		fmt.Fprintf(w, "%sif err_ := lowerFlat%s(ctx, caller, callee, %s, %s.ParamType(%d), stack[%d:%d], %s); err_ != nil { resErr_ = err_; return }\n",
+		fmt.Fprintf(w, "%sif err_ := lowerFlat%s(ctx, caller, callee, %s, %s.ParamType(%d), stack[%d:%d], %s); err_ != nil { return err_ }\n",
 			indent, TypeName(p.Type), callerInstExpr, fnExpr, paramIdx, slotOffset, slotOffset+n, argName)
 	}
 }
@@ -423,9 +370,9 @@ func emitWrapOwnArgWrite(w *strings.Builder, argRef string, rt *TypeResource, sl
 	fmt.Fprintf(w, "%str_ := %s.ParamType(%d).(wacogo.TypeOwn).ResourceType\n", inner, fnExpr, paramIdx)
 	emitBindOrHandleValueFor(w, "callerH_", argRef, rt, inner, callerInstExpr)
 	fmt.Fprintf(w, "%ssrcH_, err_ := caller.LookupOwn(tr_, callerH_)\n", inner)
-	fmt.Fprintf(w, "%sif err_ != nil { resErr_ = err_; return }\n", inner)
+	fmt.Fprintf(w, "%sif err_ != nil { return err_ }\n", inner)
 	fmt.Fprintf(w, "%sdstH_, err_ := srcH_.TransferOwn(callee.TransferTarget())\n", inner)
-	fmt.Fprintf(w, "%sif err_ != nil { resErr_ = err_; return }\n", inner)
+	fmt.Fprintf(w, "%sif err_ != nil { return err_ }\n", inner)
 	fmt.Fprintf(w, "%s%s = uint64(dstH_.HandleID())\n", inner, slotExpr)
 	// Ownership transferred — invalidate the caller-side handle.
 	fmt.Fprintf(w, "%s%s.Invalidate()\n", inner, argRef)
@@ -442,9 +389,9 @@ func emitWrapBorrowArgWrite(w *strings.Builder, argRef string, rt *TypeResource,
 	fmt.Fprintf(w, "%str_ := %s.ParamType(%d).(wacogo.TypeBorrow).ResourceType\n", inner, fnExpr, paramIdx)
 	emitBindOrHandleValueFor(w, "callerH_", argRef, rt, inner, callerInstExpr)
 	fmt.Fprintf(w, "%ssrcH_, err_ := caller.LookupBorrowable(tr_, callerH_)\n", inner)
-	fmt.Fprintf(w, "%sif err_ != nil { resErr_ = err_; return }\n", inner)
+	fmt.Fprintf(w, "%sif err_ != nil { return err_ }\n", inner)
 	fmt.Fprintf(w, "%sdstH_, err_ := srcH_.LendTo(callee.TransferTarget(), callee.Task())\n", inner)
-	fmt.Fprintf(w, "%sif err_ != nil { resErr_ = err_; return }\n", inner)
+	fmt.Fprintf(w, "%sif err_ != nil { return err_ }\n", inner)
 	fmt.Fprintf(w, "%s%s = uint64(dstH_.HandleID())\n", inner, slotExpr)
 	fmt.Fprintf(w, "%s}\n", indent)
 }
@@ -454,8 +401,7 @@ func emitWrapBorrowArgWrite(w *strings.Builder, argRef string, rt *TypeResource,
 // table. Local R: arg.bind(caller, callerInstExpr). Foreign R:
 // <pkg>.HandleValueFor(caller, callerInstExpr, arg) — the unexported
 // bind method isn't reachable across package boundaries. Both forms
-// produce a uint32 named outVar; on error the closure stores resErr_
-// and short-circuits.
+// produce a uint32 named outVar; on error the closure returns it.
 func emitBindOrHandleValueFor(w *strings.Builder, outVar, argRef string, rt *TypeResource, indent, callerInstExpr string) {
 	if rt.IsImported() {
 		fmt.Fprintf(w, "%s%s, err_ := %s.HandleValueFor(caller, %s, %s)\n",
@@ -463,13 +409,13 @@ func emitBindOrHandleValueFor(w *strings.Builder, outVar, argRef string, rt *Typ
 	} else {
 		fmt.Fprintf(w, "%s%s, err_ := %s.bind(caller, %s)\n", indent, outVar, argRef, callerInstExpr)
 	}
-	fmt.Fprintf(w, "%sif err_ != nil { resErr_ = err_; return }\n", indent)
+	fmt.Fprintf(w, "%sif err_ != nil { return err_ }\n", indent)
 }
 
 // emitWrapResultRead emits the result lift inside the read closure.
 // Mem-mode (FlatSlots > 1) goes through liftMem<Name> against callee
 // memory; flat results lift directly off the stack. Helper failures
-// store resErr_ and short-circuit. *TypeResult lifts directly to the
+// are returned from the closure. *TypeResult lifts directly to the
 // sealed interface value — the inner business outcome flows out via
 // resVal_ and the outer error is reserved for trap/infrastructure.
 func emitWrapResultRead(w *strings.Builder, result Type, recv, callerInstExpr, fnExpr string) {
@@ -491,7 +437,7 @@ func emitWrapResultRead(w *strings.Builder, result Type, recv, callerInstExpr, f
 		// against callee. liftFlat<Result*> already returns the sealed
 		// interface, so we can assign directly to resVal_.
 		n := FlatSlots(result)
-		fmt.Fprintf(w, "\t\t\tif v_, err_ := liftFlat%s(ctx, caller, callee, %s, %s.ResultType(0), stack[0:%d]); err_ != nil { resErr_ = err_; return resErr_ } else { resVal_ = v_ }\n", TypeName(result), callerInstExpr, fnExpr, n)
+		fmt.Fprintf(w, "\t\t\tif v_, err_ := liftFlat%s(ctx, caller, callee, %s, %s.ResultType(0), stack[0:%d]); err_ != nil { return err_ } else { resVal_ = v_ }\n", TypeName(result), callerInstExpr, fnExpr, n)
 	}
 }
 
@@ -500,7 +446,7 @@ func emitWrapResultRead(w *strings.Builder, result Type, recv, callerInstExpr, f
 // liftMem<Name> always returns the user-facing type directly (sealed
 // interface for *TypeResult), so the result flows straight into resVal_.
 func emitWrapResultReadMem(w *strings.Builder, result Type, recv, callerInstExpr, fnExpr string) {
-	fmt.Fprintf(w, "\t\t\tif v_, err_ := liftMem%s(ctx, caller, callee, %s, %s.ResultType(0), uint32(stack[0])); err_ != nil { resErr_ = err_; return resErr_ } else { resVal_ = v_ }\n", TypeName(result), callerInstExpr, fnExpr)
+	fmt.Fprintf(w, "\t\t\tif v_, err_ := liftMem%s(ctx, caller, callee, %s, %s.ResultType(0), uint32(stack[0])); err_ != nil { return err_ } else { resVal_ = v_ }\n", TypeName(result), callerInstExpr, fnExpr)
 }
 
 // emitWrapOwnResultRead emits the own-result lift: TransferOwn callee
@@ -517,9 +463,9 @@ func emitWrapOwnResultRead(w *strings.Builder, rt *TypeResource, slotExpr, recv,
 		fmt.Fprintf(w, "\t\t\t\ttr_ := %s.ResultType(0).(wacogo.TypeOwn).ResourceType\n", fnExpr)
 		fmt.Fprintf(w, "\t\t\t\tcalleeH_ := uint32(%s)\n", slotExpr)
 		fmt.Fprint(w, "\t\t\t\tsrcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)\n")
-		fmt.Fprint(w, "\t\t\t\tif srcErr_ != nil { resErr_ = srcErr_; return resErr_ }\n")
+		fmt.Fprint(w, "\t\t\t\tif srcErr_ != nil { return srcErr_ }\n")
 		fmt.Fprint(w, "\t\t\t\tdstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())\n")
-		fmt.Fprint(w, "\t\t\t\tif dstErr_ != nil { resErr_ = dstErr_; return resErr_ }\n")
+		fmt.Fprint(w, "\t\t\t\tif dstErr_ != nil { return dstErr_ }\n")
 		fmt.Fprintf(w, "\t\t\t\tstate_ := %s.UserState().(*instanceState)\n", callerInstExpr)
 		fmt.Fprintf(w, "\t\t\t\tfwd_ := &%s{caller: %s, rh: dstH_, fns: state_.%s}\n",
 			forwarderTypeFor(rt), callerInstExpr, fwdFnsFieldFor(rt))
@@ -532,9 +478,9 @@ func emitWrapOwnResultRead(w *strings.Builder, rt *TypeResource, slotExpr, recv,
 	fmt.Fprintf(w, "\t\t\t\ttr_ := %s.ResultType(0).(wacogo.TypeOwn).ResourceType\n", fnExpr)
 	fmt.Fprintf(w, "\t\t\t\tcalleeH_ := uint32(%s)\n", slotExpr)
 	fmt.Fprint(w, "\t\t\t\tsrcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)\n")
-	fmt.Fprint(w, "\t\t\t\tif srcErr_ != nil { resErr_ = srcErr_; return resErr_ }\n")
+	fmt.Fprint(w, "\t\t\t\tif srcErr_ != nil { return srcErr_ }\n")
 	fmt.Fprint(w, "\t\t\t\tdstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())\n")
-	fmt.Fprint(w, "\t\t\t\tif dstErr_ != nil { resErr_ = dstErr_; return resErr_ }\n")
+	fmt.Fprint(w, "\t\t\t\tif dstErr_ != nil { return dstErr_ }\n")
 	fmt.Fprintf(w, "\t\t\t\tvar impl_ %s\n", rt.WrapName)
 	fmt.Fprintf(w, "\t\t\t\tif obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {\n")
 	fmt.Fprintf(w, "\t\t\t\t\tif typed_, ok2_ := obj_.(%s); ok2_ { impl_ = typed_ }\n", rt.WrapName)

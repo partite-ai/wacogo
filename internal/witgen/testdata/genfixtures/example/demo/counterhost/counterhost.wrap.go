@@ -5,7 +5,6 @@ package counterhost
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -33,12 +32,12 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *counterhostWrapper) NewCounter(ctx context.Context, initial uint32) (*CounterHandle, error) {
 	var resVal_ *CounterHandle
-	var resErr_ error
 	arg0_ := initial
 	{
 		callErr_ := w.fnNewCounter.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
@@ -46,13 +45,11 @@ func (w *counterhostWrapper) NewCounter(ctx context.Context, initial uint32) (*C
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
-						resErr_ = srcErr_
-						return resErr_
+						return srcErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
-						resErr_ = dstErr_
-						return resErr_
+						return dstErr_
 					}
 					var impl_ Counter
 					if obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {
@@ -65,11 +62,8 @@ func (w *counterhostWrapper) NewCounter(ctx context.Context, initial uint32) (*C
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return nil, resErr_
-		}
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil

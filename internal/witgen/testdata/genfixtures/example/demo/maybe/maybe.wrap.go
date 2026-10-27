@@ -5,7 +5,6 @@ package maybe
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -29,28 +28,24 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *maybeWrapper) Find(ctx context.Context, key uint32) (OptionString, error) {
 	var resVal_ OptionString
-	var resErr_ error
 	arg0_ := key
 	{
 		callErr_ := w.fnFind.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemOptionString(ctx, caller, callee, w.callerInst, w.fnFind.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return OptionString{}, resErr_
-		}
 		if callErr_ != nil {
-			return OptionString{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return OptionString{}, callErr_
 		}
 	}
 	return resVal_, nil

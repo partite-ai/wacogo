@@ -129,8 +129,9 @@ func (f *streamsDataStreamForwarder) Read(ctx context.Context) (uint32, error) {
 	var resVal_ uint32
 	{
 		callErr_ := f.fns.fnRead.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = uint32(stack[0])
@@ -138,7 +139,7 @@ func (f *streamsDataStreamForwarder) Read(ctx context.Context) (uint32, error) {
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil
@@ -148,16 +149,17 @@ func (f *streamsDataStreamForwarder) Write(ctx context.Context, v uint32) error 
 	arg0_ := v
 	{
 		callErr_ := f.fns.fnWrite.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = uint64(arg0_)
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				return nil
 			},
 		)
 		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return callErr_
 		}
 	}
 	return nil

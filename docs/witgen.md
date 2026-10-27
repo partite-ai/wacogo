@@ -270,7 +270,10 @@ closures: a write closure that lowers args into the callee's wire
 form, and a read closure that lifts results back into the caller's
 representation. The wrapper is plan-free — `CallRaw` deliberately
 bypasses the canon plan, so every lift/lower op is explicit in those
-closures.
+closures. Each closure returns the first helper error it hits: a write
+error stops the call before it is made, and a read error makes
+`CallRaw` skip post-return and poison the callee. The wrapper method
+returns `CallRaw`'s error as-is.
 
 Resource methods on a remote (`*<R>Remote`) follow the same shape: the
 remote dispatcher carries a `*counterFns` value with one

@@ -5,7 +5,6 @@ package shape
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -29,31 +28,26 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *shapeWrapper) Describe(ctx context.Context, s ShapeKind) (string, error) {
 	var resVal_ string
-	var resErr_ error
 	arg0_ := s
 	{
 		callErr_ := w.fnDescribe.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatShapeKind(ctx, caller, callee, w.callerInst, w.fnDescribe.ParamType(0), stack[0:3], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
 			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemString(ctx, caller, callee, w.callerInst, w.fnDescribe.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return resErr_
+					return err_
 				} else {
 					resVal_ = v_
 				}
 				return nil
 			},
 		)
-		if resErr_ != nil {
-			return "", resErr_
-		}
 		if callErr_ != nil {
-			return "", fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return "", callErr_
 		}
 	}
 	return resVal_, nil

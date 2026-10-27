@@ -79,14 +79,15 @@ func (cb *CallBinding) Call(ctx context.Context, args []Val) (results []Val, err
 // CallRaw invokes the function using caller-supplied flat-stack closures,
 // bypassing the gocall plan's Val lift/lower steps. writeArgs populates the
 // stack before the wasm call; readResult reads from it after. If
-// readResult fails, post-return is skipped and the callee is poisoned.
+// writeArgs fails, the call is not made. If readResult fails, post-return
+// is skipped and the callee is poisoned.
 //
 // The reentrance gate and post-return hook are still honoured. No resource
 // table or realloc operations are performed — the caller is responsible for
 // all encoding.
 func (cb *CallBinding) CallRaw(
 	ctx context.Context,
-	writeArgs func(stack []uint64),
+	writeArgs func(stack []uint64) error,
 	readResult func(stack []uint64) error,
 ) (err error) {
 	defer func() {
@@ -106,7 +107,9 @@ func (cb *CallBinding) CallRaw(
 
 	stack := cb.plan.coreStack
 	clear(stack)
-	writeArgs(stack)
+	if err = writeArgs(stack); err != nil {
+		return err
+	}
 
 	if err = cb.core.CallWithStack(ctx, stack); err != nil {
 		cb.callee.Instance.Poison(err)
