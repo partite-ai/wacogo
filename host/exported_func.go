@@ -36,8 +36,10 @@ func (f *ExportedFunc) ResultType(i int) core.Type {
 // consume flat results. Each callback receives two CallContext values
 // — caller for the host instance issuing the call and callee for the
 // instance providing the export. If write returns an error, the
-// function is not called; if read returns an error, the callee
-// instance is poisoned. Either way CallRaw returns that error.
+// function is not called, and anything write already handed to the
+// callee, such as owned handles, stays with it. If the callee's realloc
+// fails while write lowers into its memory, or read returns an error,
+// the callee instance is poisoned. Either way CallRaw returns that error.
 //
 // CallRaw returns an error if any borrows handed to the callee were
 // not dropped before the call returned.

@@ -6,7 +6,6 @@ import (
 
 	"github.com/partite-ai/wacogo/internal/canon"
 	"github.com/partite-ai/wacogo/wasmparser"
-	"github.com/tetratelabs/wazero/api"
 )
 
 // Func is a callable component-level function. It holds only the information
@@ -42,7 +41,10 @@ func (f *Func) Call(ctx context.Context, args ...Val) ([]Val, error) {
 // a freshly-sized stack slice into which the caller writes the flat
 // encoding of the args; read is invoked once with the post-call stack
 // to decode the flat results. If write returns an error, the core
-// function is not called. If read returns an error, the callee's
+// function is not called, and anything write already handed to the
+// callee, such as owned handles, stays with it. If the callee's realloc
+// fails while write lowers into its memory, the callee instance is
+// poisoned. If read returns an error, the callee's
 // post-return is skipped and the callee instance is poisoned. Either
 // way CallRaw returns that error. Both callbacks receive a caller-side
 // CallContext (bound to the supplied caller instance) and a
@@ -74,15 +76,11 @@ func (f *Func) CallRaw(
 	callee := f.binding.Callee()
 	task := &canon.Task{}
 	callerCC := NewCallContext(caller, task, nil, nil)
-	realloc := ReallocFunc(callee.GoRealloc)
-	if realloc == nil {
-		realloc = wrapAPIRealloc(callee.Realloc)
-	}
 	calleeCC := NewCallContext(
 		instanceFromCanon(callee.Instance),
 		task,
 		callee.Memory,
-		realloc,
+		ReallocFunc(f.binding.Realloc()),
 	)
 
 	defer func() {
@@ -100,21 +98,6 @@ func (f *Func) CallRaw(
 			return read(callerCC, calleeCC, stack)
 		},
 	)
-}
-
-// wrapAPIRealloc adapts a wazero realloc export into ReallocFunc.
-// Returns nil if fn is nil.
-func wrapAPIRealloc(fn api.Function) ReallocFunc {
-	if fn == nil {
-		return nil
-	}
-	return func(ctx context.Context, origPtr, origSize, align, newSize uint32) (uint32, error) {
-		out, err := fn.Call(ctx, uint64(origPtr), uint64(origSize), uint64(align), uint64(newSize))
-		if err != nil {
-			return 0, err
-		}
-		return uint32(out[0]), nil
-	}
 }
 
 // instanceFromCanon recovers the *ComponentInstance backing a canon.Instance

@@ -22,6 +22,10 @@ type CallBinding struct {
 	// gcc.Task.NumBorrows is reset at the start of each Call (Task.End
 	// drains releases on every path but does not zero NumBorrows).
 	gcc gocallContext
+
+	// realloc is side.Realloc with the canonical ABI's checks on its
+	// result, poisoning the callee on failure; handed out by Realloc.
+	realloc ReallocFunc
 }
 
 // NewCallBinding compiles a gocall plan for params/results and captures the
@@ -43,11 +47,18 @@ func NewCallBinding(params, results []Type, callee Callee, maxLiftBytes uint64) 
 		side:       side,
 		postReturn: wrapPostReturn(callee.PostReturn),
 		core:       callee.core(),
+		realloc:    checkedRealloc(callee.Instance, callee.Memory, side.Realloc),
 	}
 	cb.gcc.callee = side
 	cb.gcc.budget.limit = maxLiftBytes
 	return cb
 }
+
+// Realloc returns the callee's realloc, for CallRaw write callbacks that
+// lower into its memory, or nil if the callee has none. A pointer that is
+// null, misaligned or out of bounds is reported as an error, and any
+// failure poisons the callee as a trap in its realloc would.
+func (cb *CallBinding) Realloc() ReallocFunc { return cb.realloc }
 
 // Callee returns the captured callee descriptor by value. Used by root-side
 // code that needs the underlying memory/realloc/CoreFunc (e.g. adapter
@@ -103,7 +114,12 @@ func (cb *CallBinding) CallRaw(
 
 	stack := cb.plan.coreStack
 	clear(stack)
-	if err = writeArgs(stack); err != nil {
+	// Lowering runs the callee's realloc, which may not leave the
+	// component, as in runGocallPlan and runTransferPlan.
+	prev := cb.callee.Instance.SuspendLeave()
+	err = writeArgs(stack)
+	cb.callee.Instance.RestoreLeave(prev)
+	if err != nil {
 		return err
 	}
 
@@ -138,6 +154,30 @@ func (cb *CallBinding) readResultAndPostReturn(ctx context.Context, stack []uint
 	prev := cb.callee.Instance.SuspendLeave()
 	defer cb.callee.Instance.RestoreLeave(prev)
 	return cb.postReturn(ctx, stack)
+}
+
+// checkedRealloc wraps r with callRealloc's checks on the returned
+// pointer, reporting their traps as errors, and poisons inst when r fails
+// or breaks those checks. Returns nil if r is nil.
+func checkedRealloc(inst Instance, mem api.Memory, r ReallocFunc) ReallocFunc {
+	if r == nil {
+		return nil
+	}
+	return func(ctx context.Context, origPtr, origSize, align, newSize uint32) (ptr uint32, err error) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				t, ok := rec.(*Trap)
+				if !ok {
+					panic(rec)
+				}
+				err = t.asError()
+			}
+			if err != nil {
+				inst.Poison(err)
+			}
+		}()
+		return callRealloc(ctx, r, mem, origPtr, origSize, align, newSize)
+	}
 }
 
 // wrapRealloc adapts an api.Function realloc into ReallocFunc, or nil.

@@ -328,7 +328,25 @@ caller-side realloc failure, a `CallRaw` read callback error, or
 post-return itself), post-return is skipped and the original callee
 is poisoned as though it had trapped. Both runners and
 `CallBinding.CallRaw` wrap the window in `poisonOnPanic` and poison
-on error returns.
+on error returns. `own` handles already lifted out of the results
+before the failure are not dropped: like any `own` nobody drops, a
+guest-defined resource's destructor never runs, and a host-defined
+one's object is released when its instance closes.
+
+### Failures while lowering `CallRaw` arguments
+
+`CallBinding.CallRaw` runs the write callback under `may_leave=false`,
+as the runners do while lowering params. The realloc it hands out
+(`CallBinding.Realloc`) applies `callRealloc`'s checks to the returned
+pointer and poisons the callee on any failure: a trap in its realloc,
+or a null, misaligned or out-of-bounds pointer, is a callee trap.
+
+Any other write error is the Go caller's (a dropped or already
+transferred handle, a nil variant value, and so on) and stops the call
+where it stands, like a trap would. Nothing is rolled back: `own`
+handles already moved into the callee stay there, just as the spec
+leaves resource tables untouched after a trap, and the callee is not
+poisoned because it has not run.
 
 ### Lift limits
 
