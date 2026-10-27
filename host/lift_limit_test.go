@@ -26,6 +26,11 @@ const aliasedListFill = `
 
 const aliasedListLiftedBytes = 64*8 + 64*1024
 
+// aliasedListValBytes is what lifting the same list into Go Vals charges:
+// per element, a 16-byte Val slot plus the element's own footprint (a
+// 24-byte ValList for the outer list, a 1-byte ValU8 for the inner ones).
+const aliasedListValBytes = 64*(16+24) + 64*1024*(16+1)
+
 const bumpRealloc = `
     (global $bump (mut i32) (i32.const 0x8000))
     (func (export "realloc") (param i32 i32 i32 i32) (result i32)
@@ -106,7 +111,7 @@ func assertLiftLimitExceeded(t *testing.T, err error) {
 
 func TestLiftLimit_GoCallResult(t *testing.T) {
 	ctx := context.Background()
-	e := newLimitedEngine(t, aliasedListLiftedBytes-1)
+	e := newLimitedEngine(t, aliasedListValBytes-1)
 	callee := instantiateWAT(t, e, aliasedCalleeWAT)
 
 	_, err := callee.ExportedFunc("get").Call(ctx)
@@ -149,18 +154,25 @@ func TestLiftLimit_AtLimitSucceeds(t *testing.T) {
 	callee := instantiateWAT(t, e, aliasedCalleeWAT)
 	caller := instantiateWAT(t, e, aliasedCallerWAT, wacogo.WithInstanceImport("callee", callee))
 
+	if _, err := caller.ExportedFunc("run-get").Call(ctx); err != nil {
+		t.Fatalf("run-get: %v", err)
+	}
+	if _, err := caller.ExportedFunc("run-take").Call(ctx); err != nil {
+		t.Fatalf("run-take: %v", err)
+	}
+}
+
+func TestLiftLimit_GoCallAtLimitSucceeds(t *testing.T) {
+	ctx := context.Background()
+	e := newLimitedEngine(t, aliasedListValBytes)
+	callee := instantiateWAT(t, e, aliasedCalleeWAT)
+
 	res, err := callee.ExportedFunc("get").Call(ctx)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if n := res[0].(*wacogo.ValList).Len(); n != 64 {
 		t.Fatalf("get returned %d elements, want 64", n)
-	}
-	if _, err := caller.ExportedFunc("run-get").Call(ctx); err != nil {
-		t.Fatalf("run-get: %v", err)
-	}
-	if _, err := caller.ExportedFunc("run-take").Call(ctx); err != nil {
-		t.Fatalf("run-take: %v", err)
 	}
 }
 

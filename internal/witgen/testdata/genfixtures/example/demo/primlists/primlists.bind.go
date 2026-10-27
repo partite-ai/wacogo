@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -248,7 +249,7 @@ func liftFlatListBool(ctx context.Context, caller, callee *host.CallContext, h *
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListBool: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(bool)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]bool, ln_)
@@ -286,7 +287,7 @@ func liftMemListBool(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListBool: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(bool)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]bool, ln_)
@@ -484,7 +485,7 @@ func liftFlatListChar(ctx context.Context, caller, callee *host.CallContext, h *
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListChar: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(rune)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]rune, ln_)
@@ -522,7 +523,7 @@ func liftMemListChar(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListChar: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(rune)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]rune, ln_)
@@ -714,7 +715,7 @@ func liftFlatListF32(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListF32: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(float32)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]float32, ln_)
@@ -752,7 +753,7 @@ func liftMemListF32(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListF32: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(float32)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]float32, ln_)
@@ -944,7 +945,7 @@ func liftFlatListF64(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListF64: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(float64)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]float64, ln_)
@@ -982,7 +983,7 @@ func liftMemListF64(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListF64: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(float64)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]float64, ln_)
@@ -1174,7 +1175,7 @@ func liftFlatListS16(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListS16: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(int16)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]int16, ln_)
@@ -1212,7 +1213,7 @@ func liftMemListS16(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListS16: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(int16)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]int16, ln_)
@@ -1404,7 +1405,7 @@ func liftFlatListS32(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListS32: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(int32)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]int32, ln_)
@@ -1442,7 +1443,7 @@ func liftMemListS32(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListS32: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(int32)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]int32, ln_)
@@ -1634,7 +1635,7 @@ func liftFlatListS64(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListS64: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(int64)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]int64, ln_)
@@ -1672,7 +1673,7 @@ func liftMemListS64(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListS64: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(int64)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]int64, ln_)
@@ -1864,7 +1865,7 @@ func liftFlatListS8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListS8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(int8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]int8, ln_)
@@ -1902,7 +1903,7 @@ func liftMemListS8(ctx context.Context, caller, callee *host.CallContext, h *hos
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListS8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(int8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]int8, ln_)
@@ -2094,7 +2095,7 @@ func liftFlatListU16(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU16: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint16)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint16, ln_)
@@ -2132,7 +2133,7 @@ func liftMemListU16(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU16: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint16)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint16, ln_)
@@ -2324,7 +2325,7 @@ func liftFlatListU32(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU32: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint32, ln_)
@@ -2362,7 +2363,7 @@ func liftMemListU32(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU32: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint32, ln_)
@@ -2554,7 +2555,7 @@ func liftFlatListU64(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU64: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint64)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint64, ln_)
@@ -2592,7 +2593,7 @@ func liftMemListU64(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU64: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint64)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint64, ln_)
@@ -2772,7 +2773,7 @@ func liftFlatListU8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint8, ln_)
@@ -2807,7 +2808,7 @@ func liftMemListU8(ctx context.Context, caller, callee *host.CallContext, h *hos
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint8, ln_)

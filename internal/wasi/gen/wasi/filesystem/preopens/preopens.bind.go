@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -281,7 +282,7 @@ func liftFlatListTupleDescriptorString(ctx context.Context, caller, callee *host
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListTupleDescriptorString: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(TupleDescriptorString))+(unsafe.Sizeof(types.DescriptorHandle{})+64))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]TupleDescriptorString, ln_)
@@ -314,7 +315,7 @@ func liftMemListTupleDescriptorString(ctx context.Context, caller, callee *host.
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListTupleDescriptorString: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(TupleDescriptorString))+(unsafe.Sizeof(types.DescriptorHandle{})+64))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]TupleDescriptorString, ln_)
@@ -475,7 +476,7 @@ func liftFlatListU8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint8, ln_)
@@ -510,7 +511,7 @@ func liftMemListU8(ctx context.Context, caller, callee *host.CallContext, h *hos
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint8, ln_)

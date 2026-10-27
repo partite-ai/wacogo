@@ -212,6 +212,7 @@ func (v *memToValVisitor) VisitList(elem Type) {
 		elemAlign = 1
 	}
 	elemStep := child.out[0]
+	elemFootprint := valFootprint(elem)
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, base uint32) (Val, error) {
 		ptr, ok := gcc.callee.Memory.ReadUint32Le(base + ptrOff)
@@ -222,7 +223,7 @@ func (v *memToValVisitor) VisitList(elem Type) {
 		if !ok {
 			return nil, fmt.Errorf("oob list len read")
 		}
-		if err := checkLiftedList(gcc, ptr, n, elemSize, elemAlign); err != nil {
+		if err := checkLiftedList(gcc, ptr, n, elemSize, elemAlign, elemFootprint); err != nil {
 			return nil, err
 		}
 
@@ -268,7 +269,7 @@ func (v *memToValVisitor) VisitRecord(fields []RecordField) {
 			}
 			recFields[i] = Field{Name: fieldNames[i], Val: fv}
 		}
-		return NewValRecord(recFields...), nil
+		return newValRecordFromSlice(recFields), nil
 	})
 }
 
@@ -301,7 +302,7 @@ func (v *memToValVisitor) VisitTuple(types []Type) {
 			}
 			recFields[i] = Field{Name: fieldNames[i], Val: fv}
 		}
-		return NewValRecord(recFields...), nil
+		return newValRecordFromSlice(recFields), nil
 	})
 }
 

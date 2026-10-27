@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -325,7 +326,7 @@ func liftFlatListListU8(ctx context.Context, caller, callee *host.CallContext, h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new([]uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([][]uint8, ln_)
@@ -358,7 +359,7 @@ func liftMemListListU8(ctx context.Context, caller, callee *host.CallContext, h 
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new([]uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([][]uint8, ln_)
@@ -507,7 +508,7 @@ func liftFlatListTypesTupleStringListU8(ctx context.Context, caller, callee *hos
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListTypesTupleStringListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(types.TupleStringListU8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]types.TupleStringListU8, ln_)
@@ -540,7 +541,7 @@ func liftMemListTypesTupleStringListU8(ctx context.Context, caller, callee *host
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListTypesTupleStringListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(types.TupleStringListU8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]types.TupleStringListU8, ln_)
@@ -701,7 +702,7 @@ func liftFlatListU8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint8, ln_)
@@ -736,7 +737,7 @@ func liftMemListU8(ctx context.Context, caller, callee *host.CallContext, h *hos
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint8, ln_)

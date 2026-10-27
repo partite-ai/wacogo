@@ -31,10 +31,12 @@ func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
 	return func(c *engineConfig) { c.runtimeConfig = cfg }
 }
 
-// WithMaxLiftBytes bounds how much data a component can pass out of its
-// memory in one go: the combined size of the lists and strings in one
-// call's arguments, or in one call's results, measured in canonical-ABI
-// bytes. A call that exceeds it fails with an error wrapping
+// WithMaxLiftBytes bounds how much memory a component can make its
+// receiver allocate in one go: for one call's arguments, or for one
+// call's results, the bytes allocated to hold the lists and strings
+// they contain. A component receiver is charged the bytes allocated in
+// its memory; a Go receiver is charged an estimate of the Go memory the
+// lifted values occupy. A call that exceeds it fails with an error wrapping
 // ErrLiftLimitExceeded, and a component whose results exceed it becomes
 // unusable as though it had trapped. 0, the default, means unlimited.
 func WithMaxLiftBytes(n uint64) EngineOption {

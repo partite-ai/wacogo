@@ -6,6 +6,7 @@ package environment
 import (
 	"context"
 	"fmt"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -170,7 +171,7 @@ func liftFlatListString(ctx context.Context, caller, callee *host.CallContext, h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListString: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(string)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]string, ln_)
@@ -203,7 +204,7 @@ func liftMemListString(ctx context.Context, caller, callee *host.CallContext, h 
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListString: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(string)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]string, ln_)
@@ -352,7 +353,7 @@ func liftFlatListTupleStringString(ctx context.Context, caller, callee *host.Cal
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListTupleStringString: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(TupleStringString)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]TupleStringString, ln_)
@@ -385,7 +386,7 @@ func liftMemListTupleStringString(ctx context.Context, caller, callee *host.Call
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListTupleStringString: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(TupleStringString)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]TupleStringString, ln_)

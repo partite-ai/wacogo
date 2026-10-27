@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -240,7 +241,7 @@ func liftFlatListCounter(ctx context.Context, caller, callee *host.CallContext, 
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListCounter: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(*CounterHandle))+(unsafe.Sizeof(CounterHandle{})+64))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]*CounterHandle, ln_)
@@ -292,7 +293,7 @@ func liftMemListCounter(ctx context.Context, caller, callee *host.CallContext, h
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListCounter: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(*CounterHandle))+(unsafe.Sizeof(CounterHandle{})+64))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]*CounterHandle, ln_)
@@ -516,7 +517,7 @@ func liftFlatListU32(ctx context.Context, caller, callee *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU32: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint32, ln_)
@@ -554,7 +555,7 @@ func liftMemListU32(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU32: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint32, ln_)

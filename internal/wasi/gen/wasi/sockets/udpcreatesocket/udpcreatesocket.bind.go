@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -253,7 +254,7 @@ func liftFlatListU8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint8, ln_)
@@ -288,7 +289,7 @@ func liftMemListU8(ctx context.Context, caller, callee *host.CallContext, h *hos
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]uint8, ln_)
@@ -447,7 +448,7 @@ func liftFlatListUdpIncomingDatagram(ctx context.Context, caller, callee *host.C
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListUdpIncomingDatagram: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(udp.IncomingDatagram))+max(unsafe.Sizeof(network.IpSocketAddressIpv4{}), unsafe.Sizeof(network.IpSocketAddressIpv6{})))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]udp.IncomingDatagram, ln_)
@@ -480,7 +481,7 @@ func liftMemListUdpIncomingDatagram(ctx context.Context, caller, callee *host.Ca
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListUdpIncomingDatagram: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(udp.IncomingDatagram))+max(unsafe.Sizeof(network.IpSocketAddressIpv4{}), unsafe.Sizeof(network.IpSocketAddressIpv6{})))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]udp.IncomingDatagram, ln_)
@@ -629,7 +630,7 @@ func liftFlatListUdpOutgoingDatagram(ctx context.Context, caller, callee *host.C
 	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftFlatListUdpOutgoingDatagram: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(udp.OutgoingDatagram))+max(unsafe.Sizeof(network.IpSocketAddressIpv4{}), unsafe.Sizeof(network.IpSocketAddressIpv6{})))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]udp.OutgoingDatagram, ln_)
@@ -662,7 +663,7 @@ func liftMemListUdpOutgoingDatagram(ctx context.Context, caller, callee *host.Ca
 	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListUdpOutgoingDatagram: list out of bounds")
 	}
-	if err_ := callee.ChargeLift(lb_); err_ != nil {
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(udp.OutgoingDatagram))+max(unsafe.Sizeof(network.IpSocketAddressIpv4{}), unsafe.Sizeof(network.IpSocketAddressIpv6{})))); err_ != nil {
 		return nil, err_
 	}
 	out_ := make([]udp.OutgoingDatagram, ln_)

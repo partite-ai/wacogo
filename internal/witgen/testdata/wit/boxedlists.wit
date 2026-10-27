@@ -1,0 +1,21 @@
+package example:demo;
+
+interface boxedlists {
+    variant item {
+        num(u32),
+        text(string),
+        empty,
+    }
+    record tagged {
+        id: u32,
+        outcome: result<string, u32>,
+    }
+    items: func() -> list<item>;
+    outcomes: func() -> list<result<u64, string>>;
+    tagged-list: func() -> list<tagged>;
+    maybe-items: func() -> list<option<item>>;
+}
+
+world boxedlists-host {
+    import boxedlists;
+}

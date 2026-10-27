@@ -11,9 +11,10 @@ import (
 var ErrLiftLimitExceeded = errors.New("lift size limit exceeded")
 
 // liftBudget bounds the bytes one lift may materialize in its receiver.
-// Charges are canonical-ABI sizes: n*elemSize per list, the byte length per
-// string (post-transcoding when the receiver's realloc is involved). A zero
-// limit disables accounting.
+// Each lift path charges what it allocates: a transfer charges the bytes
+// it reallocs in the receiver's memory (strings post-transcoding), and a
+// lift into Go Vals charges each list's and string's estimated Go
+// footprint (see valFootprint). A zero limit disables accounting.
 type liftBudget struct {
 	limit uint64
 	used  uint64
@@ -45,9 +46,10 @@ func (b *liftBudget) mustCharge(n uint64) {
 }
 
 // checkLiftedList validates a list header about to be lifted into Go
-// values and charges its canonical size to the call's budget. It runs
-// before any Go-side allocation so a hostile length cannot force one.
-func checkLiftedList(gcc *gocallContext, ptr, n, elemSize, elemAlign uint32) error {
+// values and charges the list's Go footprint (elemFootprint per element,
+// plus its slot) to the call's budget. It runs before any Go-side
+// allocation so a hostile length cannot force one.
+func checkLiftedList(gcc *gocallContext, ptr, n, elemSize, elemAlign uint32, elemFootprint uint64) error {
 	if err := checkListLen(n, elemSize); err != nil {
 		return err
 	}
@@ -60,5 +62,5 @@ func checkLiftedList(gcc *gocallContext, ptr, n, elemSize, elemAlign uint32) err
 	if uint64(ptr)+byteLen > uint64(gcc.callee.Memory.Size()) {
 		return fmt.Errorf("list pointer/length out of bounds of memory: ptr=%d len=%d", ptr, byteLen)
 	}
-	return gcc.budget.charge(byteLen)
+	return gcc.budget.charge(listElemCharge(n, elemFootprint))
 }

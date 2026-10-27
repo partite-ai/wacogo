@@ -333,26 +333,46 @@ on error returns.
 ### Lift limits
 
 `WithMaxLiftBytes` bounds each lift: one call's params, or one call's
-results. The unit is canonical-ABI bytes: `n*elemSize` per list and
-the byte length per string, summed over the whole value tree. Values
-in guest memory can alias each other (many list entries pointing at
-the same buffer), so this total is not bounded by the source's memory
-size. The accounting lives in `liftBudget` (`lift_budget.go`) and is
-charged before anything is allocated:
+results. Each lift path charges what it allocates in the receiver,
+before allocating it. Values in guest memory can alias each other (many
+list entries pointing at the same buffer), so neither total is bounded
+by the source's memory size; every lifted occurrence is charged. The
+accounting lives in `liftBudget` (`lift_budget.go`).
 
-- **Transfer.** Every list or string buffer goes through the
-  receiver's realloc, so `allocSink.add` (batched discovery walk) and
-  serial `allocSource.next` charge the requested size. The budget is
-  reset per `runPhasedTransfer` call. Cross-encoding strings are
-  charged their exact transcoded length: the discovery walk counts it
-  (`transcodedByteLen`), and batched `allocSource.next` asserts that
-  the transfer step requests the same size.
-- **Gocall.** `memToVal` / `flatToVal` list and string steps charge
-  after reading the header and before `make` or decode
-  (`checkLiftedList` also bounds-checks the list against memory).
-- **Direct memory readers.** `CallContext.ChargeLift` exposes the
-  budget to code that lifts straight from `Memory()`. witgen-generated
-  result lifts call it before each allocation.
+- **Transfer.** The receiver is a component, and the cost is its
+  memory. Every list or string buffer goes through the receiver's
+  realloc, so `allocSink.add` (batched discovery walk) and serial
+  `allocSource.next` charge the requested size. The budget is reset per
+  `runPhasedTransfer` call. Cross-encoding strings are charged their
+  exact transcoded length: the discovery walk counts it
+  (`transcodedByteLen`), and batched `allocSource.next` asserts that the
+  transfer step requests the same size.
+- **Gocall.** The receiver is Go, and the cost is Go heap. Canonical
+  sizes understate it badly: a `list<record { a: u8 }>` element is one
+  canonical byte but a `Val` slot, a `*ValRecord` and a one-entry
+  `[]Field` in Go, and each level of record nesting adds another
+  record. `memToVal` / `flatToVal` list steps therefore charge
+  `n * (valSlotSize + valFootprint(elem))` after reading the header and
+  before `make` (`checkLiftedList`, which also bounds-checks the list
+  against memory). `valFootprint` is computed once per list at plan
+  compile time from the `Val` struct sizes, excluding nested list
+  contents and string bytes, which their own steps charge. String steps
+  charge the decoded byte length.
+- **Direct memory readers.** `CallContext.ChargeLift` exposes the budget
+  to code that lifts straight from `Memory()`. witgen-generated result
+  lifts charge each list `ln_ * goFootprintExpr(elem)`: a constant
+  expression of `unsafe.Sizeof` the element's Go type plus the case
+  structs it boxes (results and variants are sealed interfaces, so a
+  payload-carrying case is heap-allocated) and the handle objects it
+  creates. Strings charge their byte length.
+
+Host functions (witgen trampolines and `host.Builder` functions) are
+not charged when they read their arguments. The transfer into the host
+component's memory has already charged the canonical bytes, so the
+buffer a trampoline reads is bounded by the limit, and the Go values it
+builds from that buffer by a type-dependent multiple of it (large only
+for deeply nested results and variants). Charging those too would need
+a per-call `CallContext` for host calls, which today share one.
 
 ## Zero-allocation transfer
 

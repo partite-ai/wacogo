@@ -59,9 +59,10 @@ func (cc *CallContext) Realloc(ctx context.Context, origPtr, origSize, align, ne
 	return cc.realloc(ctx, origPtr, origSize, align, newSize)
 }
 
-// ChargeLift records that n more bytes are about to be lifted out of this
-// context's memory. Code that lifts lists or strings directly from Memory
-// calls it with each value's canonical-ABI size before allocating for it.
+// ChargeLift records that lifting a value out of this context's memory is
+// about to allocate n more bytes. Code that lifts lists or strings
+// directly from Memory calls it with the Go memory each one will occupy
+// before allocating for it.
 // It returns an error wrapping ErrLiftLimitExceeded once the call's total
 // exceeds the engine's WithMaxLiftBytes limit.
 func (cc *CallContext) ChargeLift(n uint64) error {
