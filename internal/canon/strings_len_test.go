@@ -166,6 +166,9 @@ func TestTranscodedByteLen_MalformedTraps(t *testing.T) {
 		{"bad utf-8", []byte{0xff, 0xfe}, 2, EncUTF8, EncUTF16},
 		{"lone high surrogate", []byte{0x00, 0xd8}, 1, EncUTF16, EncUTF8},
 		{"lone low surrogate tagged", []byte{0x00, 0xdc}, 1 | latin1UTF16HighBit, EncLatin1UTF16, EncUTF8},
+		{"high surrogate then non-low", []byte{0x00, 0xd8, 0x41, 0x00}, 2, EncUTF16, EncUTF8},
+		{"odd utf-16 length", []byte{0x41}, 1 | latin1UTF16HighBit, EncLatin1UTF16, EncUTF8},
+		{"truncated utf-8", []byte{'a', 0xe4, 0xb8}, 3, EncUTF8, EncLatin1UTF16},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -182,5 +185,26 @@ func TestTranscodedByteLen_MalformedTraps(t *testing.T) {
 func TestStringByteLen_NoWrap(t *testing.T) {
 	if got := stringByteLen(0x80000001, EncUTF16); got != 0x100000002 {
 		t.Fatalf("stringByteLen = %#x, want 0x100000002", got)
+	}
+}
+
+// BenchmarkTranscodedByteLen measures the discovery walk's per-string
+// size count for each cross-encoding pair, on mostly-ASCII text with a
+// few wider code points.
+func BenchmarkTranscodedByteLen(b *testing.B) {
+	s := strings.Repeat("the quick brown fox jumps over the lazy dog é 中 ", 64)
+	for _, p := range []struct{ src, dst StringEncoding }{
+		{EncUTF8, EncUTF16},
+		{EncUTF8, EncLatin1UTF16},
+		{EncUTF16, EncUTF8},
+		{EncLatin1UTF16, EncUTF8},
+	} {
+		src, coded := encodeString(s, p.src)
+		b.Run(fmt.Sprintf("%v->%v", p.src, p.dst), func(b *testing.B) {
+			b.SetBytes(int64(len(src)))
+			for b.Loop() {
+				transcodedByteLen(src, coded, p.src, p.dst)
+			}
+		})
 	}
 }

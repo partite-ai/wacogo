@@ -236,103 +236,104 @@ func validateUTF16Bytes(bytes []byte) {
 }
 
 // transcodedByteLen returns the exact byte length src will occupy once
-// transcoded from srcEnc to dstEnc, matching what encodeString produces
-// for the decoded string. src must be the bytes returned by
-// readStringBytes for (srcCoded, srcEnc). Traps if src is malformed in
-// srcEnc. Does not allocate.
+// transcoded from srcEnc to dstEnc, matching what transcodeInto writes.
+// src must be the bytes returned by readStringBytes for (srcCoded,
+// srcEnc). Validates src as it counts, in one pass, and traps if it is
+// malformed in srcEnc. Does not allocate.
 func transcodedByteLen(src []byte, srcCoded uint32, srcEnc, dstEnc StringEncoding) uint32 {
 	srcUTF16 := srcEnc == EncUTF16
 	if srcEnc == EncLatin1UTF16 {
 		_, srcUTF16 = latin1UTF16Decode(srcCoded)
 	}
-	if srcEnc == EncUTF8 {
-		if msg := validateUTF8(src); msg != "" {
-			trapf("%s", msg)
-		}
-	} else if srcUTF16 {
-		validateUTF16Bytes(src)
+	if srcUTF16 && len(src)%2 != 0 {
+		trapf("UTF-16 byte length must be even")
 	}
-
+	// One pass counts every destination's length; the switch below
+	// picks the one dstEnc needs. Each source encoding gets its own loop
+	// so the common cases stay tight.
+	var utf8Len, utf16Len, codePoints uint32
+	latin1 := true
+	switch {
+	case srcEnc == EncUTF8:
+		for i := 0; i < len(src); {
+			if src[i] < utf8.RuneSelf {
+				utf8Len++
+				utf16Len += 2
+				codePoints++
+				i++
+				continue
+			}
+			r, size := decodeRune(src, i, srcEnc, false)
+			i += size
+			codePoints++
+			utf8Len += uint32(size)
+			if r >= 0x10000 {
+				utf16Len += 4
+			} else {
+				utf16Len += 2
+			}
+			if r > 0xFF {
+				latin1 = false
+			}
+		}
+	case srcUTF16:
+		for i := 0; i < len(src); i += 2 {
+			u := uint16(src[i]) | uint16(src[i+1])<<8
+			codePoints++
+			switch {
+			case u < 0x80:
+				utf8Len++
+				utf16Len += 2
+			case u < 0x800:
+				utf8Len += 2
+				utf16Len += 2
+				if u > 0xFF {
+					latin1 = false
+				}
+			case u < 0xD800 || u > 0xDFFF:
+				utf8Len += 3
+				utf16Len += 2
+				latin1 = false
+			case u <= 0xDBFF:
+				if i+4 > len(src) {
+					trapf("unpaired high surrogate at %d", i/2)
+				}
+				if low := uint16(src[i+2]) | uint16(src[i+3])<<8; low < 0xDC00 || low > 0xDFFF {
+					trapf("high surrogate not followed by low surrogate")
+				}
+				utf8Len += 4
+				utf16Len += 4
+				latin1 = false
+				i += 2
+			default:
+				trapf("unpaired low surrogate at %d", i/2)
+			}
+		}
+	default: // Latin-1: every byte is a code point.
+		for _, b := range src {
+			if b < 0x80 {
+				utf8Len++
+			} else {
+				utf8Len += 2
+			}
+		}
+		codePoints = uint32(len(src))
+		utf16Len = 2 * codePoints
+	}
 	switch dstEnc {
 	case EncUTF8:
-		return utf8LenOf(src, srcEnc, srcUTF16)
+		return utf8Len
 	case EncUTF16:
-		return utf16LenOf(src, srcEnc, srcUTF16)
+		return utf16Len
 	case EncLatin1UTF16:
-		if fitsLatin1(src, srcEnc, srcUTF16) {
+		if latin1 {
 			// One byte per code point.
-			if srcEnc == EncUTF8 {
-				return uint32(utf8.RuneCount(src))
-			}
-			if srcUTF16 {
-				return uint32(len(src) / 2)
-			}
-			return uint32(len(src))
+			return codePoints
 		}
-		return utf16LenOf(src, srcEnc, srcUTF16)
+		return utf16Len
 	}
 	trapf("unknown string encoding")
 	return 0
-}
-
-// utf8LenOf returns the UTF-8 byte length of a validated source string.
-func utf8LenOf(src []byte, srcEnc StringEncoding, srcUTF16 bool) uint32 {
-	switch {
-	case srcEnc == EncUTF8:
-		return uint32(len(src))
-	case srcUTF16:
-		var n uint32
-		for i := 0; i+1 < len(src); i += 2 {
-			u := uint16(src[i]) | uint16(src[i+1])<<8
-			switch {
-			case u < 0x80:
-				n++
-			case u < 0x800:
-				n += 2
-			case u >= 0xD800 && u <= 0xDBFF:
-				// High surrogate: the pair encodes one supplementary
-				// code point, 4 UTF-8 bytes. Validation guarantees the
-				// low surrogate follows.
-				n += 4
-				i += 2
-			default:
-				n += 3
-			}
-		}
-		return n
-	default: // Latin-1
-		var n uint32
-		for _, b := range src {
-			if b < 0x80 {
-				n++
-			} else {
-				n += 2
-			}
-		}
-		return n
-	}
-}
-
-// utf16LenOf returns the UTF-16 byte length of a validated source string.
-func utf16LenOf(src []byte, srcEnc StringEncoding, srcUTF16 bool) uint32 {
-	switch {
-	case srcEnc == EncUTF8:
-		var n uint32
-		for i := 0; i < len(src); {
-			r, size := utf8.DecodeRune(src[i:])
-			if r >= 0x10000 {
-				n += 4
-			} else {
-				n += 2
-			}
-			i += size
-		}
-		return n
-	case srcUTF16:
-		return uint32(len(src))
-	default: // Latin-1
-		return uint32(len(src)) * 2
-	}
 }
 
 // fitsLatin1 reports whether every code point of a validated source string

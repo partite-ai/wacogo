@@ -202,13 +202,17 @@ func runTransferPlan(
 //  2. Batch: one helper.invoke call performs N internal wasm→wasm
 //     cabi_realloc calls, populating scratch's output region with N
 //     pointers.
-//  3. Transfer: walk every step's transferStep, supplying a
-//     batchedAllocSource that hands the pre-allocated pointers back in
-//     declaration order.
+//  3. Transfer: walk every step's transferStep with an allocSource in
+//     batched mode, which hands the pre-allocated pointers back in
+//     declaration order and traps if a step asks for a size other than
+//     the one discovery reserved.
 //
-// In the serial fallback: the transfer walk runs once with a
-// serialAllocSource that issues cabi_realloc per request, matching the
-// original behaviour.
+// In the serial fallback, the transfer walk runs once with an allocSource
+// in serial mode, which calls cabi_realloc per request.
+//
+// Either way every allocation is charged to tc.budget before it is made:
+// by allocSink.add during discovery, or by allocSource.next in serial
+// mode.
 func runPhasedTransfer(ctx context.Context, tc *transferContext, steps []transferPlanStep, srcBase, dstBase uint32) {
 	helper := tc.callee.BatchHelper
 	// allocSrc and allocSink live on the (heap-allocated, per-adapter)
