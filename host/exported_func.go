@@ -35,15 +35,19 @@ func (f *ExportedFunc) ResultType(i int) core.Type {
 // call to populate stack with flat arguments; read is called after to
 // consume flat results. Each callback receives two CallContext values
 // — caller for the host instance issuing the call and callee for the
-// instance providing the export.
+// instance providing the export. If write returns an error, the
+// function is not called, and anything write already handed to the
+// callee, such as owned handles, stays with it. If the callee's realloc
+// fails while write lowers into its memory, or read returns an error,
+// the callee instance is poisoned. Either way CallRaw returns that error.
 //
 // CallRaw returns an error if any borrows handed to the callee were
 // not dropped before the call returned.
 func (f *ExportedFunc) CallRaw(
 	ctx context.Context,
 	caller *ComponentInstance,
-	write func(caller, callee *CallContext, stack []uint64),
-	read func(caller, callee *CallContext, stack []uint64),
+	write func(caller, callee *CallContext, stack []uint64) error,
+	read func(caller, callee *CallContext, stack []uint64) error,
 ) error {
 	return f.fn.CallRaw(ctx, caller.Core(), write, read)
 }

@@ -5,7 +5,6 @@ package exit
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -30,24 +29,21 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 	return w_
 }
 func (w *exitWrapper) Exit(ctx context.Context, status Result__) error {
-	var resErr_ error
 	arg0_ := status
 	{
 		callErr_ := w.fnExit.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatResult__(ctx, caller, callee, w.callerInst, w.fnExit.ParamType(0), stack[0:1], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return resErr_
+			return callErr_
 		}
 	}
 	return nil
@@ -57,14 +53,16 @@ func (w *exitWrapper) ExitWithCode(ctx context.Context, statusCode uint8) error 
 	arg0_ := statusCode
 	{
 		callErr_ := w.fnExitWithCode.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return callErr_
 		}
 	}
 	return nil

@@ -12,7 +12,6 @@ package monotonicclock
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -45,14 +44,16 @@ func (w *monotonicClockWrapper) Now(ctx context.Context) (uint64, error) {
 	var resVal_ uint64
 	{
 		callErr_ := w.fnNow.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = stack[0]
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil
@@ -62,14 +63,16 @@ func (w *monotonicClockWrapper) Resolution(ctx context.Context) (uint64, error) 
 	var resVal_ uint64
 	{
 		callErr_ := w.fnResolution.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = stack[0]
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil
@@ -77,38 +80,34 @@ func (w *monotonicClockWrapper) Resolution(ctx context.Context) (uint64, error) 
 
 func (w *monotonicClockWrapper) SubscribeDuration(ctx context.Context, when uint64) (*poll.PollableHandle, error) {
 	var resVal_ *poll.PollableHandle
-	var resErr_ error
 	arg0_ := when
 	{
 		callErr_ := w.fnSubscribeDuration.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnSubscribeDuration.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
-						resErr_ = srcErr_
-						return
+						return srcErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
-						resErr_ = dstErr_
-						return
+						return dstErr_
 					}
 					state_ := w.callerInst.UserState().(*instanceState)
 					fwd_ := &pollPollableForwarder{caller: w.callerInst, rh: dstH_, fns: state_.pollPollableFwdFns}
 					resVal_ = poll.NewPollableHandleFrom(dstH_, fwd_)
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -116,38 +115,34 @@ func (w *monotonicClockWrapper) SubscribeDuration(ctx context.Context, when uint
 
 func (w *monotonicClockWrapper) SubscribeInstant(ctx context.Context, when uint64) (*poll.PollableHandle, error) {
 	var resVal_ *poll.PollableHandle
-	var resErr_ error
 	arg0_ := when
 	{
 		callErr_ := w.fnSubscribeInstant.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnSubscribeInstant.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
-						resErr_ = srcErr_
-						return
+						return srcErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
-						resErr_ = dstErr_
-						return
+						return dstErr_
 					}
 					state_ := w.callerInst.UserState().(*instanceState)
 					fwd_ := &pollPollableForwarder{caller: w.callerInst, rh: dstH_, fns: state_.pollPollableFwdFns}
 					resVal_ = poll.NewPollableHandleFrom(dstH_, fwd_)
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil

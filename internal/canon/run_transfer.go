@@ -133,9 +133,14 @@ func runTransferPlan(
 	// 7-8. Lower results into the original caller under may_leave=false.
 	// Post-swap, tc.callee == original caller — its realloc is the one
 	// that may fire here (string/list result buffers).
+	//
+	// Any failure from here until post-return completes poisons the
+	// original callee: it returned expecting its post-return to run, and
+	// that can no longer happen, whichever side caused the failure.
 	func() {
 		prev := tc.callee.Instance.SuspendLeave()
 		defer tc.callee.Instance.RestoreLeave(prev)
+		defer poisonOnPanic(calleeInst)
 
 		var resultSrcBase, resultDstBase uint32
 		if plan.returnMem {
@@ -180,6 +185,7 @@ func runTransferPlan(
 		err := postReturn(ctx, calleeStack[:plan.nResultRegs])
 		tc.caller.Instance.RestoreLeave(prev)
 		if err != nil {
+			calleeInst.Poison(err)
 			panic(&Trap{msg: err.Error()})
 		}
 	}
@@ -196,25 +202,33 @@ func runTransferPlan(
 //  2. Batch: one helper.invoke call performs N internal wasm→wasm
 //     cabi_realloc calls, populating scratch's output region with N
 //     pointers.
-//  3. Transfer: walk every step's transferStep, supplying a
-//     batchedAllocSource that hands the pre-allocated pointers back in
-//     declaration order.
+//  3. Transfer: walk every step's transferStep with an allocSource in
+//     batched mode, which hands the pre-allocated pointers back in
+//     declaration order and traps if a step asks for a size other than
+//     the one discovery reserved.
 //
-// In the serial fallback: the transfer walk runs once with a
-// serialAllocSource that issues cabi_realloc per request, matching the
-// original behaviour.
+// In the serial fallback, the transfer walk runs once with an allocSource
+// in serial mode, which calls cabi_realloc per request.
+//
+// Either way every allocation is charged to tc.budget before it is made:
+// by allocSink.add during discovery, or by allocSource.next in serial
+// mode.
 func runPhasedTransfer(ctx context.Context, tc *transferContext, steps []transferPlanStep, srcBase, dstBase uint32) {
 	helper := tc.callee.BatchHelper
 	// allocSrc and allocSink live on the (heap-allocated, per-adapter)
 	// transferContext so their addresses can be safely shared with the
 	// indirect closures the discovery and transfer walks invoke — no per-
-	// call escape allocation.
+	// call escape allocation. Each call of runPhasedTransfer is one lift,
+	// so the budget starts fresh here.
+	tc.budget.reset()
 	tc.allocSrc.helper = nil
 	tc.allocSrc.n = 0
 	tc.allocSrc.idx = 0
+	tc.allocSrc.budget = &tc.budget
 	if helper != nil {
 		tc.allocSink.helper = helper
 		tc.allocSink.n = 0
+		tc.allocSink.budget = &tc.budget
 		for _, step := range steps {
 			if step.sizes != nil {
 				step.sizes(tc, srcBase, &tc.allocSink)

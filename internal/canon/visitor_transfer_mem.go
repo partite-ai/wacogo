@@ -164,11 +164,15 @@ func (v *memTransferVisitor) VisitString() {
 	v.byteEquivalent = false // pointer translation + encoding validation
 	v.emitAlloc(
 		func(tc *transferContext, srcBase uint32, sink *allocSink) {
+			srcPtr, ok := tc.caller.Memory.ReadUint32Le(srcBase + ptrOff)
+			if !ok {
+				panic(&Trap{msg: "oob string ptr read"})
+			}
 			srcCoded, ok := tc.caller.Memory.ReadUint32Le(srcBase + lenOff)
 			if !ok {
 				panic(&Trap{msg: "oob string len read"})
 			}
-			stringContentSizeStep(tc, srcCoded, sink)
+			stringContentSizeStep(tc, srcPtr, srcCoded, sink)
 		},
 		func(ctx context.Context, tc *transferContext, srcBase, dstBase uint32, src *allocSource) {
 			srcPtr, ok := tc.caller.Memory.ReadUint32Le(srcBase + ptrOff)

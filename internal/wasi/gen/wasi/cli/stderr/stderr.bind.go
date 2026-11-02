@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -139,6 +140,10 @@ func toGoFlatListU8(ctx context.Context, cc *host.CallContext, h *host.Component
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 1
+	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListU8: list out of bounds")
+	}
 	out_ := make([]uint8, ln_)
 	n_ := uint64(ln_) * 1
 	if n_ > math.MaxUint32 {
@@ -166,6 +171,10 @@ func toGoMemListU8(ctx context.Context, cc *host.CallContext, h *host.ComponentI
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU8: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 1
+	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU8: list out of bounds")
 	}
 	out_ := make([]uint8, ln_)
 	n_ := uint64(ln_) * 1
@@ -229,6 +238,13 @@ func liftFlatListU8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 1
+	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]uint8, ln_)
 	n_ := uint64(ln_) * 1
 	if n_ > math.MaxUint32 {
@@ -256,6 +272,13 @@ func liftMemListU8(ctx context.Context, caller, callee *host.CallContext, h *hos
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 1
+	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]uint8, ln_)
 	n_ := uint64(ln_) * 1
@@ -1141,6 +1164,9 @@ func fromGoMemString(ctx context.Context, cc *host.CallContext, h *host.Componen
 func liftFlatString(ctx context.Context, caller, callee *host.CallContext, h *host.ComponentInstance, ty wacogo.Type, stack []uint64) (string, error) {
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	if err_ := callee.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
+	}
 	bs_, ok_ := callee.Memory().Read(ptr_, ln_)
 	if !ok_ {
 		return "", fmt.Errorf("wacogo/witgen: liftFlatString: bad memory read")
@@ -1160,6 +1186,9 @@ func liftMemString(ctx context.Context, caller, callee *host.CallContext, h *hos
 		return "", fmt.Errorf("wacogo/witgen: liftMemString: string len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	if err_ := callee.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
 	}
 	bs_, ok_ := callee.Memory().Read(sptr_, ln_)
 	if !ok_ {
@@ -1238,26 +1267,23 @@ type wioerrorErrorResourceForwarder struct {
 
 func (f *wioerrorErrorResourceForwarder) ToDebugString(ctx context.Context) (string, error) {
 	var resVal_ string
-	var resErr_ error
 	{
 		callErr_ := f.fns.fnToDebugString.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemString(ctx, caller, callee, f.caller, f.fns.fnToDebugString.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return "", fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return "", resErr_
+			return "", callErr_
 		}
 	}
 	return resVal_, nil
@@ -1282,14 +1308,16 @@ type pollPollableForwarder struct {
 func (f *pollPollableForwarder) Block(ctx context.Context) error {
 	{
 		callErr_ := f.fns.fnBlock.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return callErr_
 		}
 	}
 	return nil
@@ -1299,15 +1327,17 @@ func (f *pollPollableForwarder) Ready(ctx context.Context) (bool, error) {
 	var resVal_ bool
 	{
 		callErr_ := f.fns.fnReady.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = stack[0] != 0
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return false, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return false, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1339,26 +1369,23 @@ type streamsOutputStreamForwarder struct {
 
 func (f *streamsOutputStreamForwarder) BlockingFlush(ctx context.Context) (streams.Result_StreamError, error) {
 	var resVal_ streams.Result_StreamError
-	var resErr_ error
 	{
 		callErr_ := f.fns.fnBlockingFlush.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResult_StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnBlockingFlush.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1366,48 +1393,42 @@ func (f *streamsOutputStreamForwarder) BlockingFlush(ctx context.Context) (strea
 
 func (f *streamsOutputStreamForwarder) BlockingSplice(ctx context.Context, src *streams.InputStreamHandle, len uint64) (streams.ResultU64StreamError, error) {
 	var resVal_ streams.ResultU64StreamError
-	var resErr_ error
 	arg0_ := src
 	arg1_ := len
 	{
 		callErr_ := f.fns.fnBlockingSplice.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				{
 					tr_ := f.fns.fnBlockingSplice.ParamType(1).(wacogo.TypeBorrow).ResourceType
 					callerH_, err_ := streams.HandleValueFor(caller, f.caller, arg0_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					srcH_, err_ := caller.LookupBorrowable(tr_, callerH_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					dstH_, err_ := srcH_.LendTo(callee.TransferTarget(), callee.Task())
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					stack[1] = uint64(dstH_.HandleID())
 				}
 				stack[2] = arg1_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResultU64StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnBlockingSplice.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1415,31 +1436,27 @@ func (f *streamsOutputStreamForwarder) BlockingSplice(ctx context.Context, src *
 
 func (f *streamsOutputStreamForwarder) BlockingWriteAndFlush(ctx context.Context, contents []uint8) (streams.Result_StreamError, error) {
 	var resVal_ streams.Result_StreamError
-	var resErr_ error
 	arg0_ := contents
 	{
 		callErr_ := f.fns.fnBlockingWriteAndFlush.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				if err_ := lowerFlatListU8(ctx, caller, callee, f.caller, f.fns.fnBlockingWriteAndFlush.ParamType(1), stack[1:3], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResult_StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnBlockingWriteAndFlush.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1447,28 +1464,25 @@ func (f *streamsOutputStreamForwarder) BlockingWriteAndFlush(ctx context.Context
 
 func (f *streamsOutputStreamForwarder) BlockingWriteZeroesAndFlush(ctx context.Context, len uint64) (streams.Result_StreamError, error) {
 	var resVal_ streams.Result_StreamError
-	var resErr_ error
 	arg0_ := len
 	{
 		callErr_ := f.fns.fnBlockingWriteZeroesAndFlush.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResult_StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnBlockingWriteZeroesAndFlush.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1476,26 +1490,23 @@ func (f *streamsOutputStreamForwarder) BlockingWriteZeroesAndFlush(ctx context.C
 
 func (f *streamsOutputStreamForwarder) CheckWrite(ctx context.Context) (streams.ResultU64StreamError, error) {
 	var resVal_ streams.ResultU64StreamError
-	var resErr_ error
 	{
 		callErr_ := f.fns.fnCheckWrite.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResultU64StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnCheckWrite.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1503,26 +1514,23 @@ func (f *streamsOutputStreamForwarder) CheckWrite(ctx context.Context) (streams.
 
 func (f *streamsOutputStreamForwarder) Flush(ctx context.Context) (streams.Result_StreamError, error) {
 	var resVal_ streams.Result_StreamError
-	var resErr_ error
 	{
 		callErr_ := f.fns.fnFlush.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResult_StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnFlush.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1530,48 +1538,42 @@ func (f *streamsOutputStreamForwarder) Flush(ctx context.Context) (streams.Resul
 
 func (f *streamsOutputStreamForwarder) Splice(ctx context.Context, src *streams.InputStreamHandle, len uint64) (streams.ResultU64StreamError, error) {
 	var resVal_ streams.ResultU64StreamError
-	var resErr_ error
 	arg0_ := src
 	arg1_ := len
 	{
 		callErr_ := f.fns.fnSplice.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				{
 					tr_ := f.fns.fnSplice.ParamType(1).(wacogo.TypeBorrow).ResourceType
 					callerH_, err_ := streams.HandleValueFor(caller, f.caller, arg0_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					srcH_, err_ := caller.LookupBorrowable(tr_, callerH_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					dstH_, err_ := srcH_.LendTo(callee.TransferTarget(), callee.Task())
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					stack[1] = uint64(dstH_.HandleID())
 				}
 				stack[2] = arg1_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResultU64StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnSplice.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1579,37 +1581,33 @@ func (f *streamsOutputStreamForwarder) Splice(ctx context.Context, src *streams.
 
 func (f *streamsOutputStreamForwarder) Subscribe(ctx context.Context) (*poll.PollableHandle, error) {
 	var resVal_ *poll.PollableHandle
-	var resErr_ error
 	{
 		callErr_ := f.fns.fnSubscribe.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := f.fns.fnSubscribe.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
-						resErr_ = srcErr_
-						return
+						return srcErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
-						resErr_ = dstErr_
-						return
+						return dstErr_
 					}
 					state_ := f.caller.UserState().(*instanceState)
 					fwd_ := &pollPollableForwarder{caller: f.caller, rh: dstH_, fns: state_.pollPollableFwdFns}
 					resVal_ = poll.NewPollableHandleFrom(dstH_, fwd_)
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1617,31 +1615,27 @@ func (f *streamsOutputStreamForwarder) Subscribe(ctx context.Context) (*poll.Pol
 
 func (f *streamsOutputStreamForwarder) Write(ctx context.Context, contents []uint8) (streams.Result_StreamError, error) {
 	var resVal_ streams.Result_StreamError
-	var resErr_ error
 	arg0_ := contents
 	{
 		callErr_ := f.fns.fnWrite.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				if err_ := lowerFlatListU8(ctx, caller, callee, f.caller, f.fns.fnWrite.ParamType(1), stack[1:3], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResult_StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnWrite.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1649,28 +1643,25 @@ func (f *streamsOutputStreamForwarder) Write(ctx context.Context, contents []uin
 
 func (f *streamsOutputStreamForwarder) WriteZeroes(ctx context.Context, len uint64) (streams.Result_StreamError, error) {
 	var resVal_ streams.Result_StreamError
-	var resErr_ error
 	arg0_ := len
 	{
 		callErr_ := f.fns.fnWriteZeroes.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResult_StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnWriteZeroes.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1697,28 +1688,25 @@ type streamsInputStreamForwarder struct {
 
 func (f *streamsInputStreamForwarder) BlockingRead(ctx context.Context, len uint64) (streams.ResultListU8StreamError, error) {
 	var resVal_ streams.ResultListU8StreamError
-	var resErr_ error
 	arg0_ := len
 	{
 		callErr_ := f.fns.fnBlockingRead.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResultListU8StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnBlockingRead.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1726,28 +1714,25 @@ func (f *streamsInputStreamForwarder) BlockingRead(ctx context.Context, len uint
 
 func (f *streamsInputStreamForwarder) BlockingSkip(ctx context.Context, len uint64) (streams.ResultU64StreamError, error) {
 	var resVal_ streams.ResultU64StreamError
-	var resErr_ error
 	arg0_ := len
 	{
 		callErr_ := f.fns.fnBlockingSkip.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResultU64StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnBlockingSkip.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1755,28 +1740,25 @@ func (f *streamsInputStreamForwarder) BlockingSkip(ctx context.Context, len uint
 
 func (f *streamsInputStreamForwarder) Read(ctx context.Context, len uint64) (streams.ResultListU8StreamError, error) {
 	var resVal_ streams.ResultListU8StreamError
-	var resErr_ error
 	arg0_ := len
 	{
 		callErr_ := f.fns.fnRead.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResultListU8StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnRead.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1784,28 +1766,25 @@ func (f *streamsInputStreamForwarder) Read(ctx context.Context, len uint64) (str
 
 func (f *streamsInputStreamForwarder) Skip(ctx context.Context, len uint64) (streams.ResultU64StreamError, error) {
 	var resVal_ streams.ResultU64StreamError
-	var resErr_ error
 	arg0_ := len
 	{
 		callErr_ := f.fns.fnSkip.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
 				stack[1] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemStreamsResultU64StreamsStreamError(ctx, caller, callee, f.caller, f.fns.fnSkip.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -1813,37 +1792,33 @@ func (f *streamsInputStreamForwarder) Skip(ctx context.Context, len uint64) (str
 
 func (f *streamsInputStreamForwarder) Subscribe(ctx context.Context) (*poll.PollableHandle, error) {
 	var resVal_ *poll.PollableHandle
-	var resErr_ error
 	{
 		callErr_ := f.fns.fnSubscribe.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := f.fns.fnSubscribe.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
-						resErr_ = srcErr_
-						return
+						return srcErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
-						resErr_ = dstErr_
-						return
+						return dstErr_
 					}
 					state_ := f.caller.UserState().(*instanceState)
 					fwd_ := &pollPollableForwarder{caller: f.caller, rh: dstH_, fns: state_.pollPollableFwdFns}
 					resVal_ = poll.NewPollableHandleFrom(dstH_, fwd_)
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil

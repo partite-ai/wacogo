@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -99,6 +100,10 @@ func toGoFlatListPollable(ctx context.Context, cc *host.CallContext, h *host.Com
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 4
+	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListPollable: list out of bounds")
+	}
 	out_ := make([]*PollableHandle, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		{
@@ -136,6 +141,10 @@ func toGoMemListPollable(ctx context.Context, cc *host.CallContext, h *host.Comp
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListPollable: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 4
+	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoMemListPollable: list out of bounds")
 	}
 	out_ := make([]*PollableHandle, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -201,6 +210,13 @@ func liftFlatListPollable(ctx context.Context, caller, callee *host.CallContext,
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 4
+	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftFlatListPollable: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(*PollableHandle))+(unsafe.Sizeof(PollableHandle{})+64))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]*PollableHandle, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		{
@@ -245,6 +261,13 @@ func liftMemListPollable(ctx context.Context, caller, callee *host.CallContext, 
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListPollable: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 4
+	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftMemListPollable: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(*PollableHandle))+(unsafe.Sizeof(PollableHandle{})+64))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]*PollableHandle, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -351,6 +374,10 @@ func toGoFlatListU32(ctx context.Context, cc *host.CallContext, h *host.Componen
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 4
+	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListU32: list out of bounds")
+	}
 	out_ := make([]uint32, ln_)
 	n_ := uint64(ln_) * 4
 	if n_ > math.MaxUint32 {
@@ -381,6 +408,10 @@ func toGoMemListU32(ctx context.Context, cc *host.CallContext, h *host.Component
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU32: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 4
+	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU32: list out of bounds")
 	}
 	out_ := make([]uint32, ln_)
 	n_ := uint64(ln_) * 4
@@ -453,6 +484,13 @@ func liftFlatListU32(ctx context.Context, caller, callee *host.CallContext, h *h
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 4
+	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU32: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]uint32, ln_)
 	n_ := uint64(ln_) * 4
 	if n_ > math.MaxUint32 {
@@ -483,6 +521,13 @@ func liftMemListU32(ctx context.Context, caller, callee *host.CallContext, h *ho
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU32: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 4
+	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftMemListU32: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]uint32, ln_)
 	n_ := uint64(ln_) * 4

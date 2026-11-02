@@ -5,7 +5,6 @@ package compounds
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -35,46 +34,40 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *compoundsWrapper) BoxCounter(ctx context.Context, c *CounterHandle) (RecordWithCounter, error) {
 	var resVal_ RecordWithCounter
-	var resErr_ error
 	arg0_ := c
 	{
 		callErr_ := w.fnBoxCounter.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnBoxCounter.ParamType(0).(wacogo.TypeOwn).ResourceType
 					callerH_, err_ := arg0_.bind(caller, w.callerInst)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					srcH_, err_ := caller.LookupOwn(tr_, callerH_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					dstH_, err_ := srcH_.TransferOwn(callee.TransferTarget())
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					stack[0] = uint64(dstH_.HandleID())
 					arg0_.Invalidate()
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftFlatRecordWithCounter(ctx, caller, callee, w.callerInst, w.fnBoxCounter.ResultType(0), stack[0:1]); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return RecordWithCounter{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return RecordWithCounter{}, resErr_
+			return RecordWithCounter{}, callErr_
 		}
 	}
 	return resVal_, nil
@@ -82,30 +75,26 @@ func (w *compoundsWrapper) BoxCounter(ctx context.Context, c *CounterHandle) (Re
 
 func (w *compoundsWrapper) NewCounters(ctx context.Context, starts []uint32) ([]*CounterHandle, error) {
 	var resVal_ []*CounterHandle
-	var resErr_ error
 	arg0_ := starts
 	{
 		callErr_ := w.fnNewCounters.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListU32(ctx, caller, callee, w.callerInst, w.fnNewCounters.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListCounter(ctx, caller, callee, w.callerInst, w.fnNewCounters.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -113,26 +102,24 @@ func (w *compoundsWrapper) NewCounters(ctx context.Context, starts []uint32) ([]
 
 func (w *compoundsWrapper) NewCounter(ctx context.Context, start uint32) (*CounterHandle, error) {
 	var resVal_ *CounterHandle
-	var resErr_ error
 	arg0_ := start
 	{
 		callErr_ := w.fnNewCounter.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnNewCounter.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
-						resErr_ = srcErr_
-						return
+						return srcErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
-						resErr_ = dstErr_
-						return
+						return dstErr_
 					}
 					var impl_ Counter
 					if obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {
@@ -142,13 +129,11 @@ func (w *compoundsWrapper) NewCounter(ctx context.Context, start uint32) (*Count
 					}
 					resVal_ = NewCounterHandleFrom(dstH_, impl_)
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil

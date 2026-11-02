@@ -5,7 +5,6 @@ package pair
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -29,30 +28,26 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *pairWrapper) Swap(ctx context.Context, p TupleU32U32) (TupleU32U32, error) {
 	var resVal_ TupleU32U32
-	var resErr_ error
 	arg0_ := p
 	{
 		callErr_ := w.fnSwap.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatTupleU32U32(ctx, caller, callee, w.callerInst, w.fnSwap.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemTupleU32U32(ctx, caller, callee, w.callerInst, w.fnSwap.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return TupleU32U32{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return TupleU32U32{}, resErr_
+			return TupleU32U32{}, callErr_
 		}
 	}
 	return resVal_, nil

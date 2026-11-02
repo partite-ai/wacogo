@@ -234,9 +234,10 @@ non-zero, 8-aligned) to that global before forwarding.
 The reason this works: host functions don't need a real allocator.
 They need scratch space for the duration of a single canonical-ABI
 call. Resetting at the top of every top-level call gives that for
-free, with no fragmentation and no growth. The reserved first 16
-bytes of stub memory mean realloc never returns null (the canonical
-ABI traps on null pointers).
+free, with no fragmentation and no growth. Running out of memory,
+or a request that would wrap past 4 GiB, traps (`unreachable` in the
+wasm stub, an error from the Go `stubAllocator`), as the canonical ABI
+expects of an allocator; it never returns a sentinel pointer.
 
 ## Per-instance state model
 

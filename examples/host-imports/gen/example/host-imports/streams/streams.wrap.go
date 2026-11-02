@@ -5,7 +5,6 @@ package streams
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -33,26 +32,24 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *streamsWrapper) NewDataStream(ctx context.Context, seed uint32) (*DataStreamHandle, error) {
 	var resVal_ *DataStreamHandle
-	var resErr_ error
 	arg0_ := seed
 	{
 		callErr_ := w.fnNewDataStream.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(arg0_)
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnNewDataStream.ResultType(0).(wacogo.TypeOwn).ResourceType
 					calleeH_ := uint32(stack[0])
 					srcH_, srcErr_ := callee.LookupOwn(tr_, calleeH_)
 					if srcErr_ != nil {
-						resErr_ = srcErr_
-						return
+						return srcErr_
 					}
 					dstH_, dstErr_ := srcH_.TransferOwn(caller.TransferTarget())
 					if dstErr_ != nil {
-						resErr_ = dstErr_
-						return
+						return dstErr_
 					}
 					var impl_ DataStream
 					if obj_, ok_ := dstH_.Type().Instance().LookupExtern(dstH_.Rep()); ok_ {
@@ -62,13 +59,11 @@ func (w *streamsWrapper) NewDataStream(ctx context.Context, seed uint32) (*DataS
 					}
 					resVal_ = NewDataStreamHandleFrom(dstH_, impl_)
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil

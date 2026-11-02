@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"unsafe"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -341,6 +342,10 @@ func toGoFlatListIncomingDatagram(ctx context.Context, cc *host.CallContext, h *
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 40
+	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListIncomingDatagram: list out of bounds")
+	}
 	out_ := make([]IncomingDatagram, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := toGoMemIncomingDatagram(ctx, cc, h, lstT_.Elem, ptr_+i_*40); err_ != nil {
@@ -366,6 +371,10 @@ func toGoMemListIncomingDatagram(ctx context.Context, cc *host.CallContext, h *h
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListIncomingDatagram: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 40
+	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoMemListIncomingDatagram: list out of bounds")
 	}
 	out_ := make([]IncomingDatagram, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -419,6 +428,13 @@ func liftFlatListIncomingDatagram(ctx context.Context, caller, callee *host.Call
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 40
+	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftFlatListIncomingDatagram: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(IncomingDatagram))+max(unsafe.Sizeof(network.IpSocketAddressIpv4{}), unsafe.Sizeof(network.IpSocketAddressIpv6{})))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]IncomingDatagram, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := liftMemIncomingDatagram(ctx, caller, callee, h, lstT_.Elem, ptr_+i_*40); err_ != nil {
@@ -444,6 +460,13 @@ func liftMemListIncomingDatagram(ctx context.Context, caller, callee *host.CallC
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListIncomingDatagram: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 40
+	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftMemListIncomingDatagram: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(IncomingDatagram))+max(unsafe.Sizeof(network.IpSocketAddressIpv4{}), unsafe.Sizeof(network.IpSocketAddressIpv6{})))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]IncomingDatagram, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -501,6 +524,10 @@ func toGoFlatListOutgoingDatagram(ctx context.Context, cc *host.CallContext, h *
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 44
+	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListOutgoingDatagram: list out of bounds")
+	}
 	out_ := make([]OutgoingDatagram, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := toGoMemOutgoingDatagram(ctx, cc, h, lstT_.Elem, ptr_+i_*44); err_ != nil {
@@ -526,6 +553,10 @@ func toGoMemListOutgoingDatagram(ctx context.Context, cc *host.CallContext, h *h
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListOutgoingDatagram: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 44
+	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoMemListOutgoingDatagram: list out of bounds")
 	}
 	out_ := make([]OutgoingDatagram, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -579,6 +610,13 @@ func liftFlatListOutgoingDatagram(ctx context.Context, caller, callee *host.Call
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 44
+	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftFlatListOutgoingDatagram: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(OutgoingDatagram))+max(unsafe.Sizeof(network.IpSocketAddressIpv4{}), unsafe.Sizeof(network.IpSocketAddressIpv6{})))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]OutgoingDatagram, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := liftMemOutgoingDatagram(ctx, caller, callee, h, lstT_.Elem, ptr_+i_*44); err_ != nil {
@@ -604,6 +642,13 @@ func liftMemListOutgoingDatagram(ctx context.Context, caller, callee *host.CallC
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListOutgoingDatagram: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 44
+	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftMemListOutgoingDatagram: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(OutgoingDatagram))+max(unsafe.Sizeof(network.IpSocketAddressIpv4{}), unsafe.Sizeof(network.IpSocketAddressIpv6{})))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]OutgoingDatagram, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -661,6 +706,10 @@ func toGoFlatListU8(ctx context.Context, cc *host.CallContext, h *host.Component
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 1
+	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListU8: list out of bounds")
+	}
 	out_ := make([]uint8, ln_)
 	n_ := uint64(ln_) * 1
 	if n_ > math.MaxUint32 {
@@ -688,6 +737,10 @@ func toGoMemListU8(ctx context.Context, cc *host.CallContext, h *host.ComponentI
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU8: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 1
+	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU8: list out of bounds")
 	}
 	out_ := make([]uint8, ln_)
 	n_ := uint64(ln_) * 1
@@ -751,6 +804,13 @@ func liftFlatListU8(ctx context.Context, caller, callee *host.CallContext, h *ho
 	_ = lstT_
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	lb_ := uint64(ln_) * 1
+	if uint64(ptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftFlatListU8: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]uint8, ln_)
 	n_ := uint64(ln_) * 1
 	if n_ > math.MaxUint32 {
@@ -778,6 +838,13 @@ func liftMemListU8(ctx context.Context, caller, callee *host.CallContext, h *hos
 		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	lb_ := uint64(ln_) * 1
+	if uint64(lptr_)+lb_ > uint64(callee.Memory().Size()) {
+		return nil, fmt.Errorf("wacogo/witgen: liftMemListU8: list out of bounds")
+	}
+	if err_ := callee.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint8)))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]uint8, ln_)
 	n_ := uint64(ln_) * 1
@@ -3714,14 +3781,16 @@ type pollPollableForwarder struct {
 func (f *pollPollableForwarder) Block(ctx context.Context) error {
 	{
 		callErr_ := f.fns.fnBlock.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return callErr_
 		}
 	}
 	return nil
@@ -3731,15 +3800,17 @@ func (f *pollPollableForwarder) Ready(ctx context.Context) (bool, error) {
 	var resVal_ bool
 	{
 		callErr_ := f.fns.fnReady.CallRaw(ctx, f.caller,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = uint64(f.rh.HandleID())
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = stack[0] != 0
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return false, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return false, callErr_
 		}
 	}
 	return resVal_, nil

@@ -55,7 +55,7 @@ func TestBatchReallocHelper_RoundTrip(t *testing.T) {
 		t.Fatalf("instantiate target: %v", err)
 	}
 
-	helper, err := NewHost(rt).buildBatchReallocHelper(ctx, targetMod.Name(), "realloc")
+	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, targetMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestBatchReallocHelper_ZeroN(t *testing.T) {
 		t.Fatalf("instantiate target: %v", err)
 	}
 
-	helper, err := NewHost(rt).buildBatchReallocHelper(ctx, targetMod.Name(), "realloc")
+	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, targetMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestBatchReallocHelper_SharesCompiledModule(t *testing.T) {
 		return mod
 	}
 
-	host := NewHost(rt)
+	host := NewHost(rt, 0)
 
 	tgtA := bumpTarget("tgt_share_a", "realloc", 1000)
 	tgtB := bumpTarget("tgt_share_b", "realloc", 2000)
@@ -259,7 +259,7 @@ func TestBatchReallocHelper_OverridesCallerMemoryAllocator(t *testing.T) {
 	})
 	cctx := experimental.WithMemoryAllocator(ctx, callerAlloc)
 
-	helper, err := NewHost(rt).buildBatchReallocHelper(cctx, targetMod.Name(), "realloc")
+	helper, err := NewHost(rt, 0).buildBatchReallocHelper(cctx, targetMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}

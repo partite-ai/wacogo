@@ -142,6 +142,12 @@ func NewValRecord(fields ...Field) *ValRecord {
 	return &ValRecord{fields: cp}
 }
 
+// newValRecordFromSlice wraps fields without copying; the caller must
+// not retain fields.
+func newValRecordFromSlice(fields []Field) *ValRecord {
+	return &ValRecord{fields: fields}
+}
+
 func (r *ValRecord) val() {}
 
 func (r *ValRecord) buildIndex() {

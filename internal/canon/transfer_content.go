@@ -13,65 +13,82 @@ func transferStringContent(ctx context.Context, tc *transferContext, srcPtr, src
 	dstEnc := tc.callee.StringEncoding
 
 	byteLen := stringByteLen(srcCoded, srcEnc)
-	if byteLen > maxStringByteLength {
+	if byteLen > uint64(maxStringByteLength) {
 		panic(&Trap{msg: "string byte length exceeds max"})
 	}
 	mustTransfer(checkAlignment(srcPtr, stringAlign(srcEnc)))
 
-	srcBytes, ok := tc.caller.Memory.Read(srcPtr, byteLen)
+	srcBytes, ok := tc.caller.Memory.Read(srcPtr, uint32(byteLen))
 	if !ok {
 		panic(&Trap{msg: fmt.Sprintf("string content out-of-bounds: ptr=%d len=%d", srcPtr, byteLen)})
 	}
 
-	var outBytes []byte
-	var outCoded uint32
-	if srcEnc == dstEnc {
-		switch srcEnc {
-		case EncUTF8:
-			if msg := validateUTF8(srcBytes); msg != "" {
-				panic(&Trap{msg: msg})
-			}
-			outBytes, outCoded = srcBytes, srcCoded
-		case EncUTF16:
-			validateUTF16Bytes(srcBytes)
-			outBytes, outCoded = srcBytes, srcCoded
-		case EncLatin1UTF16:
-			// Per spec, the Latin-1 sub-encoding has no validation work to
-			// do (every byte is a valid code point); the UTF-16 sub-encoding
-			// validates surrogate pairing.
-			if _, isUTF16 := latin1UTF16Decode(srcCoded); isUTF16 {
-				validateUTF16Bytes(srcBytes)
-			}
-			outBytes, outCoded = srcBytes, srcCoded
-		default:
-			outBytes, outCoded = srcBytes, srcCoded
-		}
-	} else {
-		s := decodeString(memShim{tc.caller.Memory}, srcPtr, srcCoded, srcEnc)
-		outBytes, outCoded = encodeString(s, dstEnc)
+	if srcEnc != dstEnc {
+		return transcodeStringContent(ctx, tc, srcBytes, srcCoded, src)
 	}
-
-	// The discovery walk requested a buffer sized to the worst-case under
-	// stringEncoderUpperBound. The actual output length (len(outBytes)) is
-	// always ≤ that bound. The destination pointer reserves at least that
-	// many bytes; we only write the actual outBytes.
-	dstPtr := src.next(ctx, tc, uint32(len(outBytes)), stringAlign(dstEnc))
-	if !tc.callee.Memory.Write(dstPtr, outBytes) {
+	switch srcEnc {
+	case EncUTF8:
+		if msg := validateUTF8(srcBytes); msg != "" {
+			panic(&Trap{msg: msg})
+		}
+	case EncUTF16:
+		validateUTF16Bytes(srcBytes)
+	case EncLatin1UTF16:
+		// Per spec, the Latin-1 sub-encoding has no validation work to
+		// do (every byte is a valid code point); the UTF-16 sub-encoding
+		// validates surrogate pairing.
+		if _, isUTF16 := latin1UTF16Decode(srcCoded); isUTF16 {
+			validateUTF16Bytes(srcBytes)
+		}
+	}
+	// In batched mode the discovery walk (stringContentSizeStep) already
+	// reserved exactly len(srcBytes); src.next checks the sizes agree.
+	dstPtr := src.next(ctx, tc, uint32(len(srcBytes)), stringAlign(dstEnc))
+	if !tc.callee.Memory.Write(dstPtr, srcBytes) {
 		panic(&Trap{msg: "string oob write"})
 	}
-	return dstPtr, outCoded
+	return dstPtr, srcCoded
 }
 
-// stringContentSizeStep is the discovery walk for a string transfer.
-// Given the source coded length, it computes the upper-bound byte count
-// under the applicable encoding conversion and reports a single allocation.
-// Source bytes themselves are not needed for sizing.
-func stringContentSizeStep(tc *transferContext, srcCoded uint32, sink *allocSink) {
+// transcodeStringContent transfers a string between differing encodings.
+// It allocates the exact transcoded size (which the discovery walk
+// reserved in batched mode, and which src.next charges to the lift budget
+// in serial mode) before transcoding, then transcodes straight into the
+// callee's buffer, so a hostile length is refused before any work and no
+// Go-side copy of the string is made.
+func transcodeStringContent(ctx context.Context, tc *transferContext, srcBytes []byte, srcCoded uint32, src *allocSource) (uint32, uint32) {
 	srcEnc := tc.caller.StringEncoding
 	dstEnc := tc.callee.StringEncoding
-	byteLen := stringByteLen(srcCoded, srcEnc)
-	upper := byteLen * stringEncoderUpperBoundMultiplier(srcEnc, dstEnc)
-	sink.add(upper, stringAlign(dstEnc))
+	size, reserved := src.reservedSize()
+	if !reserved {
+		size = transcodedByteLen(srcBytes, srcCoded, srcEnc, dstEnc)
+	}
+	dstPtr := src.next(ctx, tc, size, stringAlign(dstEnc))
+	dst, ok := tc.callee.Memory.Read(dstPtr, size)
+	if !ok {
+		panic(&Trap{msg: "string oob write"})
+	}
+	return dstPtr, transcodeInto(dst, srcBytes, srcCoded, srcEnc, dstEnc)
+}
+
+// stringContentSizeStep is the discovery walk for a string transfer. It
+// reports a single allocation of exactly the byte length the transfer step
+// will write. Same-encoding transfers copy verbatim, so the size follows
+// from srcCoded alone; cross-encoding transfers read and validate the
+// source to count its transcoded length.
+func stringContentSizeStep(tc *transferContext, srcPtr, srcCoded uint32, sink *allocSink) {
+	srcEnc := tc.caller.StringEncoding
+	dstEnc := tc.callee.StringEncoding
+	if srcEnc == dstEnc {
+		byteLen := stringByteLen(srcCoded, srcEnc)
+		if byteLen > uint64(maxStringByteLength) {
+			panic(&Trap{msg: "string byte length exceeds max"})
+		}
+		sink.add(uint32(byteLen), stringAlign(dstEnc))
+		return
+	}
+	srcBytes := readStringBytes(memShim{tc.caller.Memory}, srcPtr, srcCoded, srcEnc)
+	sink.add(transcodedByteLen(srcBytes, srcCoded, srcEnc, dstEnc), stringAlign(dstEnc))
 }
 
 // transferListBulk is the fast path for lists whose element type's

@@ -756,6 +756,7 @@ func (s *instantiationState) buildLiftedFunc(
 			FuncTypeParamsAsCanon(funcType),
 			FuncTypeResultsAsCanon(funcType),
 			callee,
+			s.inst.engine.maxLiftBytes,
 		),
 	}
 	idx := uint32(len(s.funcs))

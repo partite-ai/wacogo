@@ -129,8 +129,10 @@ func (v *flatToValVisitor) VisitString() {
 		}()
 		ptr := uint32(gcc.registers[ptrSlot])
 		coded := uint32(gcc.registers[lenSlot])
-		enc := gcc.callee.StringEncoding
-		s := decodeString(memShim{gcc.callee.Memory}, ptr, coded, enc)
+		s, err := liftString(memShim{gcc.callee.Memory}, ptr, coded, gcc.callee.StringEncoding, &gcc.budget)
+		if err != nil {
+			return nil, err
+		}
 		return ValString(s), nil
 	})
 }
@@ -149,17 +151,13 @@ func (v *flatToValVisitor) VisitList(elem Type) {
 		elemAlign = 1
 	}
 	elemStep := child.out[0]
+	elemFootprint := valFootprint(elem)
 
 	v.emit(func(ctx context.Context, gcc *gocallContext, _ uint32) (Val, error) {
 		ptr := uint32(gcc.registers[ptrSlot])
 		n := uint32(gcc.registers[lenSlot])
-		if err := checkListLen(n, elemSize); err != nil {
+		if err := checkLiftedList(gcc, ptr, n, elemSize, elemAlign, elemFootprint); err != nil {
 			return nil, err
-		}
-		if n > 0 && elemAlign > 1 {
-			if err := checkAlignment(ptr, elemAlign); err != nil {
-				return nil, err
-			}
 		}
 
 		out := make([]Val, n)
@@ -198,7 +196,7 @@ func (v *flatToValVisitor) VisitRecord(fields []RecordField) {
 			}
 			recFields[i] = Field{Name: fieldNames[i], Val: fv}
 		}
-		return NewValRecord(recFields...), nil
+		return newValRecordFromSlice(recFields), nil
 	})
 }
 
@@ -225,7 +223,7 @@ func (v *flatToValVisitor) VisitTuple(types []Type) {
 			}
 			recFields[i] = Field{Name: fieldNames[i], Val: fv}
 		}
-		return NewValRecord(recFields...), nil
+		return newValRecordFromSlice(recFields), nil
 	})
 }
 

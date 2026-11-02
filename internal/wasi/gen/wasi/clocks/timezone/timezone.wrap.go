@@ -5,7 +5,6 @@ package timezone
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -32,30 +31,26 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *timezoneWrapper) Display(ctx context.Context, when wallclock.Datetime) (TimezoneDisplay, error) {
 	var resVal_ TimezoneDisplay
-	var resErr_ error
 	arg0_ := when
 	{
 		callErr_ := w.fnDisplay.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatWallclockDatetime(ctx, caller, callee, w.callerInst, w.fnDisplay.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemTimezoneDisplay(ctx, caller, callee, w.callerInst, w.fnDisplay.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return TimezoneDisplay{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return TimezoneDisplay{}, resErr_
+			return TimezoneDisplay{}, callErr_
 		}
 	}
 	return resVal_, nil
@@ -63,25 +58,22 @@ func (w *timezoneWrapper) Display(ctx context.Context, when wallclock.Datetime) 
 
 func (w *timezoneWrapper) UtcOffset(ctx context.Context, when wallclock.Datetime) (int32, error) {
 	var resVal_ int32
-	var resErr_ error
 	arg0_ := when
 	{
 		callErr_ := w.fnUtcOffset.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatWallclockDatetime(ctx, caller, callee, w.callerInst, w.fnUtcOffset.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = int32(int64(stack[0]))
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return 0, resErr_
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil

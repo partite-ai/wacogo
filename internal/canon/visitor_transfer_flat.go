@@ -133,8 +133,9 @@ func (v *flatTransferVisitor) VisitString() {
 	lenSlot := v.assignSlot()
 	v.emitAlloc(
 		func(tc *transferContext, _ uint32, sink *allocSink) {
+			srcPtr := uint32(tc.registers[ptrSlot])
 			srcCoded := uint32(tc.registers[lenSlot])
-			stringContentSizeStep(tc, srcCoded, sink)
+			stringContentSizeStep(tc, srcPtr, srcCoded, sink)
 		},
 		func(ctx context.Context, tc *transferContext, _, _ uint32, src *allocSource) {
 			srcPtr := uint32(tc.registers[ptrSlot])

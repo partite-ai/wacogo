@@ -30,6 +30,9 @@ type CallContext struct {
 	task    *canon.Task
 	memory  api.Memory
 	realloc ReallocFunc
+
+	// budget accounts ChargeLift calls; nil means unlimited.
+	budget *canon.LiftBudget
 }
 
 // NewCallContext returns a CallContext for the given instance, task,
@@ -52,6 +55,16 @@ func (cc *CallContext) Realloc(ctx context.Context, origPtr, origSize, align, ne
 		return 0, fmt.Errorf("wacogo/core: Realloc unavailable: no realloc in scope")
 	}
 	return cc.realloc(ctx, origPtr, origSize, align, newSize)
+}
+
+// ChargeLift records that lifting a value out of this context's memory is
+// about to allocate n more bytes. Code that lifts lists or strings
+// directly from Memory calls it with the Go memory each one will occupy
+// before allocating for it.
+// It returns an error wrapping ErrLiftLimitExceeded once the call's total
+// exceeds the engine's WithMaxLiftBytes limit.
+func (cc *CallContext) ChargeLift(n uint64) error {
+	return cc.budget.Charge(n)
 }
 
 // Instance returns the *ComponentInstance this context is bound to.

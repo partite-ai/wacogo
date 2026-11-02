@@ -42,8 +42,8 @@ func TestExportedFuncCallRaw_PrimitiveRoundTrip(t *testing.T) {
 
 	var got uint32
 	err = fn.CallRaw(ctx, inst.Core(),
-		func(_, _ *core.CallContext, stack []uint64) { stack[0] = 7; stack[1] = 35 },
-		func(_, _ *core.CallContext, stack []uint64) { got = uint32(stack[0]) },
+		func(_, _ *core.CallContext, stack []uint64) error { stack[0] = 7; stack[1] = 35; return nil },
+		func(_, _ *core.CallContext, stack []uint64) error { got = uint32(stack[0]); return nil },
 	)
 	if err != nil {
 		t.Fatalf("CallRaw: %v", err)
@@ -76,8 +76,8 @@ func TestExportedFuncCallRaw_TrapPropagated(t *testing.T) {
 	defer inst.Close(ctx)
 
 	err = inst.Core().ExportedFunc("trap").CallRaw(ctx, inst.Core(),
-		func(_, _ *core.CallContext, _ []uint64) {},
-		func(_, _ *core.CallContext, _ []uint64) {},
+		func(_, _ *core.CallContext, _ []uint64) error { return nil },
+		func(_, _ *core.CallContext, _ []uint64) error { return nil },
 	)
 	if err == nil {
 		t.Fatal("expected trap error, got nil")

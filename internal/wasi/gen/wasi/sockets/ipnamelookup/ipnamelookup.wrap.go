@@ -5,7 +5,6 @@ package ipnamelookup
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -34,50 +33,43 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *ipNameLookupWrapper) ResolveAddresses(ctx context.Context, p_network *network.NetworkResourceHandle, name string) (ResultResolveAddressStreamNetworkErrorCode, error) {
 	var resVal_ ResultResolveAddressStreamNetworkErrorCode
-	var resErr_ error
 	arg0_ := p_network
 	arg1_ := name
 	{
 		callErr_ := w.fnResolveAddresses.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				{
 					tr_ := w.fnResolveAddresses.ParamType(0).(wacogo.TypeBorrow).ResourceType
 					callerH_, err_ := network.HandleValueFor(caller, w.callerInst, arg0_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					srcH_, err_ := caller.LookupBorrowable(tr_, callerH_)
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					dstH_, err_ := srcH_.LendTo(callee.TransferTarget(), callee.Task())
 					if err_ != nil {
-						resErr_ = err_
-						return
+						return err_
 					}
 					stack[0] = uint64(dstH_.HandleID())
 				}
 				if err_ := lowerFlatString(ctx, caller, callee, w.callerInst, w.fnResolveAddresses.ParamType(1), stack[1:3], arg1_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemResultResolveAddressStreamNetworkErrorCode(ctx, caller, callee, w.callerInst, w.fnResolveAddresses.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil

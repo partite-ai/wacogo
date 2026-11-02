@@ -263,10 +263,13 @@ func (c *Component) buildFuncExports(
 				})
 			},
 		}
+		// Results of a host function are produced by Go code, not a
+		// guest, so their lift is not bounded.
 		binding := canon.NewCallBinding(
 			core.FuncTypeParamsAsCanon(coreFT),
 			core.FuncTypeResultsAsCanon(coreFT),
 			callee,
+			0,
 		)
 		funcExports[i] = core.NewExportedFunc(
 			fr.exportName,

@@ -11,11 +11,10 @@ import (
 //
 // BatchHelper, when non-nil, points to a per-adapter wasm helper that
 // batches N cabi_realloc calls behind a single Go→wasm crossing. It is
-// instantiated at adapter build time only when the transfer plan contains
-// a step that benefits from batching (e.g. list<string> param transfer)
-// and the side's StringEncoding matches the source's. Runtime code that
-// can take a batched path checks for nil and falls back to per-element
-// realloc when it is missing.
+// instantiated at adapter build time whenever the side's realloc is a
+// wasm export (not a Go allocator). Runtime code that can take a batched
+// path checks for nil and falls back to per-element realloc when it is
+// missing.
 type transferSide struct {
 	Instance       Instance
 	Memory         api.Memory
@@ -39,6 +38,10 @@ type transferContext struct {
 	// build time, not once per call.
 	allocSrc  allocSource
 	allocSink allocSink
+
+	// budget bounds each lift (the params phase, then the results phase);
+	// reset at the start of each phase by runPhasedTransfer.
+	budget LiftBudget
 }
 
 // endTaskOrTrap is the per-call End-of-task hook used as a method-bound
@@ -61,6 +64,9 @@ type gocallContext struct {
 	callee    *transferSide
 	registers []uint64 // core args/results slice
 	Task      Task
+
+	// budget bounds the result lift; reset before each one.
+	budget LiftBudget
 }
 
 // endTask is the per-call End-of-task hook used as a method-bound defer

@@ -102,6 +102,12 @@ func TestGolden(t *testing.T) {
 			packageRoot: "github.com/partite-ai/wacogo/internal/witgen/testdata/genfixtures",
 		},
 		{
+			name:        "Boxedlists",
+			witPath:     "testdata/wit/boxedlists.wit",
+			world:       "example:demo/boxedlists-host",
+			packageRoot: "github.com/partite-ai/wacogo/internal/witgen/testdata/genfixtures",
+		},
+		{
 			name:        "Compounds",
 			witPath:     "testdata/wit/compounds.wit",
 			world:       "example:demo/compounds-host",

@@ -5,7 +5,6 @@ package sumlist
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -29,25 +28,22 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *sumlistWrapper) Sum(ctx context.Context, xs []uint32) (uint32, error) {
 	var resVal_ uint32
-	var resErr_ error
 	arg0_ := xs
 	{
 		callErr_ := w.fnSum.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if err_ := lowerFlatListU32(ctx, caller, callee, w.callerInst, w.fnSum.ParamType(0), stack[0:2], arg0_); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				}
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = uint32(stack[0])
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return 0, resErr_
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil

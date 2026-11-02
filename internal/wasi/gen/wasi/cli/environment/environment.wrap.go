@@ -5,7 +5,6 @@ package environment
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -33,25 +32,22 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *environmentWrapper) GetArguments(ctx context.Context) ([]string, error) {
 	var resVal_ []string
-	var resErr_ error
 	{
 		callErr_ := w.fnGetArguments.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListString(ctx, caller, callee, w.callerInst, w.fnGetArguments.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -59,25 +55,22 @@ func (w *environmentWrapper) GetArguments(ctx context.Context) ([]string, error)
 
 func (w *environmentWrapper) GetEnvironment(ctx context.Context) ([]TupleStringString, error) {
 	var resVal_ []TupleStringString
-	var resErr_ error
 	{
 		callErr_ := w.fnGetEnvironment.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListTupleStringString(ctx, caller, callee, w.callerInst, w.fnGetEnvironment.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -85,25 +78,22 @@ func (w *environmentWrapper) GetEnvironment(ctx context.Context) ([]TupleStringS
 
 func (w *environmentWrapper) InitialCwd(ctx context.Context) (OptionString, error) {
 	var resVal_ OptionString
-	var resErr_ error
 	{
 		callErr_ := w.fnInitialCwd.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemOptionString(ctx, caller, callee, w.callerInst, w.fnInitialCwd.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return OptionString{}, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return OptionString{}, resErr_
+			return OptionString{}, callErr_
 		}
 	}
 	return resVal_, nil

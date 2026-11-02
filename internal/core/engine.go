@@ -21,6 +21,7 @@ type EngineOption func(*engineConfig)
 
 type engineConfig struct {
 	runtimeConfig wazero.RuntimeConfig
+	maxLiftBytes  uint64
 }
 
 // WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
@@ -30,12 +31,29 @@ func WithRuntimeConfig(cfg wazero.RuntimeConfig) EngineOption {
 	return func(c *engineConfig) { c.runtimeConfig = cfg }
 }
 
+// WithMaxLiftBytes bounds how much memory a component can make its
+// receiver allocate in one go: for one call's arguments, or for one
+// call's results, the bytes allocated to hold the lists and strings
+// they contain. A component receiver is charged the bytes allocated in
+// its memory; a Go receiver is charged an estimate of the Go memory the
+// lifted values occupy. A call that exceeds it fails with an error wrapping
+// ErrLiftLimitExceeded, and a component whose results exceed it becomes
+// unusable as though it had trapped. 0, the default, means unlimited.
+func WithMaxLiftBytes(n uint64) EngineOption {
+	return func(c *engineConfig) { c.maxLiftBytes = n }
+}
+
+// ErrLiftLimitExceeded is wrapped by errors reported when a call's
+// arguments or results exceed the limit set by WithMaxLiftBytes.
+var ErrLiftLimitExceeded = canon.ErrLiftLimitExceeded
+
 // Engine owns the wazero runtime and is the entry point for loading components.
 type Engine struct {
-	runtime   wazero.Runtime
-	canonHost *canon.Host
-	features  wasmparser.FeatureSet
-	closed    atomic.Bool
+	runtime      wazero.Runtime
+	canonHost    *canon.Host
+	features     wasmparser.FeatureSet
+	maxLiftBytes uint64
+	closed       atomic.Bool
 
 	// bridges caches compiled instantiate-from-exports bridge modules by
 	// their bytes, which depend only on the component, not the instance.
@@ -55,10 +73,11 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 	}
 	rt := wazero.NewRuntimeWithConfig(ctx, cnf)
 	return &Engine{
-		runtime:   rt,
-		canonHost: canon.NewHost(rt),
-		features:  wasmparser.DefaultFeatures(),
-		bridges:   map[string]wazero.CompiledModule{},
+		runtime:      rt,
+		canonHost:    canon.NewHost(rt, cfg.maxLiftBytes),
+		features:     wasmparser.DefaultFeatures(),
+		maxLiftBytes: cfg.maxLiftBytes,
+		bridges:      map[string]wazero.CompiledModule{},
 	}
 }
 

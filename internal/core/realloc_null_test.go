@@ -58,10 +58,11 @@ func TestReallocNullAcceptedForZeroSize(t *testing.T) {
 	}
 }
 
-func TestReallocNullTrapsForNonZeroSize(t *testing.T) {
+// TestReallocNullAcceptedForNonZeroSize checks address 0 is accepted for
+// any size: the canonical ABI checks only alignment and bounds.
+func TestReallocNullAcceptedForNonZeroSize(t *testing.T) {
 	wat := strings.Replace(reallocComponentWAT("(i32.const 0)"), "(else (i32.const 1024))", "(else (i32.const 0))", 1)
-	err := callStringExport(t, wat, "x")
-	if err == nil || !strings.Contains(err.Error(), "realloc returned null") {
-		t.Fatalf("lowering a non-empty string: err=%v", err)
+	if err := callStringExport(t, wat, "x"); err != nil {
+		t.Fatalf("lowering a non-empty string: %v", err)
 	}
 }

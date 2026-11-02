@@ -8,7 +8,6 @@ package insecure
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/partite-ai/wacogo"
 	"github.com/partite-ai/wacogo/host"
@@ -34,27 +33,24 @@ func WrapInstance(caller *host.ComponentInstance, callee *wacogo.ComponentInstan
 }
 func (w *insecureWrapper) GetInsecureRandomBytes(ctx context.Context, len uint64) ([]uint8, error) {
 	var resVal_ []uint8
-	var resErr_ error
 	arg0_ := len
 	{
 		callErr_ := w.fnGetInsecureRandomBytes.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				stack[0] = arg0_
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				if v_, err_ := liftMemListU8(ctx, caller, callee, w.callerInst, w.fnGetInsecureRandomBytes.ResultType(0), uint32(stack[0])); err_ != nil {
-					resErr_ = err_
-					return
+					return err_
 				} else {
 					resVal_ = v_
 				}
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return nil, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
-		}
-		if resErr_ != nil {
-			return nil, resErr_
+			return nil, callErr_
 		}
 	}
 	return resVal_, nil
@@ -64,14 +60,16 @@ func (w *insecureWrapper) GetInsecureRandomU64(ctx context.Context) (uint64, err
 	var resVal_ uint64
 	{
 		callErr_ := w.fnGetInsecureRandomU64.CallRaw(ctx, w.callerInst,
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
+				return nil
 			},
-			func(caller, callee *host.CallContext, stack []uint64) {
+			func(caller, callee *host.CallContext, stack []uint64) error {
 				resVal_ = stack[0]
+				return nil
 			},
 		)
 		if callErr_ != nil {
-			return 0, fmt.Errorf("wacogo/witgen: CallRaw failed: %w", callErr_)
+			return 0, callErr_
 		}
 	}
 	return resVal_, nil

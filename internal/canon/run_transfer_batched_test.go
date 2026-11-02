@@ -1,7 +1,10 @@
 package canon
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/partite-ai/wacogo/internal/wasm"
@@ -91,7 +94,7 @@ func TestRunPhasedTransfer_BatchedListString(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = srcMod.Close(ctx) })
 
-	helper, err := NewHost(rt).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
@@ -224,7 +227,7 @@ func TestRunPhasedTransfer_GrowsScratchForLargeN(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = srcMod.Close(ctx) })
 
-	helper, err := NewHost(rt).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
@@ -276,5 +279,158 @@ func TestRunPhasedTransfer_GrowsScratchForLargeN(t *testing.T) {
 	gotN := uint32(tc.registers[1])
 	if gotN != n {
 		t.Errorf("dst n = %d, want %d", gotN, n)
+	}
+}
+
+// TestRunPhasedTransfer_BatchedTranscodeExactSizes verifies that batched
+// cross-encoding string transfers reserve exactly the transcoded length:
+// with a bump allocator, each string's destination pointer must directly
+// follow the previous string's bytes.
+func TestRunPhasedTransfer_BatchedTranscodeExactSizes(t *testing.T) {
+	strs := []string{"aé", "\U0001F600", "x中"}
+	pairs := []struct{ src, dst StringEncoding }{
+		{EncUTF8, EncUTF16},
+		{EncUTF16, EncUTF8},
+		{EncUTF8, EncLatin1UTF16},
+		{EncLatin1UTF16, EncUTF8},
+	}
+	for i, p := range pairs {
+		t.Run(fmt.Sprintf("%v->%v", p.src, p.dst), func(t *testing.T) {
+			ctx := context.Background()
+			rt := wazero.NewRuntime(ctx)
+			t.Cleanup(func() { _ = rt.Close(ctx) })
+
+			const bumpStart uint32 = 1024
+			calleeMod := setupBumpCallee(t, rt, fmt.Sprintf("callee_transcode_%d", i), bumpStart)
+			var sb wasm.ModuleBuilder
+			sb.AddMemory(1, 0)
+			sb.AddExportMemory("memory", 0)
+			srcCompiled, err := rt.CompileModule(ctx, sb.Encode())
+			if err != nil {
+				t.Fatalf("compile src: %v", err)
+			}
+			srcMod, err := rt.InstantiateModule(ctx, srcCompiled, wazero.NewModuleConfig().WithName(fmt.Sprintf("src_transcode_%d", i)))
+			if err != nil {
+				t.Fatalf("instantiate src: %v", err)
+			}
+			t.Cleanup(func() { _ = srcMod.Close(ctx) })
+			helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+			if err != nil {
+				t.Fatalf("buildBatchReallocHelper: %v", err)
+			}
+			t.Cleanup(func() { _ = helper.close(ctx) })
+
+			srcMem := srcMod.Memory()
+			for j, s := range strs {
+				b, coded := encodeString(s, p.src)
+				ptr := uint32(100 * (j + 1))
+				srcMem.WriteUint32Le(uint32(j)*8, ptr)
+				srcMem.WriteUint32Le(uint32(j)*8+4, coded)
+				srcMem.Write(ptr, b)
+			}
+
+			v := &flatTransferVisitor{}
+			v.VisitList(testStringType{})
+			tc := &transferContext{
+				caller: &transferSide{Instance: &testInstance{name: "caller"}, Memory: srcMem, StringEncoding: p.src},
+				callee: &transferSide{
+					Instance:       &testInstance{name: "callee"},
+					Memory:         calleeMod.Memory(),
+					Realloc:        reallocFromExport(calleeMod.ExportedFunction("realloc")),
+					StringEncoding: p.dst,
+					BatchHelper:    helper,
+				},
+				registers: []uint64{0, uint64(len(strs))},
+			}
+			runPhasedTransfer(ctx, tc, v.out, 0, 0)
+
+			dstMem := calleeMod.Memory()
+			listPtr := uint32(tc.registers[0])
+			next := bumpStart + uint32(len(strs))*8
+			for j, s := range strs {
+				gotPtr, _ := dstMem.ReadUint32Le(listPtr + uint32(j)*8)
+				gotCoded, _ := dstMem.ReadUint32Le(listPtr + uint32(j)*8 + 4)
+				if gotPtr != next {
+					t.Errorf("string[%d] dst ptr = %d, want %d", j, gotPtr, next)
+				}
+				if got := decodeString(memShim{dstMem}, gotPtr, gotCoded, p.dst); got != s {
+					t.Errorf("string[%d] = %q, want %q", j, got, s)
+				}
+				next = gotPtr + uint32(stringByteLen(gotCoded, p.dst))
+			}
+		})
+	}
+}
+
+// TestRunPhasedTransfer_SerialTranscode covers cross-encoding string
+// transfers to a receiver without a batch helper: the receiver's realloc
+// is asked for exactly the transcoded size, and a string over the lift
+// budget is refused before realloc is called or anything is transcoded.
+func TestRunPhasedTransfer_SerialTranscode(t *testing.T) {
+	const s = "aé中\U0001F600z"
+	for _, p := range []struct{ src, dst StringEncoding }{
+		{EncUTF16, EncUTF8},
+		{EncUTF8, EncUTF16},
+		{EncUTF8, EncLatin1UTF16},
+		{EncLatin1UTF16, EncUTF8},
+	} {
+		t.Run(fmt.Sprintf("%v->%v", p.src, p.dst), func(t *testing.T) {
+			want, wantCoded := encodeString(s, p.dst)
+			for _, limit := range []uint64{0, uint64(len(want)), uint64(len(want)) - 1} {
+				srcMem := setupMem(t, 1<<16)
+				dstMem := setupMem(t, 1<<16)
+				b, coded := encodeString(s, p.src)
+				srcMem.Write(64, b)
+
+				var requested []uint32
+				v := &flatTransferVisitor{}
+				v.VisitString()
+				tc := &transferContext{
+					caller: &transferSide{Instance: &testInstance{name: "caller"}, Memory: srcMem, StringEncoding: p.src},
+					callee: &transferSide{
+						Instance: &testInstance{name: "callee"},
+						Memory:   dstMem,
+						Realloc: func(_ context.Context, _, _, _, newSize uint32) (uint32, error) {
+							requested = append(requested, newSize)
+							return 1024, nil
+						},
+						StringEncoding: p.dst,
+					},
+					registers: []uint64{64, uint64(coded)},
+					budget:    LiftBudget{limit: limit},
+				}
+				err := func() (err error) {
+					defer func() {
+						if r := recover(); r != nil {
+							err = r.(*Trap).asError()
+						}
+					}()
+					runPhasedTransfer(context.Background(), tc, v.out, 0, 0)
+					return nil
+				}()
+
+				if limit != 0 && limit < uint64(len(want)) {
+					if !errors.Is(err, ErrLiftLimitExceeded) {
+						t.Fatalf("limit %d: err = %v, want ErrLiftLimitExceeded", limit, err)
+					}
+					if len(requested) != 0 {
+						t.Fatalf("limit %d: realloc called with %v after the budget was exceeded", limit, requested)
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatalf("limit %d: %v", limit, err)
+				}
+				if len(requested) != 1 || requested[0] != uint32(len(want)) {
+					t.Fatalf("limit %d: realloc sizes %v, want [%d]", limit, requested, len(want))
+				}
+				if uint32(tc.registers[1]) != wantCoded {
+					t.Fatalf("limit %d: coded = %#x, want %#x", limit, tc.registers[1], wantCoded)
+				}
+				if got, _ := dstMem.Read(1024, uint32(len(want))); !bytes.Equal(got, want) {
+					t.Fatalf("limit %d: bytes = %x, want %x", limit, got, want)
+				}
+			}
+		})
 	}
 }

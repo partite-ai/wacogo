@@ -319,6 +319,83 @@ only `defer`s are the always-fire `Exit` and `Task.End`. (The
 `Call`-level entry on `*CallBinding` recovers any `*Trap` panic into
 an error so it never leaks out.)
 
+### Failures between return and post-return
+
+Post-return runs only after the callee's results have been fully
+lifted; it is how the callee frees its result buffers. If anything
+fails in that window (a result step trap, a lift-limit overrun, a
+caller-side realloc failure, a `CallRaw` read callback error, or
+post-return itself), post-return is skipped and the original callee
+is poisoned as though it had trapped. Both runners and
+`CallBinding.CallRaw` wrap the window in `poisonOnPanic` and poison
+on error returns. `own` handles already lifted out of the results
+before the failure are not dropped: like any `own` nobody drops, a
+guest-defined resource's destructor never runs, and a host-defined
+one's object is released when its instance closes.
+
+### Failures while lowering `CallRaw` arguments
+
+`CallBinding.CallRaw` runs the write callback under `may_leave=false`,
+as the runners do while lowering params. The realloc it hands out
+(`CallBinding.Realloc`) applies `callRealloc`'s checks to the returned
+pointer and poisons the callee on any failure: a trap in its realloc,
+or a null, misaligned or out-of-bounds pointer, is a callee trap.
+
+Any other write error is the Go caller's (a dropped or already
+transferred handle, a nil variant value, and so on) and stops the call
+where it stands, like a trap would. Nothing is rolled back: `own`
+handles already moved into the callee stay there, just as the spec
+leaves resource tables untouched after a trap, and the callee is not
+poisoned because it has not run.
+
+### Lift limits
+
+`WithMaxLiftBytes` bounds each lift: one call's params, or one call's
+results. Each lift path charges what it allocates in the receiver,
+before allocating it. Values in guest memory can alias each other (many
+list entries pointing at the same buffer), so neither total is bounded
+by the source's memory size; every lifted occurrence is charged. The
+accounting lives in `liftBudget` (`lift_budget.go`).
+
+- **Transfer.** The receiver is a component, and the cost is its
+  memory. Every list or string buffer goes through the receiver's
+  realloc, so `allocSink.add` (batched discovery walk) and serial
+  `allocSource.next` charge the requested size. The budget is reset per
+  `runPhasedTransfer` call. Cross-encoding strings are charged their
+  exact transcoded length (`transcodedByteLen`, counted by the discovery
+  walk in batched mode and by the transfer step itself in serial mode)
+  before anything is allocated, and are then transcoded straight into
+  the receiver's buffer (`transcodeInto`), so no Go-side copy of the
+  string is made. Batched `allocSource.next` traps if a transfer step
+  requests a size other than the one discovery reserved.
+- **Gocall.** The receiver is Go, and the cost is Go heap. Canonical
+  sizes understate it badly: a `list<record { a: u8 }>` element is one
+  canonical byte but a `Val` slot, a `*ValRecord` and a one-entry
+  `[]Field` in Go, and each level of record nesting adds another
+  record. `memToVal` / `flatToVal` list steps therefore charge
+  `n * (valSlotSize + valFootprint(elem))` after reading the header and
+  before `make` (`checkLiftedList`, which also bounds-checks the list
+  against memory). `valFootprint` is computed once per list at plan
+  compile time from the `Val` struct sizes, excluding nested list
+  contents and string bytes, which their own steps charge. String steps
+  (`liftString`) charge the UTF-8 length of the Go string, its only
+  allocation, before decoding into it.
+- **Direct memory readers.** `CallContext.ChargeLift` exposes the budget
+  to code that lifts straight from `Memory()`. witgen-generated result
+  lifts charge each list `ln_ * goFootprintExpr(elem)`: a constant
+  expression of `unsafe.Sizeof` the element's Go type plus the case
+  structs it boxes (results and variants are sealed interfaces, so a
+  payload-carrying case is heap-allocated) and the handle objects it
+  creates. Strings charge their byte length.
+
+Host functions (witgen trampolines and `host.Builder` functions) are
+not charged when they read their arguments. The transfer into the host
+component's memory has already charged the canonical bytes, so the
+buffer a trampoline reads is bounded by the limit, and the Go values it
+builds from that buffer by a type-dependent multiple of it (large only
+for deeply nested results and variants). Charging those too would need
+a per-call `CallContext` for host calls, which today share one.
+
 ## Zero-allocation transfer
 
 The component→component path through `runTransferPlan` performs **no

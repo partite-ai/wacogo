@@ -342,12 +342,15 @@ func emitLiftFlat(w *strings.Builder, t Type) {
 	case TypeString:
 		fmt.Fprintf(w, `ptr_ := uint32(stack[0])
 ln_ := uint32(stack[1])
+if err_ := callee.ChargeLift(uint64(ln_)); err_ != nil {
+%s
+}
 bs_, ok_ := callee.Memory().Read(ptr_, ln_)
 if !ok_ {
 %s
 }
 return string(bs_), nil
-`, sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: bad memory read")`, helperName)))
+`, sink.Emit("err_"), sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: bad memory read")`, helperName)))
 	case *TypeList:
 		elemTy := GoTypeOf(v.Elem)
 		elemSize := Size(v.Elem)
@@ -355,6 +358,7 @@ return string(bs_), nil
 		fmt.Fprintf(w, "_ = lstT_\n")
 		fmt.Fprintf(w, "ptr_ := uint32(stack[0])\n")
 		fmt.Fprintf(w, "ln_ := uint32(stack[1])\n")
+		emitListLiftPrecheck(w, "callee", "ptr_", v.Elem, helperName, sink, true)
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
 		if p, ok := v.Elem.(Prim); ok {
 			emitBulkPrimListRead(w, p, "out_", "ptr_", "callee.Memory()", helperName, "elem", sink)
@@ -414,12 +418,15 @@ func emitLiftMem(w *strings.Builder, t Type) {
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "sptr_", "ptr", "callee.Memory()", helperName, "string ptr", sink))
 		fmt.Fprintf(w, "var ln_ uint32\n")
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "ln_", "ptr + 4", "callee.Memory()", helperName, "string len", sink))
-		fmt.Fprintf(w, `bs_, ok_ := callee.Memory().Read(sptr_, ln_)
+		fmt.Fprintf(w, `if err_ := callee.ChargeLift(uint64(ln_)); err_ != nil {
+%s
+}
+bs_, ok_ := callee.Memory().Read(sptr_, ln_)
 if !ok_ {
 %s
 }
 return string(bs_), nil
-`, sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: bad memory read")`, helperName)))
+`, sink.Emit("err_"), sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: bad memory read")`, helperName)))
 	case *TypeList:
 		elemTy := GoTypeOf(v.Elem)
 		elemSize := Size(v.Elem)
@@ -429,6 +436,7 @@ return string(bs_), nil
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "lptr_", "ptr", "callee.Memory()", helperName, "list ptr", sink))
 		fmt.Fprintf(w, "var ln_ uint32\n")
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "ln_", "ptr + 4", "callee.Memory()", helperName, "list len", sink))
+		emitListLiftPrecheck(w, "callee", "lptr_", v.Elem, helperName, sink, true)
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
 		if p, ok := v.Elem.(Prim); ok {
 			emitBulkPrimListRead(w, p, "out_", "lptr_", "callee.Memory()", helperName, "list elem", sink)
@@ -1076,7 +1084,8 @@ func emitBindFile(iface *Interface, sourceFile string) ([]byte, error) {
 	buf.WriteString("\t\"context\"\n")
 	buf.WriteString("\t\"encoding/binary\"\n")
 	buf.WriteString("\t\"fmt\"\n")
-	buf.WriteString("\t\"math\"\n\n")
+	buf.WriteString("\t\"math\"\n")
+	buf.WriteString("\t\"unsafe\"\n\n")
 	buf.WriteString("\t\"github.com/partite-ai/wacogo\"\n")
 	buf.WriteString("\t\"github.com/partite-ai/wacogo/host\"\n")
 	for _, imp := range iface.Imports {
@@ -1200,10 +1209,6 @@ func emitForwarderBody(w *strings.Builder, ir ImportedResource, m ResourceMethod
 	if m.Result != nil {
 		fmt.Fprintf(w, "\tvar resVal_ %s\n", goTypeForSide(m.Result, false))
 	}
-	needsResErr := bodyWritesResErr(m.Params, m.Result)
-	if needsResErr {
-		fmt.Fprint(w, "\tvar resErr_ error\n")
-	}
 	for i, p := range m.Params {
 		paramName := p.GoName
 		if reserved[paramName] {
@@ -1214,7 +1219,7 @@ func emitForwarderBody(w *strings.Builder, ir ImportedResource, m ResourceMethod
 	fmt.Fprint(w, "\t{\n")
 	fmt.Fprintf(w, "\t\tcallErr_ := f.fns.fn%s.CallRaw(ctx, f.caller,\n", m.GoName)
 	// write closure: self + params
-	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) {\n")
+	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) error {\n")
 	fmt.Fprint(w, "\t\t\t\tstack[0] = uint64(f.rh.HandleID())\n")
 	off := 1
 	fnExpr := "f.fns.fn" + m.GoName
@@ -1223,18 +1228,17 @@ func emitForwarderBody(w *strings.Builder, ir ImportedResource, m ResourceMethod
 		emitWrapArgWrite(w, p, fmt.Sprintf("arg%d_", i), off, "\t\t\t\t", "f.caller", fnExpr, 1+i)
 		off += FlatSlots(p.Type)
 	}
+	fmt.Fprint(w, "\t\t\t\treturn nil\n")
 	fmt.Fprint(w, "\t\t\t},\n")
 	// read closure: result lift
-	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) {\n")
+	fmt.Fprint(w, "\t\t\tfunc(caller, callee *host.CallContext, stack []uint64) error {\n")
 	if m.Result != nil {
 		emitWrapResultRead(w, m.Result, "f", "f.caller", fnExpr)
 	}
+	fmt.Fprint(w, "\t\t\t\treturn nil\n")
 	fmt.Fprint(w, "\t\t\t},\n")
 	fmt.Fprint(w, "\t\t)\n")
-	fmt.Fprintf(w, "\t\tif callErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "fmt.Errorf(\"wacogo/witgen: CallRaw failed: %w\", callErr_)"))
-	if needsResErr {
-		fmt.Fprintf(w, "\t\tif resErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "resErr_"))
-	}
+	fmt.Fprintf(w, "\t\tif callErr_ != nil { %s }\n", returnWithErrExpr(m.Result, "callErr_"))
 	fmt.Fprint(w, "\t}\n")
 	if m.Result == nil {
 		fmt.Fprint(w, "\treturn nil\n")
@@ -1270,6 +1274,7 @@ return string(bs_), nil
 		fmt.Fprintf(w, "_ = lstT_\n")
 		fmt.Fprintf(w, "ptr_ := uint32(stack[0])\n")
 		fmt.Fprintf(w, "ln_ := uint32(stack[1])\n")
+		emitListLiftPrecheck(w, "cc", "ptr_", v.Elem, helperName, sink, false)
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
 		if p, ok := v.Elem.(Prim); ok {
 			emitBulkPrimListRead(w, p, "out_", "ptr_", "cc.Memory()", helperName, "elem", sink)
@@ -1346,6 +1351,7 @@ return string(bs_), nil
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "lptr_", "ptr", "cc.Memory()", helperName, "list ptr", sink))
 		fmt.Fprintf(w, "var ln_ uint32\n")
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "ln_", "ptr + 4", "cc.Memory()", helperName, "list len", sink))
+		emitListLiftPrecheck(w, "cc", "lptr_", v.Elem, helperName, sink, false)
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
 		if p, ok := v.Elem.(Prim); ok {
 			emitBulkPrimListRead(w, p, "out_", "lptr_", "cc.Memory()", helperName, "list elem", sink)
@@ -2847,6 +2853,113 @@ func emitBulkPrimView(w *strings.Builder, size int, baseVar, memExpr, helperName
 	fmt.Fprintf(w, "if n_ > math.MaxUint32 {\n%s\n}\n", sink.Emit(errExpr))
 	fmt.Fprintf(w, "buf_, ok_ := %s.Read(%s, uint32(n_))\n", memExpr, baseVar)
 	fmt.Fprintf(w, "if !ok_ {\n%s\n}\n", sink.Emit(errExpr))
+}
+
+// emitListLiftPrecheck emits the checks that must precede allocating the
+// Go slice for a lifted list of ln_ elements of type elem at ptrVar: the
+// list's bytes must lie within ccExpr's memory, and (when charge is set)
+// the Go bytes the lift allocates for the elements are charged against
+// the call's lift budget. Without them a hostile length would size the
+// allocation directly.
+func emitListLiftPrecheck(w *strings.Builder, ccExpr, ptrVar string, elem Type, helperName string, sink errSink, charge bool) {
+	fmt.Fprintf(w, "lb_ := uint64(ln_) * %d\n", Size(elem))
+	fmt.Fprintf(w, "if uint64(%s)+lb_ > uint64(%s.Memory().Size()) {\n%s\n}\n", ptrVar, ccExpr,
+		sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: list out of bounds")`, helperName)))
+	if charge {
+		fmt.Fprintf(w, "if err_ := %s.ChargeLift(uint64(ln_) * uint64(%s)); err_ != nil {\n%s\n}\n",
+			ccExpr, goFootprintExpr(elem), sink.Emit("err_"))
+	}
+}
+
+// handleStateAllowance approximates, in bytes, what lifting a resource
+// handle allocates beyond its *<R>Handle struct: the handle's state (or
+// a foreign forwarder) and the canon table entry behind it.
+const handleStateAllowance = 64
+
+// goFootprintExpr returns a Go constant expression for the heap bytes one
+// lifted element of type t costs: its in-slice size plus anything it
+// boxes (result and variant cases, resource handles), excluding list
+// contents and string bytes, which their own lifts charge.
+func goFootprintExpr(t Type) string {
+	expr := fmt.Sprintf("unsafe.Sizeof(*new(%s))", GoTypeOf(t))
+	if extra := boxedFootprintExpr(t); extra != "" {
+		expr += " + " + extra
+	}
+	return expr
+}
+
+// boxedFootprintExpr returns a Go constant expression for the heap bytes
+// a value of type t allocates outside its own storage, or "" if it
+// allocates none (beyond list contents and string bytes).
+func boxedFootprintExpr(t Type) string {
+	switch v := t.(type) {
+	case *TypeRecord:
+		var parts []string
+		for _, f := range v.Fields {
+			if e := boxedFootprintExpr(f.Type); e != "" {
+				parts = append(parts, e)
+			}
+		}
+		return strings.Join(parts, " + ")
+	case *TypeTuple:
+		var parts []string
+		for _, f := range v.Fields {
+			if e := boxedFootprintExpr(f); e != "" {
+				parts = append(parts, e)
+			}
+		}
+		return strings.Join(parts, " + ")
+	case *TypeOption:
+		return boxedFootprintExpr(v.Elem)
+	case *TypeResult:
+		var cases []string
+		if v.OK != nil {
+			cases = append(cases, boxedCaseExpr(ResultCaseGoName(v, "Ok"), v.OK))
+		}
+		if v.Err != nil {
+			cases = append(cases, boxedCaseExpr(ResultCaseGoName(v, "Err"), v.Err))
+		}
+		return maxExpr(cases)
+	case *TypeVariant:
+		var cases []string
+		for _, c := range v.Cases {
+			if c.Payload != nil {
+				cases = append(cases, boxedCaseExpr(variantCaseName(v, c), c.Payload))
+			}
+		}
+		return maxExpr(cases)
+	case *TypeOwn:
+		return handleFootprintExpr(v.Resource)
+	case *TypeBorrow:
+		return handleFootprintExpr(v.Resource)
+	case *TypeResource:
+		return handleFootprintExpr(v)
+	}
+	return ""
+}
+
+// boxedCaseExpr is the cost of storing a payload-carrying case struct in
+// its sealed interface: the struct is heap-allocated.
+func boxedCaseExpr(caseStruct string, payload Type) string {
+	expr := fmt.Sprintf("unsafe.Sizeof(%s{})", caseStruct)
+	if extra := boxedFootprintExpr(payload); extra != "" {
+		expr = fmt.Sprintf("(%s + %s)", expr, extra)
+	}
+	return expr
+}
+
+func handleFootprintExpr(rt *TypeResource) string {
+	return fmt.Sprintf("(unsafe.Sizeof(%s{}) + %d)", qualifyType(rt.GoPackageQualifier, rt.WrapName+"Handle"), handleStateAllowance)
+}
+
+func maxExpr(exprs []string) string {
+	switch len(exprs) {
+	case 0:
+		return ""
+	case 1:
+		return exprs[0]
+	}
+	return "max(" + strings.Join(exprs, ", ") + ")"
 }
 
 // emitBulkPrimListRead fills dstVar (already made with ln_ elements)
