@@ -26,10 +26,11 @@ func TestStubAllocator_MatchesWasmRealloc(t *testing.T) {
 
 	rt := core.WazeroRuntime(e)
 	newStub := func() api.Module {
-		hostMod, err := buildPerInstanceHostMod(ctx, rt, comp, &ComponentInstance{})
+		hostMod, hostCode, err := buildPerInstanceHostMod(ctx, rt, comp, &ComponentInstance{})
 		if err != nil {
 			t.Fatal(err)
 		}
+		t.Cleanup(func() { hostCode.Close(ctx) })
 		t.Cleanup(func() { hostMod.Close(ctx) })
 		stub, err := instantiateStubModule(ctx, rt, comp.compiledStub, hostMod)
 		if err != nil {

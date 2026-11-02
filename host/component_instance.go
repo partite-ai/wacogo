@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/partite-ai/wacogo/internal/core"
+	"github.com/tetratelabs/wazero"
 )
 
 // DestroyOrphan, when implemented by a value stored in the extern table,
@@ -43,6 +44,7 @@ type ComponentInstance struct {
 	callListener CallListener
 	cleanups     []func()
 	hostCallCC   *core.CallContext
+	hostCode     wazero.CompiledModule
 }
 
 // Core returns the underlying *wacogo.ComponentInstance, suitable for
@@ -78,6 +80,12 @@ func (h *ComponentInstance) Close(ctx context.Context) error {
 	var errs []error
 	if h.core != nil {
 		if err := h.core.Close(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	// Closing h.core closed the host module, so its compiled code can go.
+	if h.hostCode != nil {
+		if err := h.hostCode.Close(ctx); err != nil {
 			errs = append(errs, err)
 		}
 	}

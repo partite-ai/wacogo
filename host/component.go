@@ -128,13 +128,15 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	}
 
 	// 2. Per-instance host module + stub instantiation; closures capture h.
-	hostMod, err := buildPerInstanceHostMod(ctx, core.WazeroRuntime(c.engine), c, h)
+	hostMod, hostCode, err := buildPerInstanceHostMod(ctx, core.WazeroRuntime(c.engine), c, h)
 	if err != nil {
 		return nil, err
 	}
+	h.hostCode = hostCode
 	stubMod, err := instantiateStubModule(ctx, core.WazeroRuntime(c.engine), c.compiledStub, hostMod)
 	if err != nil {
 		_ = hostMod.Close(ctx)
+		_ = hostCode.Close(ctx)
 		return nil, err
 	}
 
@@ -147,6 +149,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	if err != nil {
 		_ = stubMod.Close(ctx)
 		_ = hostMod.Close(ctx)
+		_ = hostCode.Close(ctx)
 		return nil, err
 	}
 
@@ -209,6 +212,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	if err != nil {
 		_ = stubMod.Close(ctx)
 		_ = hostMod.Close(ctx)
+		_ = hostCode.Close(ctx)
 		return nil, err
 	}
 
