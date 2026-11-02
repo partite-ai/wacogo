@@ -14,6 +14,8 @@ import (
 type loadInstanceInfo struct {
 	importName string
 	component  *Component
+	// imported holds the declared type of an imported instance.
+	imported *wasmparser.ValidatedComponentImport
 }
 
 // loadScope tracks the spec-defined index spaces of the component being loaded.
@@ -361,6 +363,15 @@ func (l *componentLoader) processAliasSection(sec *wasmparser.ComponentAliasSect
 func (l *componentLoader) processAliasInstanceExport(a wasmparser.AliasInstanceExport) {
 	sort := componentExternalKindToSort(a.Kind)
 	if sort == SortType {
+		// A type that the import's declaration fixes to a primitive is
+		// known without the provider. Host components cannot export
+		// primitive types, so the provider would not have it.
+		if imp := l.scope.componentInstances[a.Instance].imported; imp != nil {
+			if prim, ok := imp.ExportedPrimitiveType(a.Name); ok {
+				l.allocType(primitiveResolver{t: primitiveTypeFor(prim)})
+				return
+			}
+		}
 		l.allocType(instanceImportResolver{instanceIdx: a.Instance, exportName: a.Name})
 		return
 	}
@@ -378,6 +389,8 @@ func (l *componentLoader) processAliasInstanceExport(a wasmparser.AliasInstanceE
 		l.scope.subComponents = append(l.scope.subComponents, nil)
 	case SortFunc:
 		l.funcIsImport = append(l.funcIsImport, false)
+	case SortInstance:
+		l.scope.componentInstances = append(l.scope.componentInstances, loadInstanceInfo{})
 	}
 	l.plan = append(l.plan, alias)
 }
@@ -537,6 +550,7 @@ func (l *componentLoader) processImportSection(sec *wasmparser.ValidatedComponen
 			})
 			l.scope.componentInstances = append(l.scope.componentInstances, loadInstanceInfo{
 				importName: item.Import.Name.Name,
+				imported:   &item,
 			})
 		case SortCoreModule:
 			idx := uint32(len(l.scope.compiledModules))

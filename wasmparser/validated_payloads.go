@@ -190,6 +190,24 @@ func (v ValidatedComponentImport) InstanceType() *InstanceType {
 	return nil
 }
 
+// ExportedPrimitiveType reports the primitive type of the type export
+// name when this import is an instance whose type fixes that export to a
+// primitive, such as `type duration = u64`.
+func (v ValidatedComponentImport) ExportedPrimitiveType(name string) (PrimitiveValType, bool) {
+	if v.et.Kind != EntityInstance {
+		return 0, false
+	}
+	ent, ok := v.arena.InstanceTypes[v.et.InstID].Exports[name]
+	if !ok || ent.Kind != EntityType || ent.TypeRef.Kind != AnyTypeDefined {
+		return 0, false
+	}
+	dt := v.arena.DefinedTypes[ent.TypeRef.Index]
+	if dt.Kind != DefinedKindPrimitive {
+		return 0, false
+	}
+	return dt.Primitive, true
+}
+
 // IsInstanceRuntimeEmpty reports whether this import is an instance type
 // that carries no runtime data: every export is a type export or a
 // recursively runtime-empty instance, and the instance introduces no
