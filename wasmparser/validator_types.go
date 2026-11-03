@@ -345,6 +345,9 @@ type ComponentTypeDesc struct {
 	ImportOrder []string // preserves insertion order for deterministic iteration
 	Exports     map[string]ComponentEntityType
 	ExportOrder []string // preserves insertion order for deterministic iteration
+	// DefinedResources lists the resources a component type declaration introduces
+	// directly, through (sub resource) bounds.
+	DefinedResources []ResourceID
 }
 
 // ---------- Type Arena ----------

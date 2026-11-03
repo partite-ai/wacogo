@@ -2,6 +2,8 @@ package wasmparser
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -410,10 +412,11 @@ func (v *Validator) addComponentTypeDecl(cs *ComponentState, ctd *ComponentTypeD
 
 	// Build the component type from subCS
 	compType := ComponentTypeDesc{
-		Imports:     subCS.imports,
-		ImportOrder: subCS.importOrder,
-		Exports:     subCS.exports,
-		ExportOrder: subCS.exportOrder,
+		Imports:          subCS.imports,
+		ImportOrder:      subCS.importOrder,
+		Exports:          subCS.exports,
+		ExportOrder:      subCS.exportOrder,
+		DefinedResources: slices.Collect(maps.Keys(subCS.locallyDefinedSubResources)),
 	}
 	id := v.arena.pushComponentType(compType)
 	if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
@@ -767,7 +770,10 @@ func (v *Validator) addExportCapturing(cs *ComponentState, exp *ComponentExport)
 		if err != nil {
 			return ComponentEntityType{}, err
 		}
-		sc := v.newSubtypeCheckerWithRemapping()
+		// Unlike instantiation, which binds a component's imported resources to
+		// the supplied ones, nothing here is open to binding: an ascription can
+		// only name resources that already exist, so each must match by identity.
+		sc := &SubtypeChecker{aArena: v.arena, bArena: v.arena}
 		if err := sc.isSubtype(et, ascribed); err != nil {
 			return ComponentEntityType{}, fmt.Errorf("ascribed type of export is not compatible: %w", err)
 		}

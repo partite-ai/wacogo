@@ -1002,7 +1002,13 @@ func (sc *SubtypeChecker) remapComponentType(id ComponentTypeID) ComponentTypeID
 	for name, et := range ct.Exports {
 		exports[name] = sc.remapEntityType(et)
 	}
-	return sc.writeArena.pushComponentType(ComponentTypeDesc{Imports: imports, ImportOrder: ct.ImportOrder, Exports: exports, ExportOrder: ct.ExportOrder})
+	definedResources := slices.Clone(ct.DefinedResources)
+	for i, rid := range definedResources {
+		if mapped, ok := sc.resourceMapping[rid]; ok {
+			definedResources[i] = mapped.id
+		}
+	}
+	return sc.writeArena.pushComponentType(ComponentTypeDesc{Imports: imports, ImportOrder: ct.ImportOrder, Exports: exports, ExportOrder: ct.ExportOrder, DefinedResources: definedResources})
 }
 
 func (sc *SubtypeChecker) entityTypeHasResources(et ComponentEntityType) bool {

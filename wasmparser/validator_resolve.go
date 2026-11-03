@@ -1,8 +1,10 @@
 package wasmparser
 
-import "slices"
-
-import "fmt"
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
 
 // walkValType recursively visits all DefinedTypeDesc nodes within
 // an ValTypeDesc. For primitive types, there is nothing to visit. For defined
@@ -733,59 +735,39 @@ func (v *Validator) aliasOuter(cs *ComponentState, a AliasOuter) error {
 	return nil
 }
 
-// checkOuterAliasResourceScope validates that an outer-aliased type doesn't reference
-// resources defined in ancestor components that are not accessible from the child.
-// Only checks across COMPONENT boundaries (not type declaration boundaries).
+// checkOuterAliasResourceScope rejects an outer alias that carries a resource
+// into a component from outside it, which keeps each component an isolated unit
+// that could be extracted from those around it. Aliases that only enter type
+// declarations cross no component boundary.
 func (v *Validator) checkOuterAliasResourceScope(ty ComponentAnyTypeID, count uint32) error {
-	resourceIDs := v.gatherResourceIDs(ty)
-	if len(resourceIDs) == 0 {
+	if count == 0 {
 		return nil
 	}
-
-	// Walk from the current component's position up through ancestors.
-	// We need to check if any COMPONENT (not type declaration) boundary
-	// has resources that we're crossing.
-	stackLen := len(v.components)
-	current := v.components[stackLen-1]
-
-	// Walk up from the position just above current to the target (inclusive)
-	// and check only actual components (not type declarations)
-	for i := stackLen - 2; i >= stackLen-1-int(count); i-- {
-		ancestor := v.components[i]
-		// Only check boundaries where the child is a real component
-		// (crossing from component -> component means resources are scoped)
-		if current.kind == ComponentKindComponent {
-			for rid := range resourceIDs {
-				if ancestor.localResources[rid] {
-					return fmt.Errorf("refers to resources not defined in the current component")
-				}
-				// Resource exports are minted as fresh IDs aliasing the
-				// underlying defining ID; resolve once so an outer-aliased
-				// type that re-exports a locally defined resource is
-				// rejected by its defining ancestor.
-				if defining := v.arena.ResolveResourceAlias(rid); defining != rid && ancestor.localResources[defining] {
-					return fmt.Errorf("refers to resources not defined in the current component")
-				}
-			}
-		}
-		current = ancestor
+	// Type declarations can only nest at the bottom of the stack, so the alias
+	// crosses a component boundary exactly when the state just inside its target
+	// is a component.
+	if v.components[len(v.components)-int(count)].kind != ComponentKindComponent {
+		return nil
 	}
-
+	if len(v.freeResources(ty)) > 0 {
+		return fmt.Errorf("cannot alias outer type which transitively refers to resources not defined in the current component")
+	}
 	return nil
 }
 
-// gatherResourceIDs returns the set of resource IDs referenced by a type.
-func (v *Validator) gatherResourceIDs(ty ComponentAnyTypeID) map[ResourceID]bool {
+// freeResources returns the resources a type refers to without defining them,
+// each as its defining ID.
+func (v *Validator) freeResources(ty ComponentAnyTypeID) map[ResourceID]bool {
 	set := make(map[ResourceID]bool)
 	v.collectResourceIDs(ty, set)
 	return set
 }
 
-// collectResourceIDs collects all resource IDs referenced by a ComponentAnyTypeID.
+// collectResourceIDs collects the free resources of a ComponentAnyTypeID.
 func (v *Validator) collectResourceIDs(ty ComponentAnyTypeID, set map[ResourceID]bool) {
 	switch ty.Kind {
 	case AnyTypeResource:
-		set[ty.ResID] = true
+		set[v.arena.ResolveResourceAlias(ty.ResID)] = true
 	case AnyTypeDefined:
 		v.collectResourceIDsFromDefined(ComponentDefinedTypeID(ty.Index), set)
 	case AnyTypeFunc:
@@ -802,9 +784,9 @@ func (v *Validator) collectResourceIDsFromDefined(id ComponentDefinedTypeID, set
 	v.walkDefinedType(&dt, func(d *DefinedTypeDesc) bool {
 		switch d.Kind {
 		case DefinedKindOwn:
-			set[d.Own] = true
+			set[v.arena.ResolveResourceAlias(d.Own)] = true
 		case DefinedKindBorrow:
-			set[d.Borrow] = true
+			set[v.arena.ResolveResourceAlias(d.Borrow)] = true
 		}
 		return false
 	})
@@ -814,9 +796,9 @@ func (v *Validator) collectResourceIDsFromValType(ivt ValTypeDesc, set map[Resou
 	v.walkValType(ivt, func(dt *DefinedTypeDesc) bool {
 		switch dt.Kind {
 		case DefinedKindOwn:
-			set[dt.Own] = true
+			set[v.arena.ResolveResourceAlias(dt.Own)] = true
 		case DefinedKindBorrow:
-			set[dt.Borrow] = true
+			set[v.arena.ResolveResourceAlias(dt.Borrow)] = true
 		}
 		return false
 	})
@@ -833,19 +815,48 @@ func (v *Validator) collectResourceIDsFromFunc(id ComponentFuncTypeID, set map[R
 }
 
 func (v *Validator) collectResourceIDsFromInstance(id ComponentInstanceTypeID, set map[ResourceID]bool) {
-	it := v.arena.InstanceTypes[id]
-	for _, et := range it.Exports {
-		v.collectResourceIDsFromEntity(et, set)
+	free := make(map[ResourceID]bool)
+	for _, et := range v.arena.InstanceTypes[id].Exports {
+		v.collectResourceIDsFromEntity(et, free)
 	}
+	v.removeInstanceResources(id, free)
+	maps.Copy(set, free)
 }
 
 func (v *Validator) collectResourceIDsFromComponent(id ComponentTypeID, set map[ResourceID]bool) {
 	ct := v.arena.ComponentTypes[id]
-	for _, et := range ct.Imports {
-		v.collectResourceIDsFromEntity(et, set)
+	free := make(map[ResourceID]bool)
+	for _, entities := range []map[string]ComponentEntityType{ct.Imports, ct.Exports} {
+		for _, et := range entities {
+			v.collectResourceIDsFromEntity(et, free)
+		}
 	}
-	for _, et := range ct.Exports {
-		v.collectResourceIDsFromEntity(et, set)
+	for _, rid := range ct.DefinedResources {
+		delete(free, rid)
+	}
+	// A resource an imported or exported instance defines can be aliased out of
+	// it and used by the rest of the component type.
+	for _, entities := range []map[string]ComponentEntityType{ct.Imports, ct.Exports} {
+		for _, et := range entities {
+			if et.Kind == EntityInstance {
+				v.removeInstanceResources(et.InstID, free)
+			}
+		}
+	}
+	maps.Copy(set, free)
+}
+
+// removeInstanceResources removes from set the resources an instance type
+// defines, including through nested instances.
+func (v *Validator) removeInstanceResources(id ComponentInstanceTypeID, set map[ResourceID]bool) {
+	it := v.arena.InstanceTypes[id]
+	for _, res := range it.DefinedResources {
+		delete(set, res.ID)
+	}
+	for _, et := range it.Exports {
+		if et.Kind == EntityInstance {
+			v.removeInstanceResources(et.InstID, set)
+		}
 	}
 }
 
