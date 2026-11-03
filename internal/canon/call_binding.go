@@ -140,6 +140,9 @@ func (cb *CallBinding) CallRaw(
 // propagating; error returns are poisoned by the caller.
 func (cb *CallBinding) readResultAndPostReturn(ctx context.Context, stack []uint64, readResult func(stack []uint64, budget *LiftBudget) error) error {
 	defer poisonOnPanic(cb.callee.Instance)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// The binding is single-threaded per callee, like the Call path that
 	// shares gcc, so its budget can be reused.
 	cb.gcc.budget.reset()

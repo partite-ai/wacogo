@@ -107,6 +107,9 @@ func liftResultsAndPostReturn(
 	postReturn PostReturnFunc,
 ) ([]Val, error) {
 	defer poisonOnPanic(gcc.callee.Instance)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	gcc.budget.reset()
 
 	// Flat-mode steps read gcc.registers (= stack); mem-mode steps read
