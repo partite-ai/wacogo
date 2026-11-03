@@ -111,6 +111,9 @@ func toGoFlatListCounter(ctx context.Context, cc *host.CallContext, h *host.Comp
 	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListCounter: list out of bounds")
 	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(*CounterHandle))+(unsafe.Sizeof(CounterHandle{})+64))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]*CounterHandle, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		{
@@ -155,6 +158,9 @@ func toGoMemListCounter(ctx context.Context, cc *host.CallContext, h *host.Compo
 	lb_ := uint64(ln_) * 4
 	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListCounter: list out of bounds")
+	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(*CounterHandle))+(unsafe.Sizeof(CounterHandle{})+64))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]*CounterHandle, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -407,6 +413,9 @@ func toGoFlatListU32(ctx context.Context, cc *host.CallContext, h *host.Componen
 	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListU32: list out of bounds")
 	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]uint32, ln_)
 	n_ := uint64(ln_) * 4
 	if n_ > math.MaxUint32 {
@@ -441,6 +450,9 @@ func toGoMemListU32(ctx context.Context, cc *host.CallContext, h *host.Component
 	lb_ := uint64(ln_) * 4
 	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU32: list out of bounds")
+	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]uint32, ln_)
 	n_ := uint64(ln_) * 4

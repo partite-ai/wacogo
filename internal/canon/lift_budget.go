@@ -16,12 +16,16 @@ var ErrLiftLimitExceeded = errors.New("lift size limit exceeded")
 // lift into Go Vals charges each list's and string's estimated Go
 // footprint (see valFootprint). A zero limit disables accounting.
 //
-// Code outside canon receives a *LiftBudget from CallBinding.CallRaw and
-// charges it through Charge.
+// Generated decoders charge through CallContext.ChargeLift: CallBinding.CallRaw
+// supplies the result budget, and host callbacks start an argument budget.
 type LiftBudget struct {
 	limit uint64
 	used  uint64
 }
+
+// NewLiftBudget starts an independent lift with the given byte limit.
+// A zero limit disables accounting.
+func NewLiftBudget(limit uint64) LiftBudget { return LiftBudget{limit: limit} }
 
 // reset starts a new lift.
 func (b *LiftBudget) reset() { b.used = 0 }

@@ -33,6 +33,10 @@ type CallContext struct {
 
 	// budget accounts ChargeLift calls; nil means unlimited.
 	budget *canon.LiftBudget
+
+	// hostBudget is reused by serial host calls that decode their arguments
+	// directly into Go values, independently of canonical memory transfers.
+	hostBudget canon.LiftBudget
 }
 
 // NewCallContext returns a CallContext for the given instance, task,
@@ -65,6 +69,13 @@ func (cc *CallContext) Realloc(ctx context.Context, origPtr, origSize, align, ne
 // exceeds the engine's WithMaxLiftBytes limit.
 func (cc *CallContext) ChargeLift(n uint64) error {
 	return cc.budget.Charge(n)
+}
+
+// ResetLiftBudget starts argument decoding for a host function call. The host
+// instance's entry gate prevents overlapping calls on this reusable context.
+func (cc *CallContext) ResetLiftBudget() {
+	cc.hostBudget = canon.NewLiftBudget(cc.inst.engine.maxLiftBytes)
+	cc.budget = &cc.hostBudget
 }
 
 // Instance returns the *ComponentInstance this context is bound to.

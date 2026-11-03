@@ -44,7 +44,7 @@ func runTransferPlan(
 	// phase.
 	calleeInst := tc.callee.Instance
 	if err := calleeInst.Enter(ctx); err != nil {
-		panic(&Trap{msg: err.Error()})
+		panic(&Trap{msg: err.Error(), err: err})
 	}
 	defer calleeInst.Exit(ctx)
 
@@ -86,7 +86,7 @@ func runTransferPlan(
 			mustTransfer(checkAlignment(callerParamPtr, plan.paramMaxAlign))
 			calleePtr, err := callRealloc(ctx, tc.callee.Realloc, tc.callee.Memory, 0, 0, plan.paramMaxAlign, plan.paramMemSize)
 			if err != nil {
-				panic(&Trap{msg: err.Error()})
+				panic(&Trap{msg: err.Error(), err: err})
 			}
 			paramSrcBase = callerParamPtr
 			paramDstBase = calleePtr
@@ -110,7 +110,7 @@ func runTransferPlan(
 	// the trap reason.
 	if cerr := calleeFn.CallWithStack(ctx, calleeStack); cerr != nil {
 		tc.callee.Instance.Poison(cerr)
-		panic(&Trap{msg: cerr.Error()})
+		panic(&Trap{msg: cerr.Error(), err: cerr})
 	}
 
 	// 6. Swap sides before result steps.
@@ -186,7 +186,7 @@ func runTransferPlan(
 		tc.caller.Instance.RestoreLeave(prev)
 		if err != nil {
 			calleeInst.Poison(err)
-			panic(&Trap{msg: err.Error()})
+			panic(&Trap{msg: err.Error(), err: err})
 		}
 	}
 
@@ -236,7 +236,7 @@ func runPhasedTransfer(ctx context.Context, tc *transferContext, steps []transfe
 		}
 		if tc.allocSink.n > 0 {
 			if err := helper.invoke(ctx, tc.allocSink.n); err != nil {
-				panic(&Trap{msg: err.Error()})
+				panic(&Trap{msg: err.Error(), err: err})
 			}
 		}
 		tc.allocSrc.helper = helper

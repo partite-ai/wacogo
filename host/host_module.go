@@ -37,6 +37,7 @@ func buildPerInstanceHostMod(
 		resultTypes := valueTypesFromCoreBytes(fr.flatResults)
 		fn := api.GoModuleFunc(func(ctx context.Context, mod api.Module, stack []uint64) {
 			instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
+				h.hostCallCC.ResetLiftBudget()
 				return fr.userFn(ctx, h.hostCallCC, h, stack)
 			})
 		})

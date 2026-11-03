@@ -69,6 +69,9 @@ func toGoFlatString(ctx context.Context, cc *host.CallContext, h *host.Component
 	_ = ty
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	if err_ := cc.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
+	}
 	bs_, ok_ := cc.Memory().Read(ptr_, ln_)
 	if !ok_ {
 		return "", fmt.Errorf("wacogo/witgen: toGoFlatString: bad memory read")
@@ -89,6 +92,9 @@ func toGoMemString(ctx context.Context, cc *host.CallContext, h *host.ComponentI
 		return "", fmt.Errorf("wacogo/witgen: toGoMemString: string len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	if err_ := cc.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
 	}
 	bs_, ok_ := cc.Memory().Read(sptr_, ln_)
 	if !ok_ {

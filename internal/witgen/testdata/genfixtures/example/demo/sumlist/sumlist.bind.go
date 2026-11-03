@@ -77,6 +77,9 @@ func toGoFlatListU32(ctx context.Context, cc *host.CallContext, h *host.Componen
 	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListU32: list out of bounds")
 	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]uint32, ln_)
 	n_ := uint64(ln_) * 4
 	if n_ > math.MaxUint32 {
@@ -111,6 +114,9 @@ func toGoMemListU32(ctx context.Context, cc *host.CallContext, h *host.Component
 	lb_ := uint64(ln_) * 4
 	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListU32: list out of bounds")
+	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(uint32)))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]uint32, ln_)
 	n_ := uint64(ln_) * 4
