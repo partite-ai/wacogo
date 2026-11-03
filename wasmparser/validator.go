@@ -52,6 +52,7 @@ type Validator struct {
 	// when building a Validated*SectionPayload wrapper.
 	lastImportEntries []ComponentEntityType
 	lastExportEntries []ComponentEntityType
+	lastAliasEntries  []ComponentEntityType
 }
 
 // NewValidator creates a new Validator with the given feature set.

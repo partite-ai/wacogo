@@ -207,6 +207,12 @@ func (v ValidatedComponentImport) IsInstanceRuntimeEmpty() bool {
 	return isInstanceTypeRuntimeEmpty(v.arena, v.et.InstID)
 }
 
+// EntityType returns the type the validator resolved for this import, along
+// with the arena its IDs index into.
+func (v ValidatedComponentImport) EntityType() (ComponentEntityType, *TypeArena) {
+	return v.et, v.arena
+}
+
 func isInstanceTypeRuntimeEmpty(arena *TypeArena, instID ComponentInstanceTypeID) bool {
 	it := arena.InstanceTypes[instID]
 	if len(it.DefinedResources) > 0 {
@@ -225,4 +231,69 @@ func isInstanceTypeRuntimeEmpty(arena *TypeArena, instID ComponentInstanceTypeID
 		}
 	}
 	return true
+}
+
+// ValidatedComponentAliasSectionPayload is the alias-side mirror of
+// ValidatedComponentImportSectionPayload.
+type ValidatedComponentAliasSectionPayload struct {
+	raw     *ComponentAliasSectionPayload
+	entries []ComponentEntityType
+	arena   *TypeArena
+}
+
+func (*ValidatedComponentAliasSectionPayload) payload() {}
+
+// Raw returns the underlying raw payload.
+func (p *ValidatedComponentAliasSectionPayload) Raw() *ComponentAliasSectionPayload {
+	return p.raw
+}
+
+// Items returns an iterator yielding each alias paired with the type the
+// validator resolved for it.
+func (p *ValidatedComponentAliasSectionPayload) Items() iter.Seq2[ValidatedComponentAlias, error] {
+	return func(yield func(ValidatedComponentAlias, error) bool) {
+		i := 0
+		for alias, err := range p.raw.Items() {
+			if err != nil {
+				yield(ValidatedComponentAlias{}, err)
+				return
+			}
+			var et ComponentEntityType
+			if i < len(p.entries) {
+				et = p.entries[i]
+			}
+			if !yield(ValidatedComponentAlias{Alias: alias, et: et, arena: p.arena}, nil) {
+				return
+			}
+			i++
+		}
+	}
+}
+
+// ValidatedComponentAlias is an alias paired with the type the validator
+// resolved for it.
+type ValidatedComponentAlias struct {
+	Alias ComponentAlias
+	et    ComponentEntityType
+	arena *TypeArena
+}
+
+// EntityType returns the type the validator resolved for an instance-export
+// alias, along with the arena its IDs index into. ok is false for any other
+// kind of alias.
+func (v ValidatedComponentAlias) EntityType() (et ComponentEntityType, arena *TypeArena, ok bool) {
+	if _, ok := v.Alias.(AliasInstanceExport); !ok {
+		return ComponentEntityType{}, nil, false
+	}
+	return v.et, v.arena, true
+}
+
+// IsInstanceRuntimeEmpty reports whether this alias names an instance that needs
+// nothing at runtime, so that the instance it comes from may omit it. See
+// [ValidatedComponentImport.IsInstanceRuntimeEmpty].
+func (v ValidatedComponentAlias) IsInstanceRuntimeEmpty() bool {
+	if _, ok := v.Alias.(AliasInstanceExport); !ok || v.et.Kind != EntityInstance {
+		return false
+	}
+	return isInstanceTypeRuntimeEmpty(v.arena, v.et.InstID)
 }

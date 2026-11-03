@@ -43,7 +43,11 @@ func (r indexResolver) resolve(rc *resolverCtx) Type { return rc.state.types[r.i
 type listResolver struct{ elem typeResolver }
 
 func (r listResolver) resolve(rc *resolverCtx) Type {
-	return TypeList{Elem: r.elem.resolve(rc)}
+	elem := r.elem.resolve(rc)
+	if elem == nil {
+		return nil
+	}
+	return TypeList{Elem: elem}
 }
 
 type recordResolverField struct {
@@ -55,7 +59,11 @@ type recordResolver struct{ fields []recordResolverField }
 func (r recordResolver) resolve(rc *resolverCtx) Type {
 	out := make([]FieldType, len(r.fields))
 	for i, f := range r.fields {
-		out[i] = FieldType{Name: f.name, Type: f.t.resolve(rc)}
+		t := f.t.resolve(rc)
+		if t == nil {
+			return nil
+		}
+		out[i] = FieldType{Name: f.name, Type: t}
 	}
 	return TypeRecord{Fields: out}
 }
@@ -65,7 +73,11 @@ type tupleResolver struct{ elems []typeResolver }
 func (r tupleResolver) resolve(rc *resolverCtx) Type {
 	out := make([]Type, len(r.elems))
 	for i, ref := range r.elems {
-		out[i] = ref.resolve(rc)
+		t := ref.resolve(rc)
+		if t == nil {
+			return nil
+		}
+		out[i] = t
 	}
 	return TypeTuple{Types: out}
 }
@@ -82,7 +94,11 @@ func (r variantResolver) resolve(rc *resolverCtx) Type {
 	for i, c := range r.cases {
 		out[i].Name = c.name
 		if c.hasPayload {
-			out[i].Payload = c.payload.resolve(rc)
+			t := c.payload.resolve(rc)
+			if t == nil {
+				return nil
+			}
+			out[i].Payload = t
 		}
 	}
 	return TypeVariant{Cases: out}
@@ -95,7 +111,11 @@ func (r enumResolver) resolve(*resolverCtx) Type { return TypeEnum{Cases: r.case
 type optionResolver struct{ inner typeResolver }
 
 func (r optionResolver) resolve(rc *resolverCtx) Type {
-	return TypeOption{Inner: r.inner.resolve(rc)}
+	inner := r.inner.resolve(rc)
+	if inner == nil {
+		return nil
+	}
+	return TypeOption{Inner: inner}
 }
 
 type resultResolver struct {
@@ -107,9 +127,15 @@ func (r resultResolver) resolve(rc *resolverCtx) Type {
 	var ok, err Type
 	if r.hasOk {
 		ok = r.ok.resolve(rc)
+		if ok == nil {
+			return nil
+		}
 	}
 	if r.hasErr {
 		err = r.err.resolve(rc)
+		if err == nil {
+			return nil
+		}
 	}
 	return TypeResult{Ok: ok, Err: err}
 }
@@ -203,8 +229,35 @@ func (r resourceResolver) resolve(rc *resolverCtx) Type {
 	return NewTypeResource(rc.inst, dtorFn)
 }
 
+// ownOfResolver and borrowOfResolver are ownResolver and borrowResolver for a
+// resource that has no slot in the component's type index space, such as one
+// referenced only from within an instance import's declaration.
+type ownOfResolver struct{ resource typeResolver }
+
+func (r ownOfResolver) resolve(rc *resolverCtx) Type {
+	rt, ok := r.resource.resolve(rc).(*TypeResource)
+	if !ok {
+		return nil
+	}
+	return TypeOwn{ResourceType: rt}
+}
+
+type borrowOfResolver struct{ resource typeResolver }
+
+func (r borrowOfResolver) resolve(rc *resolverCtx) Type {
+	rt, ok := r.resource.resolve(rc).(*TypeResource)
+	if !ok {
+		return nil
+	}
+	return TypeBorrow{ResourceType: rt}
+}
+
+// instanceImportResolver reads a type export from a live instance in the
+// component instance index space. path names the nested instances to walk
+// through, from instanceIdx, to reach the one exporting exportName.
 type instanceImportResolver struct {
 	instanceIdx uint32
+	path        []string
 	exportName  string
 }
 
@@ -219,6 +272,12 @@ func (r instanceImportResolver) resolve(rc *resolverCtx) Type {
 		// Instance slot present but not yet populated (import not satisfied).
 		// Return nil so callers can surface an instantiation-time error.
 		return nil
+	}
+	for _, name := range r.path {
+		inst = inst.ExportedInstance(name)
+		if inst == nil {
+			return nil
+		}
 	}
 	return inst.exportedType(r.exportName)
 }

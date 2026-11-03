@@ -156,7 +156,7 @@ func (v *Validator) resourceIsLocal(cs *ComponentState, rid ResourceID) bool {
 	if cs.localResources[rid] {
 		return true
 	}
-	if defining := v.arena.resolveResourceAlias(rid); defining != rid {
+	if defining := v.arena.ResolveResourceAlias(rid); defining != rid {
 		return cs.localResources[defining]
 	}
 	return false

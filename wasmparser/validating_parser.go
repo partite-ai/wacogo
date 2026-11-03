@@ -88,6 +88,14 @@ func (vp *ValidatingParser) Next() (Payload, error) {
 			entries: entries,
 			arena:   vp.validator.arena,
 		}, nil
+	case *ComponentAliasSectionPayload:
+		entries := vp.validator.lastAliasEntries
+		vp.validator.lastAliasEntries = nil
+		return &ValidatedComponentAliasSectionPayload{
+			raw:     p,
+			entries: entries,
+			arena:   vp.validator.arena,
+		}, nil
 	case *ComponentImportSectionPayload:
 		entries := vp.validator.lastImportEntries
 		vp.validator.lastImportEntries = nil

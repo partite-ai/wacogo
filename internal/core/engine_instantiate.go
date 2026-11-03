@@ -502,6 +502,9 @@ func (step *planAlias) execute(_ context.Context, s *instantiationState) error {
 			s.funcs = append(s.funcs, entry.funcVal)
 		case SortInstance:
 			sub := inst.ExportedInstance(src.name)
+			if _, exported := inst.exports[src.name]; !exported && step.runtimeEmpty {
+				sub = &ComponentInstance{}
+			}
 			if sub == nil {
 				return fmt.Errorf("wacogo: alias export: %q not found as instance in component instance %d", src.name, src.instanceIdx)
 			}
@@ -1226,6 +1229,11 @@ func (step *planResolveType) execute(_ context.Context, s *instantiationState) e
 	}
 	typ := r.resolve(&resolverCtx{inst: s.inst, imports: s.imports, state: s})
 	if typ == nil {
+		if ir, ok := r.(importResolver); ok {
+			if _, supplied := s.imports[ir.importName]; !supplied {
+				return fmt.Errorf("wacogo: import %q: was not found", ir.importName)
+			}
+		}
 		return fmt.Errorf("wacogo: planResolveType: nil type at %d (missing import?)", step.typeID)
 	}
 	s.types[step.typeID] = typ

@@ -123,21 +123,8 @@ func (c *ComponentType) ComputeResourceOrigins(suppliedImports map[string]*Insta
 			continue
 		}
 		impInst := c.arena.InstanceTypes[impEnt.InstID]
-		definedSet := make(map[ResourceID]bool, len(impInst.DefinedResources))
-		for _, rid := range impInst.DefinedResources {
-			definedSet[rid] = true
-		}
-		for name, ent := range impInst.Exports {
-			if ent.Kind != EntityType || ent.TypeRef.Kind != AnyTypeResource {
-				continue
-			}
-			rid := ent.TypeRef.ResID
-			if !definedSet[rid] {
-				continue
-			}
-			if _, exists := lenderByRID[rid]; !exists {
-				lenderByRID[rid] = lenderRef{importName: impName, exportName: name}
-			}
+		for _, res := range impInst.DefinedResources {
+			lenderByRID[res.ID] = lenderRef{importName: impName, exportName: res.Export}
 		}
 	}
 	out := make(map[ResourceID]ResourceOriginSpec)
@@ -151,7 +138,7 @@ func (c *ComponentType) ComputeResourceOrigins(suppliedImports map[string]*Insta
 			// Try once through a resource alias — the export may have
 			// been minted as a fresh "created" identity with the
 			// import-bound resource as its defining source.
-			defining := c.arena.resolveResourceAlias(rid)
+			defining := c.arena.ResolveResourceAlias(rid)
 			if defining == rid {
 				continue // locally defined
 			}
@@ -231,7 +218,7 @@ func (c *ComponentType) CheckInstantiation(args map[string]any) error {
 			}
 			sc.aArena = a.source.arena
 			sc.aScope = a
-			if err := sc.isInstanceSubtypeAgainstExports(a.source.id, importType.InstID); err != nil {
+			if err := sc.isInstanceSubtypeAgainstExports(a.source.arena.ComponentTypes[a.source.id].Exports, importType.InstID); err != nil {
 				return fmt.Errorf("import %q: %w", importName, err)
 			}
 		case *FuncType:
@@ -268,50 +255,46 @@ func (c *ComponentType) CheckInstantiation(args map[string]any) error {
 	return nil
 }
 
-// isInstanceSubtypeAgainstExports checks that the component's exports
-// (treated as an instance's exports) are a subtype of the instance type's
-// exports. Used by CheckInstantiation to avoid materializing a synthetic
-// instance type.
+// isInstanceSubtypeAgainstExports checks that the exports of a supplied instance
+// are a subtype of the instance type's exports. Used by CheckInstantiation to
+// avoid materializing a synthetic instance type.
 //
-// Type exports whose identity is statically determined without host
-// cooperation may be absent on the host. Concretely:
-//   - Non-resource type exports (structural types) never require a host
-//     provider — their identity is fully determined by the consumer.
-//   - For each freshly-introduced resource (listed in DefinedResources),
-//     at least one export referencing it must appear on both sides so
-//     the subtype checker can tie the consumer's abstract ResourceID to
-//     the host's concrete one. Further exports referencing the same
-//     resource via `(eq $r)` are aliases and may be omitted by the
-//     host; its identity is already pinned.
-func (sc *SubtypeChecker) isInstanceSubtypeAgainstExports(aCompID ComponentTypeID, bInstID ComponentInstanceTypeID) error {
-	at := sc.aArena.ComponentTypes[aCompID]
+// Unlike isInstanceSubtype, which links components to each other, this links a
+// supplied instance and follows wasmtime in letting it omit whatever needs no
+// runtime definition. The same rules apply at every instance depth:
+//   - Non-resource type exports may be omitted, as the consumer's declaration
+//     fully determines them.
+//   - A nested instance needing nothing at runtime may be omitted.
+//   - Each freshly-introduced resource (listed in DefinedResources) must
+//     appear under the export that defines it, so the subtype checker can
+//     tie the consumer's abstract ResourceID to the supplied concrete one.
+//     Further exports referencing the same resource via `(eq $r)` are
+//     aliases and may be omitted; its identity is already pinned.
+func (sc *SubtypeChecker) isInstanceSubtypeAgainstExports(aExports map[string]ComponentEntityType, bInstID ComponentInstanceTypeID) error {
 	bt := sc.bArena.InstanceTypes[bInstID]
 
-	providedResources := make(map[ResourceID]bool)
 	for name, bExport := range bt.Exports {
-		aExport, ok := at.Exports[name]
+		aExport, ok := aExports[name]
 		if !ok {
-			if bExport.Kind == EntityType {
+			if bExport.Kind == EntityType || (bExport.Kind == EntityInstance && isInstanceTypeRuntimeEmpty(sc.bArena, bExport.InstID)) {
 				continue
 			}
 			return fmt.Errorf("export `%s` was not found", name)
 		}
-		if err := sc.isSubtype(aExport, bExport); err != nil {
-			return fmt.Errorf("type mismatch in instance export `%s`: %w", name, err)
+		var err error
+		if aExport.Kind == EntityInstance && bExport.Kind == EntityInstance {
+			err = sc.isInstanceSubtypeAgainstExports(sc.aArena.InstanceTypes[aExport.InstID].Exports, bExport.InstID)
+		} else {
+			err = sc.isSubtype(aExport, bExport)
 		}
-		if bExport.Kind == EntityType && bExport.TypeRef.Kind == AnyTypeResource {
-			providedResources[bExport.TypeRef.ResID] = true
+		if err != nil {
+			return fmt.Errorf("type mismatch in instance export `%s`: %w", name, err)
 		}
 	}
 
-	for _, rid := range bt.DefinedResources {
-		if providedResources[rid] {
-			continue
-		}
-		for name, bExport := range bt.Exports {
-			if bExport.Kind == EntityType && bExport.TypeRef.Kind == AnyTypeResource && bExport.TypeRef.ResID == rid {
-				return fmt.Errorf("export `%s` was not found", name)
-			}
+	for _, res := range bt.DefinedResources {
+		if _, ok := aExports[res.Export]; !ok {
+			return fmt.Errorf("export `%s` was not found", res.Export)
 		}
 	}
 	return nil

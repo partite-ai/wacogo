@@ -316,8 +316,8 @@ func (sc *SubtypeChecker) checkResourceMatch(aRes, bRes ResourceID) error {
 	// defining resource, fall back to the defining ID. Two imports that both
 	// reference (eq $r) where $r is itself an alias must still compare
 	// equal under this check. Aliases live globally on the arena.
-	aRes = aArena.resolveResourceAlias(aRes)
-	bRes = sc.bArena.resolveResourceAlias(bRes)
+	aRes = aArena.ResolveResourceAlias(aRes)
+	bRes = sc.bArena.ResolveResourceAlias(bRes)
 
 	if sc.resourceMapping != nil {
 		if existing, ok := sc.resourceMapping[bRes]; ok {
@@ -584,7 +584,7 @@ func (sc *SubtypeChecker) mintMapped(srcID ResourceID) ResourceID {
 	}
 	fresh := sc.writeArena.allocResourceID()
 	sc.resourceMapping[srcID] = scopedResID{arena: sc.writeArena, id: fresh}
-	if defining := sc.aArena.resolveResourceAlias(srcID); defining != srcID {
+	if defining := sc.aArena.ResolveResourceAlias(srcID); defining != srcID {
 		definingFresh := sc.mintMapped(defining)
 		if sc.writeArena.resourceAliases == nil {
 			sc.writeArena.resourceAliases = make(map[ResourceID]ResourceID)
@@ -953,14 +953,13 @@ func (sc *SubtypeChecker) remapInstanceType(id ComponentInstanceTypeID) Componen
 	for name, et := range it.Exports {
 		exports[name] = sc.remapEntityType(et)
 	}
-	var definedResources []ResourceID
+	var definedResources []DefinedResource
 	if len(it.DefinedResources) > 0 {
-		definedResources = make([]ResourceID, len(it.DefinedResources))
-		for i, oldRes := range it.DefinedResources {
-			if mapped, ok := sc.resourceMapping[oldRes]; ok {
-				definedResources[i] = mapped.id
-			} else {
-				definedResources[i] = oldRes
+		definedResources = make([]DefinedResource, len(it.DefinedResources))
+		for i, res := range it.DefinedResources {
+			definedResources[i] = res
+			if mapped, ok := sc.resourceMapping[res.ID]; ok {
+				definedResources[i].ID = mapped.id
 			}
 		}
 	}

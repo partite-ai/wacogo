@@ -117,3 +117,16 @@ func TestValidatingParserYieldsValidatedExportSection(t *testing.T) {
 		t.Fatal("did not see export f")
 	}
 }
+
+func TestValidatedComponentAliasEntityType(t *testing.T) {
+	arena := newTypeArena(DefaultFeatures())
+	et := ComponentEntityType{Kind: EntityFunc}
+	if got, gotArena, ok := (ValidatedComponentAlias{Alias: AliasInstanceExport{}, et: et, arena: arena}).EntityType(); !ok || got != et || gotArena != arena {
+		t.Errorf("instance export: got (%+v, %p, %v)", got, gotArena, ok)
+	}
+	for _, alias := range []ComponentAlias{AliasCoreInstanceExport{}, AliasOuter{}} {
+		if _, _, ok := (ValidatedComponentAlias{Alias: alias, arena: arena}).EntityType(); ok {
+			t.Errorf("%T: ok = true, want false", alias)
+		}
+	}
+}

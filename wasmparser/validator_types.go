@@ -329,7 +329,14 @@ type FuncParamDesc struct {
 // InstanceTypeDesc holds the exports of a component instance.
 type InstanceTypeDesc struct {
 	Exports          map[string]ComponentEntityType
-	DefinedResources []ResourceID // resources defined (not just referenced) by this instance type
+	DefinedResources []DefinedResource // resources defined (not just referenced) by this instance type
+}
+
+// DefinedResource is a resource an instance type introduces, with the export
+// that defines it. Any other export of the same resource is an alias of it.
+type DefinedResource struct {
+	ID     ResourceID
+	Export string
 }
 
 // ComponentTypeDesc holds imports and exports of a component type.
@@ -392,13 +399,13 @@ func NewArena(features FeatureSet) *TypeArena {
 	return newTypeArena(features)
 }
 
-// resolveResourceAlias returns the defining ResourceID for rid if rid is the
-// fresh-export-alias half of a recorded pair, else returns rid unchanged.
-// Single hop only — defining IDs never alias further.
-func (a *TypeArena) resolveResourceAlias(rid ResourceID) ResourceID {
+// ResolveResourceAlias returns the resource that rid is an alias of, or rid if
+// it isn't an alias.
+func (a *TypeArena) ResolveResourceAlias(rid ResourceID) ResourceID {
 	if a == nil {
 		return rid
 	}
+	// Single hop: a defining ID never aliases further.
 	if defining, ok := a.resourceAliases[rid]; ok {
 		return defining
 	}

@@ -100,6 +100,10 @@ type planAlias struct {
 	// stored. This is used when a placeholder was reserved at load time.
 	// When < 0, the result is appended to the end of the target index space.
 	targetIndex int
+	// runtimeEmpty is true when the alias names an instance that carries no
+	// runtime data, in which case an empty placeholder is substituted if the
+	// source instance omits it.
+	runtimeEmpty bool
 }
 
 // planLift lifts a core function into a component function.

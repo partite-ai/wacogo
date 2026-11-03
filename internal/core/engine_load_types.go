@@ -147,3 +147,156 @@ func buildComponentTypeResolver(ct wasmparser.ComponentTypeDef) typeResolver {
 	}
 	panic(fmt.Sprintf("wacogo: unhandled ComponentType %T", ct))
 }
+
+// arenaTypeResolver returns a resolver for ref, or false if the type can't be
+// determined from its declaration and must be read from the instance providing it.
+func (l *componentLoader) arenaTypeResolver(arena *wasmparser.TypeArena, ref wasmparser.ComponentAnyTypeID) (typeResolver, bool) {
+	switch ref.Kind {
+	case wasmparser.AnyTypeDefined:
+		return l.arenaDefinedType(arena, wasmparser.ComponentDefinedTypeID(ref.Index))
+	case wasmparser.AnyTypeFunc:
+		ft := arena.FuncTypes[ref.Index]
+		params, ok := l.arenaFuncParams(arena, ft.Params)
+		if !ok {
+			return nil, false
+		}
+		results, ok := l.arenaFuncParams(arena, ft.Results)
+		if !ok {
+			return nil, false
+		}
+		return funcResolver{params: params, results: results}, true
+	case wasmparser.AnyTypeInstance:
+		return instanceTypeResolver{}, true
+	case wasmparser.AnyTypeComponent:
+		return componentTypeResolver{}, true
+	case wasmparser.AnyTypeResource:
+		return l.arenaResource(arena, ref.ResID)
+	}
+	return nil, false
+}
+
+func (l *componentLoader) arenaFuncParams(arena *wasmparser.TypeArena, params []wasmparser.FuncParamDesc) ([]funcResolverParam, bool) {
+	out := make([]funcResolverParam, len(params))
+	for i, p := range params {
+		t, ok := l.arenaValType(arena, p.Type)
+		if !ok {
+			return nil, false
+		}
+		out[i] = funcResolverParam{name: p.Name, t: t}
+	}
+	return out, true
+}
+
+func (l *componentLoader) arenaResource(arena *wasmparser.TypeArena, id wasmparser.ResourceID) (typeResolver, bool) {
+	source, ok := l.resourceSources[arena.ResolveResourceAlias(id)]
+	return source, ok
+}
+
+func (l *componentLoader) arenaValType(arena *wasmparser.TypeArena, vt wasmparser.ValTypeDesc) (typeResolver, bool) {
+	if !vt.IsPrimitive {
+		return l.arenaDefinedType(arena, vt.TypeID)
+	}
+	return arenaPrimitive(vt.Primitive)
+}
+
+// arenaPrimitive differs from primitiveTypeFor in reporting error-context, which
+// has no Type representation, as not determinable from its declaration.
+func arenaPrimitive(p wasmparser.PrimitiveValType) (typeResolver, bool) {
+	if p == wasmparser.PrimErrorContext {
+		return nil, false
+	}
+	return primitiveResolver{t: primitiveTypeFor(p)}, true
+}
+
+func (l *componentLoader) arenaDefinedType(arena *wasmparser.TypeArena, id wasmparser.ComponentDefinedTypeID) (typeResolver, bool) {
+	if r, cached := l.arenaTypes[id]; cached {
+		return r, r != nil
+	}
+	r, ok := l.buildArenaDefinedType(arena, arena.DefinedTypes[id])
+	l.arenaTypes[id] = r
+	return r, ok
+}
+
+// buildArenaDefinedType mirrors buildDefinedTypeResolver for the validator's
+// resolved form of a type. A type with no resources anywhere inside it is built
+// here and held as a constant, which keeps instantiation from rebuilding it.
+func (l *componentLoader) buildArenaDefinedType(arena *wasmparser.TypeArena, dt wasmparser.DefinedTypeDesc) (typeResolver, bool) {
+	known, constant := true, true
+	val := func(vt wasmparser.ValTypeDesc) typeResolver {
+		r, ok := l.arenaValType(arena, vt)
+		if !ok {
+			known = false
+			return nil
+		}
+		if _, isConstant := r.(primitiveResolver); !isConstant {
+			constant = false
+		}
+		return r
+	}
+	var r typeResolver
+	switch dt.Kind {
+	case wasmparser.DefinedKindPrimitive:
+		return arenaPrimitive(dt.Primitive)
+	case wasmparser.DefinedKindRecord:
+		fields := make([]recordResolverField, len(dt.Record.Fields))
+		for i, f := range dt.Record.Fields {
+			fields[i] = recordResolverField{name: f.Name, t: val(f.Type)}
+		}
+		r = recordResolver{fields: fields}
+	case wasmparser.DefinedKindVariant:
+		cases := make([]variantResolverCase, len(dt.Variant.Cases))
+		for i, c := range dt.Variant.Cases {
+			cases[i].name = c.Name
+			if c.Type.Valid {
+				cases[i].payload = val(c.Type.Value)
+				cases[i].hasPayload = true
+			}
+		}
+		r = variantResolver{cases: cases}
+	case wasmparser.DefinedKindList:
+		r = listResolver{elem: val(dt.List)}
+	case wasmparser.DefinedKindTuple:
+		elems := make([]typeResolver, len(dt.Tuple))
+		for i, e := range dt.Tuple {
+			elems[i] = val(e)
+		}
+		r = tupleResolver{elems: elems}
+	case wasmparser.DefinedKindFlags:
+		r = flagsResolver{names: dt.Flags}
+	case wasmparser.DefinedKindEnum:
+		r = enumResolver{cases: dt.Enum}
+	case wasmparser.DefinedKindOption:
+		r = optionResolver{inner: val(dt.Option)}
+	case wasmparser.DefinedKindResult:
+		out := resultResolver{}
+		if dt.ResultOk.Valid {
+			out.ok, out.hasOk = val(dt.ResultOk.Value), true
+		}
+		if dt.ResultErr.Valid {
+			out.err, out.hasErr = val(dt.ResultErr.Value), true
+		}
+		r = out
+	case wasmparser.DefinedKindOwn:
+		resource, ok := l.arenaResource(arena, dt.Own)
+		if !ok {
+			return nil, false
+		}
+		return ownOfResolver{resource: resource}, true
+	case wasmparser.DefinedKindBorrow:
+		resource, ok := l.arenaResource(arena, dt.Borrow)
+		if !ok {
+			return nil, false
+		}
+		return borrowOfResolver{resource: resource}, true
+	default:
+		return nil, false
+	}
+	if !known {
+		return nil, false
+	}
+	if !constant {
+		return r, true
+	}
+	// Every child is a constant, so no resolver context is consulted.
+	return primitiveResolver{t: r.resolve(nil)}, true
+}

@@ -467,11 +467,17 @@ func (v *Validator) addInstanceTypeDecl(cs *ComponentState, itd *InstanceTypeDec
 	// bounds that were allocated (not aliased in) by this instance type. Outer
 	// aliases pull in existing resource IDs; those are NOT defined here and
 	// must not be freshened on import.
-	var definedResources []ResourceID
-	for _, et := range subCS.exports {
+	//
+	// An (eq) export can only refer to a preceding type, so the first export of
+	// a resource in declaration order is the one that defines it.
+	var definedResources []DefinedResource
+	seen := make(map[ResourceID]bool)
+	for _, name := range subCS.exportOrder {
+		et := subCS.exports[name]
 		if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource &&
-			subCS.locallyDefinedSubResources[et.TypeRef.ResID] {
-			definedResources = append(definedResources, et.TypeRef.ResID)
+			subCS.locallyDefinedSubResources[et.TypeRef.ResID] && !seen[et.TypeRef.ResID] {
+			seen[et.TypeRef.ResID] = true
+			definedResources = append(definedResources, DefinedResource{ID: et.TypeRef.ResID, Export: name})
 		}
 	}
 	instType := InstanceTypeDesc{
@@ -548,7 +554,7 @@ func (v *Validator) addImportCapturing(cs *ComponentState, imp *ComponentImport)
 	}
 
 	// Freshen resources for imported instances that define resources
-	et = v.freshenImportResources(et)
+	et = v.freshenInstanceResources(et)
 
 	// Mint a fresh "created" identity for type entities so subsequent
 	// references to the import name resolve to a different ID than the
@@ -614,7 +620,7 @@ func (v *Validator) freshenTypeEntityCreated(cs *ComponentState, et ComponentEnt
 		// Record the alias on the arena, resolving any pre-existing alias
 		// one hop so the recorded defining ID is the original declaration,
 		// never another export alias.
-		v.arena.resourceAliases[fresh] = v.arena.resolveResourceAlias(src)
+		v.arena.resourceAliases[fresh] = v.arena.ResolveResourceAlias(src)
 		// The alias represents the same underlying resource as its source.
 		// Carry forward local-resource flagging so (canon resource.new/rep)
 		// still treats the alias as locally defined when the source was.
@@ -642,51 +648,34 @@ func importTypeRefIsSubResource(tr ComponentTypeRef) bool {
 	return ok
 }
 
-// freshenExportResources freshens resource IDs for exported instances with defined
-// resources in type declarations. Each export of an instance type gets fresh resource
-// IDs so that two exports of the same type produce distinct resources.
-func (v *Validator) freshenExportResources(et ComponentEntityType) ComponentEntityType {
+// freshenInstanceResources gives an instance entity fresh IDs for the resources
+// its type introduces, so that two imports or exports of one instance type have
+// distinct resources.
+func (v *Validator) freshenInstanceResources(et ComponentEntityType) ComponentEntityType {
 	if et.Kind != EntityInstance {
 		return et
 	}
 	instType := v.arena.InstanceTypes[et.InstID]
-	if len(instType.DefinedResources) == 0 {
-		return et
-	}
 
-	// Build remapping from old defined resource IDs to fresh ones
 	sc := v.newSubtypeCheckerWithRemapping()
-	for _, oldRes := range instType.DefinedResources {
-		freshRes := v.arena.allocResourceID()
-		sc.resourceMapping[oldRes] = scopedResID{scope: nil, arena: v.arena, id: freshRes}
+	// Resources and defined types visible in an enclosing scope were aliased in
+	// from outside the instance type. They keep their identity; only what the
+	// type itself introduces, including inside nested instances, is fresh.
+	for _, cs := range v.components {
+		for _, ty := range cs.types {
+			switch ty.Kind {
+			case AnyTypeResource:
+				sc.resourceMapping[ty.ResID] = scopedResID{arena: v.arena, id: ty.ResID}
+			case AnyTypeDefined:
+				id := ComponentDefinedTypeID(ty.Index)
+				sc.definedTypeRemap[id] = id
+			}
+		}
+	}
+	for _, res := range instType.DefinedResources {
+		sc.resourceMapping[res.ID] = scopedResID{arena: v.arena, id: v.arena.allocResourceID()}
 	}
 
-	// Remap the instance type's exports and clear defined resources
-	// (the concrete exported instance has no defined resources — they've been freshened)
-	newInstID := sc.remapInstanceType(et.InstID)
-	return ComponentEntityType{Kind: EntityInstance, InstID: newInstID}
-}
-
-// freshenImportResources freshens resource IDs for imported instances that define
-// resources. Each import of an instance type with defined resources gets fresh
-// resource IDs so that two imports of the same instance type have distinct resources.
-func (v *Validator) freshenImportResources(et ComponentEntityType) ComponentEntityType {
-	if et.Kind != EntityInstance {
-		return et
-	}
-	instType := v.arena.InstanceTypes[et.InstID]
-	if len(instType.DefinedResources) == 0 {
-		return et
-	}
-
-	// Build remapping from old defined resource IDs to fresh ones
-	sc := v.newSubtypeCheckerWithRemapping()
-	for _, oldRes := range instType.DefinedResources {
-		freshRes := v.arena.allocResourceID()
-		sc.resourceMapping[oldRes] = scopedResID{scope: nil, arena: v.arena, id: freshRes}
-	}
-
-	// Remap the instance type's exports
 	newInstID := sc.remapInstanceType(et.InstID)
 	return ComponentEntityType{Kind: EntityInstance, InstID: newInstID}
 }
@@ -853,7 +842,7 @@ func (v *Validator) addExportDecl(cs *ComponentState, exp ComponentExport) error
 
 	// Freshen resources for exported instances with defined resources
 	// (in type declarations, each export of the same instance type gets fresh resource IDs)
-	et = v.freshenExportResources(et)
+	et = v.freshenInstanceResources(et)
 
 	// Note: type-entity exports inside a type declaration intentionally do
 	// NOT get a freshly minted identity. Their AscribedType always carries an

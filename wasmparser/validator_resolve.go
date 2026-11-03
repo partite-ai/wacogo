@@ -128,7 +128,7 @@ func addResourceName(arena *TypeArena, m map[ResourceID][]string, rid ResourceID
 	}
 	addOne(rid)
 	if arena != nil {
-		if defining := arena.resolveResourceAlias(rid); defining != rid {
+		if defining := arena.ResolveResourceAlias(rid); defining != rid {
 			addOne(defining)
 		}
 	}
@@ -200,7 +200,7 @@ func (v *Validator) checkMethodResourceName(cs *ComponentState, resourceName str
 // same underlying resource type, regardless of which specific alias was
 // used in the func signature.
 func (v *Validator) namesForResource(m map[ResourceID][]string, rid ResourceID) ([]string, bool) {
-	defining := v.arena.resolveResourceAlias(rid)
+	defining := v.arena.ResolveResourceAlias(rid)
 	var out []string
 	if names, ok := m[rid]; ok {
 		out = append(out, names...)
@@ -575,6 +575,7 @@ func (v *Validator) validateAliasSection(p *ComponentAliasSectionPayload) error 
 	if cs == nil {
 		return fmt.Errorf("alias section outside component")
 	}
+	v.lastAliasEntries = v.lastAliasEntries[:0]
 	for alias, err := range p.Items() {
 		if err != nil {
 			return err
@@ -582,6 +583,12 @@ func (v *Validator) validateAliasSection(p *ComponentAliasSectionPayload) error 
 		if err := v.addAlias(cs, alias); err != nil {
 			return err
 		}
+		var et ComponentEntityType
+		if a, ok := alias.(AliasInstanceExport); ok {
+			// addAlias has checked that the instance and export exist.
+			et = v.arena.InstanceTypes[cs.instances[a.Instance]].Exports[a.Name]
+		}
+		v.lastAliasEntries = append(v.lastAliasEntries, et)
 	}
 	return nil
 }
@@ -756,7 +763,7 @@ func (v *Validator) checkOuterAliasResourceScope(ty ComponentAnyTypeID, count ui
 				// underlying defining ID; resolve once so an outer-aliased
 				// type that re-exports a locally defined resource is
 				// rejected by its defining ancestor.
-				if defining := v.arena.resolveResourceAlias(rid); defining != rid && ancestor.localResources[defining] {
+				if defining := v.arena.ResolveResourceAlias(rid); defining != rid && ancestor.localResources[defining] {
 					return fmt.Errorf("refers to resources not defined in the current component")
 				}
 			}
