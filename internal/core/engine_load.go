@@ -558,7 +558,7 @@ func (l *componentLoader) processImportSection(sec *wasmparser.ValidatedComponen
 			if tr, ok := item.Import.Type.(wasmparser.TypeRefType); ok {
 				if eq, ok := tr.Bounds.(wasmparser.TypeBoundsEq); ok {
 					l.allocType(indexResolver{idx: eq.Index})
-					return nil
+					continue
 				}
 			}
 

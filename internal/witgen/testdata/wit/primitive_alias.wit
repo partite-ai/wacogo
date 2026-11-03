@@ -1,0 +1,25 @@
+package example:demo;
+
+interface ids {
+    type occurrence-id = string;
+    type count = u32;
+    type copied-id = occurrence-id;
+
+    record entry {
+        id: occurrence-id,
+        n: count,
+    }
+
+    lookup: func(id: occurrence-id) -> option<entry>;
+}
+
+interface consumer {
+    use ids.{occurrence-id as imported-id};
+    type another-id = imported-id;
+    lookup: func(id: another-id);
+}
+
+world idshost {
+    import ids;
+    import consumer;
+}

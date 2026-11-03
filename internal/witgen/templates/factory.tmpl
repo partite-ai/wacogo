@@ -49,6 +49,8 @@ func NewFactory(ctx context.Context, e *wacogo.Engine) (*Factory, error) {
 {{end}}{{range directNominals .Records}}	{{importedNominalAddTypeStmt .}}
 {{end}}{{range directNominals .Variants}}	{{importedNominalAddTypeStmt .}}
 {{end}}{{end}}
+{{range .PrimitiveAliases}}	b_.AddType({{printf "%q" .Name}}, {{.Type.HostTypeExpr}})
+{{end}}
 {{range .Enums}}	typ{{.GoName}}_ := b_.AddType("{{.Name}}", host.Enum{Cases: []string{ {{range $i, $c := .Cases}}{{if $i}}, {{end}}{{printf "%q" $c.Name}}{{end}} }})
 	_ = typ{{.GoName}}_
 {{end}}

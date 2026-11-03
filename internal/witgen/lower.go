@@ -862,6 +862,20 @@ func lowerInterface(wif *wit.Interface, globalTypeDefIR map[*wit.TypeDef]Type) (
 			return true
 		}
 		tdName := *td.Name
+		// Primitive aliases need an export even though their uses lower to
+		// inline primitives. Follow aliases here without changing the nominal
+		// type registration below: imported records and resources have identity.
+		switch td.Root().Kind.(type) {
+		case wit.Bool, wit.U8, wit.U16, wit.U32, wit.U64,
+			wit.S8, wit.S16, wit.S32, wit.S64, wit.F32, wit.F64, wit.Char, wit.String:
+			alias, err := lowerType(td, typeDefIR)
+			if err != nil {
+				typeDefErr = fmt.Errorf("type alias %q: %w", tdName, err)
+				return false
+			}
+			iface.PrimitiveAliases = append(iface.PrimitiveAliases, PrimitiveAlias{Name: tdName, Type: alias})
+			return true
+		}
 		switch k := td.Kind.(type) {
 		case *wit.Enum:
 			// Skip typedefs imported via `use` — they belong to a different

@@ -96,6 +96,66 @@ func TestAddTypeExportsSatisfyConsumerInstanceSubtype(t *testing.T) {
 	}
 }
 
+// TestAddTypePrimitiveAliasExport covers `type id = string`: a component
+// whose imported instance names the alias must find a type export of
+// that name, and the export must carry the primitive.
+func TestAddTypePrimitiveAliasExport(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+
+	b := e.NewHostBuilder("aliased-host")
+	id := b.AddType("id", host.String)
+	b.AddType("ids", host.List{Elem: id})
+
+	hostComp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("host Build: %v", err)
+	}
+	defer hostComp.Close(ctx)
+	hostInst, err := hostComp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("host Instantiate: %v", err)
+	}
+	defer hostInst.Close(ctx)
+
+	for _, tt := range []struct {
+		name    string
+		id      string
+		wantErr bool
+	}{
+		{name: "matching primitive", id: "string"},
+		{name: "mismatched primitive", id: "u32", wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			guestBin := watToBinary(t, `(component
+  (import "host" (instance
+    (type $id `+tt.id+`)
+    (export "id" (type (eq $id)))
+    (type $ids (list $id))
+    (export "ids" (type (eq $ids)))
+  ))
+)`)
+			guestComp, err := e.LoadComponent(ctx, bytes.NewReader(guestBin))
+			if err != nil {
+				t.Fatalf("guest LoadComponent: %v", err)
+			}
+			guestInst, err := guestComp.Instantiate(ctx, wacogo.WithInstanceImport("host", hostInst.Core()))
+			if tt.wantErr {
+				if err == nil {
+					_ = guestInst.Close(ctx)
+					t.Fatal("guest Instantiate accepted a mismatched primitive alias")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("guest Instantiate: %v", err)
+			}
+			defer guestInst.Close(ctx)
+		})
+	}
+}
+
 // TestAddTypeExportsResolveAtRuntime covers the other half of an AddType
 // export: a consumer that aliases the type out of the imported instance
 // must resolve it to a concrete Type, at the root and inside a nested

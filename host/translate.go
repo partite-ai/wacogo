@@ -221,7 +221,7 @@ func validateFuncType(ft *FuncType) error {
 func validateTopLevelTypeExpr(te TypeExpr) error {
 	switch v := te.(type) {
 	case prim:
-		return fmt.Errorf("cannot register primitive via AddType (use primitives inline)")
+		return nil
 	case Record:
 		for _, f := range v.Fields {
 			if err := validateValTypeExpr(f.Type); err != nil {

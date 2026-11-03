@@ -118,7 +118,8 @@ func (b *Builder) AddResourceRef(exportName string) *ResourceTypeRef {
 // Nominal kinds (Record, Variant, Flags, Enum) must be registered
 // with a non-empty exportName and cannot be used inline. Structural
 // kinds (List, Tuple, Option, Result) may be registered or used
-// inline. Primitives and own/borrow handles must not be registered.
+// inline. Primitives may be registered as named aliases or used inline.
+// Own/borrow handles must not be registered.
 // Violations surface as Build errors.
 func (b *Builder) AddType(exportName string, typ TypeExpr) *TypeRef {
 	ref := &TypeRef{declExpr: typ}
