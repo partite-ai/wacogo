@@ -2,6 +2,7 @@ package wasmparser
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 )
 
@@ -40,9 +41,18 @@ type SubtypeChecker struct {
 	// are honored without any per-instance arena allocation.
 	aScope any
 
+	// bScope is aScope for the b-side. It is set only while comparing a
+	// component's imports, where the two sides swap.
+	bScope any
+
 	// resourceMapping maps b-side ResourceIDs to the (scope, arena,
 	// ResourceID) they have been matched against.
 	resourceMapping map[ResourceID]scopedResID
+
+	// aBound and bBound hold what the enclosing component types' own resources
+	// were bound to, by their defining IDs. See isComponentSubtype.
+	aBound map[ResourceID]scopedResID
+	bBound map[ResourceID]scopedResID
 
 	// definedTypeRemap memoizes remapDefinedType so multiple references to the
 	// same source defined type within one remap session resolve to the same
@@ -296,43 +306,50 @@ func (sc *SubtypeChecker) isDefinedTypeSubtypeImpl(a, b ComponentDefinedTypeID) 
 // checks without weakening per-instance freshness for locally defined
 // resources.
 func (sc *SubtypeChecker) checkResourceMatch(aRes, bRes ResourceID) error {
-	aScope := sc.aScope
-	aArena := sc.aArena
-	for hops := 0; hops < 8; hops++ {
-		it, ok := aScope.(*InstanceType)
-		if !ok || it.resourceOrigin == nil {
-			break
-		}
-		spec, ok := it.resourceOrigin[aRes]
-		if !ok || spec.Lender == nil || spec.Lender == it {
-			break
-		}
-		aScope = spec.Lender
-		aRes = spec.LenderResID
-		aArena = spec.Lender.source.arena
-	}
-
-	// One-hop alias resolution: if either side is an export-alias of a
-	// defining resource, fall back to the defining ID. Two imports that both
-	// reference (eq $r) where $r is itself an alias must still compare
-	// equal under this check. Aliases live globally on the arena.
-	aRes = aArena.ResolveResourceAlias(aRes)
-	bRes = sc.bArena.ResolveResourceAlias(bRes)
+	a := resolveResource(sc.aScope, sc.aArena, aRes, sc.aBound)
 
 	if sc.resourceMapping != nil {
+		bRes = sc.bArena.ResolveResourceAlias(bRes)
 		if existing, ok := sc.resourceMapping[bRes]; ok {
-			if existing.scope != aScope || existing.arena != aArena || existing.id != aRes {
+			if existing != a {
 				return sc.resourceMismatchErr()
 			}
 			return nil
 		}
-		sc.resourceMapping[bRes] = scopedResID{scope: aScope, arena: aArena, id: aRes}
+		sc.resourceMapping[bRes] = a
 		return nil
 	}
-	if aRes != bRes || aArena != sc.bArena {
+	if a != resolveResource(sc.bScope, sc.bArena, bRes, sc.bBound) {
 		return sc.resourceMismatchErr()
 	}
 	return nil
+}
+
+// resolveResource returns the identity of a resource: what it was bound to if
+// bound holds it, and otherwise its defining resource, following any re-export
+// recorded on an *InstanceType scope to the instance that defines it.
+func resolveResource(scope any, arena *TypeArena, res ResourceID, bound map[ResourceID]scopedResID) scopedResID {
+	if b, ok := bound[arena.ResolveResourceAlias(res)]; ok {
+		return b
+	}
+	for hops := 0; hops < 8; hops++ {
+		it, ok := scope.(*InstanceType)
+		if !ok || it.resourceOrigin == nil {
+			break
+		}
+		spec, ok := it.resourceOrigin[res]
+		if !ok || spec.Lender == nil || spec.Lender == it {
+			break
+		}
+		scope = spec.Lender
+		res = spec.LenderResID
+		arena = spec.Lender.source.arena
+	}
+	// One-hop alias resolution: if the resource is an export-alias of a defining
+	// resource, fall back to the defining ID. Two imports that both reference
+	// (eq $r) where $r is itself an alias must still compare equal under this
+	// check. Aliases live globally on the arena.
+	return scopedResID{scope: scope, arena: arena, id: arena.ResolveResourceAlias(res)}
 }
 
 // resourceMismatchErr selects the spec-aligned wording for a rejected
@@ -478,32 +495,112 @@ func (sc *SubtypeChecker) isInstanceSubtype(a, b ComponentInstanceTypeID) error 
 	return nil
 }
 
-// isComponentSubtype checks that component type `a` is a subtype of component type `b`.
+// isComponentSubtype checks that component type `a` is a subtype of component type `b`:
+// that an `a` can be used wherever a `b` is expected. It may import less and export
+// more, and each import of `b` must satisfy the import of `a` it is given to.
+//
+// Each type's own resources stand for whatever its user supplies. So the resources
+// `a` imports are bound to the matching resources `b` imports, and those `b` exports
+// to the matching resources `a` exports. All other resources compare by identity.
 func (sc *SubtypeChecker) isComponentSubtype(a, b ComponentTypeID) error {
 	at := sc.aArena.ComponentTypes[a]
 	bt := sc.bArena.ComponentTypes[b]
 
-	for name, bImport := range bt.Imports {
-		aImport, ok := at.Imports[name]
+	inner := &SubtypeChecker{
+		aArena:      sc.aArena,
+		bArena:      sc.bArena,
+		aScope:      sc.aScope,
+		bScope:      sc.bScope,
+		hostBinding: sc.hostBinding,
+		aBound:      maps.Clone(sc.aBound),
+		bBound:      maps.Clone(sc.bBound),
+	}
+	if inner.aBound == nil {
+		inner.aBound = make(map[ResourceID]scopedResID)
+	}
+	if inner.bBound == nil {
+		inner.bBound = make(map[ResourceID]scopedResID)
+	}
+	maps.Copy(inner.bBound, sc.resourceMapping)
+	swapped := &SubtypeChecker{
+		aArena:      inner.bArena,
+		bArena:      inner.aArena,
+		aScope:      inner.bScope,
+		bScope:      inner.aScope,
+		hostBinding: inner.hostBinding,
+		aBound:      inner.bBound,
+		bBound:      inner.aBound,
+	}
+
+	// A resource is named again by each (eq) referring to it, under the same ID, so
+	// each is bound once, where the type introduces it.
+	open := make(map[ResourceID]bool)
+	for _, res := range at.DefinedResources {
+		open[res] = true
+	}
+	for _, name := range at.ImportOrder {
+		bImport, ok := bt.Imports[name]
 		if !ok {
-			return fmt.Errorf("missing expected import `%s`", name)
+			return fmt.Errorf("missing import named `%s`", name)
 		}
-		if err := sc.isSubtype(bImport, aImport); err != nil {
+		swapped.bindOpenResources(bImport, at.Imports[name], open)
+	}
+	for _, name := range at.ImportOrder {
+		if err := swapped.isSubtype(bt.Imports[name], at.Imports[name]); err != nil {
 			return fmt.Errorf("type mismatch in import `%s`: %w", name, err)
 		}
 	}
 
-	for name, bExport := range bt.Exports {
+	clear(open)
+	for _, res := range bt.DefinedResources {
+		open[res] = true
+	}
+	for _, name := range bt.ImportOrder {
+		if et := bt.Imports[name]; et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
+			delete(open, et.TypeRef.ResID)
+		}
+	}
+	for _, name := range bt.ExportOrder {
 		aExport, ok := at.Exports[name]
 		if !ok {
 			return fmt.Errorf("export `%s` was not found", name)
 		}
-		if err := sc.isSubtype(aExport, bExport); err != nil {
+		inner.bindOpenResources(aExport, bt.Exports[name], open)
+	}
+	for _, name := range bt.ExportOrder {
+		if err := inner.isSubtype(at.Exports[name], bt.Exports[name]); err != nil {
 			return fmt.Errorf("type mismatch in export `%s`: %w", name, err)
 		}
 	}
 
 	return nil
+}
+
+// bindOpenResources binds the resources the b-side type introduces to the a-side
+// resources at the same place: a directly named one if it is still in open, which it
+// is then removed from, and those of an instance. Mismatched shapes bind nothing, and
+// are left for the subtype check to report.
+func (sc *SubtypeChecker) bindOpenResources(a, b ComponentEntityType, open map[ResourceID]bool) {
+	switch {
+	case a.Kind == EntityType && b.Kind == EntityType:
+		if a.TypeRef.Kind == AnyTypeResource && b.TypeRef.Kind == AnyTypeResource && open[b.TypeRef.ResID] {
+			delete(open, b.TypeRef.ResID)
+			sc.bBound[b.TypeRef.ResID] = resolveResource(sc.aScope, sc.aArena, a.TypeRef.ResID, sc.aBound)
+		}
+	case a.Kind == EntityInstance && b.Kind == EntityInstance:
+		aExports := sc.aArena.InstanceTypes[a.InstID].Exports
+		bt := sc.bArena.InstanceTypes[b.InstID]
+		for _, res := range bt.DefinedResources {
+			if aExport, ok := aExports[res.Export]; ok && aExport.Kind == EntityType && aExport.TypeRef.Kind == AnyTypeResource {
+				sc.bBound[res.ID] = resolveResource(sc.aScope, sc.aArena, aExport.TypeRef.ResID, sc.aBound)
+			}
+		}
+		for name, bExport := range bt.Exports {
+			if aExport, ok := aExports[name]; ok && aExport.Kind == EntityInstance && bExport.Kind == EntityInstance {
+				sc.bindOpenResources(aExport, bExport, nil)
+			}
+		}
+	}
 }
 
 // isTypeSubtype checks that type ref `a` is a subtype of type ref `b`.

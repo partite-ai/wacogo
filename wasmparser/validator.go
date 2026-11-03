@@ -2,6 +2,8 @@ package wasmparser
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 )
 
 // Types is a sentinel returned by (*Validator).Types to indicate that
@@ -181,6 +183,7 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		ct.ImportOrder = child.importOrder
 		ct.Exports = child.exports
 		ct.ExportOrder = child.exportOrder
+		ct.DefinedResources = slices.Collect(maps.Keys(child.locallyDefinedSubResources))
 		size := v.arena.computeComponentTypeSize(ct)
 		v.arena.ComponentTypeSizes[compTypeID] = size
 		if size > MaxEffectiveTypeSize {
