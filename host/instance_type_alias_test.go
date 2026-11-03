@@ -956,3 +956,207 @@ func TestInstanceTypeAlias_CompoundAliasedIntoImport(t *testing.T) {
 		})
 	}
 }
+
+// A resource re-exported through a nested instance is still the resource of the
+// instance that defines it.
+func TestInstanceTypeAlias_ResourceReexportedThroughNestedInstance(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+
+	addRes := func(b *host.Builder) { b.AddResource("r", nil) }
+	a := buildProvider(t, e, addRes).Core()
+	other := buildProvider(t, e, addRes).Core()
+	nestedA := buildProvider(t, e, func(b *host.Builder) {
+		b.AddNestedInstance("deep").AddResource("r", nil)
+	}).Core()
+
+	const importA = `(import "a" (instance $a (export "r" (type (sub resource)))))
+  (alias export $a "r" (type $r))`
+
+	reexport := func(t *testing.T, wat string, opts ...wacogo.InstantiateOption) *wacogo.ComponentInstance {
+		t.Helper()
+		inst, err := instantiateGuest(t, e, wat, opts...)
+		if err != nil {
+			t.Fatalf("re-exporting instance: %v", err)
+		}
+		return inst
+	}
+
+	throughNested := reexport(t, `(component
+  `+importA+`
+  (instance $n (export "r" (type $r)))
+  (export "n" (instance $n))
+)`, wacogo.WithInstanceImport("a", a))
+
+	throughTwoLevels := reexport(t, `(component
+  `+importA+`
+  (instance $i (export "r" (type $r)))
+  (instance $n (export "i" (instance $i)))
+  (export "n" (instance $n))
+)`, wacogo.WithInstanceImport("a", a))
+
+	throughSubcomponent := reexport(t, `(component
+  `+importA+`
+  (component $s
+    (import "r" (type $r (sub resource)))
+    (instance $i (export "r" (type $r)))
+    (export "n" (instance $i))
+  )
+  (instance $x (instantiate $s (with "r" (type $r))))
+  (alias export $x "n" (instance $n))
+  (export "n" (instance $n))
+)`, wacogo.WithInstanceImport("a", a))
+
+	withFunc := reexport(t, `(component
+  `+importA+`
+  (core module $m (func (export "f") (param i32)))
+  (core instance $mi (instantiate $m))
+  (type $o (own $r))
+  (func $f (param "h" $o) (canon lift (core func $mi "f")))
+  (instance $n (export "r" (type $r)) (export "f" (func $f)))
+  (export "n" (instance $n))
+)`, wacogo.WithInstanceImport("a", a))
+
+	fromNestedImport := reexport(t, `(component
+  (import "a" (instance $a (export "deep" (instance (export "r" (type (sub resource)))))))
+  (alias export $a "deep" (instance $d))
+  (alias export $d "r" (type $r))
+  (instance $n (export "r" (type $r)))
+  (export "n" (instance $n))
+  (export "top" (type $r))
+)`, wacogo.WithInstanceImport("a", nestedA))
+
+	chained := reexport(t, `(component
+  (import "p" (instance $p (export "n" (instance $pn (export "r" (type (sub resource)))))))
+  (alias export $p "n" (instance $pn))
+  (alias export $pn "r" (type $r))
+  (instance $n (export "r" (type $r)))
+  (export "n" (instance $n))
+)`, wacogo.WithInstanceImport("p", throughNested))
+
+	// The nested instance carries the type at runtime, as the same resource.
+	if got, want := throughNested.ExportedInstance("n").ExportedType("r"), a.ExportedType("r"); got == nil || !sameType(got, want) {
+		t.Errorf("nested instance's resource = %v, want %v", got, want)
+	}
+
+	const wantsNestedR = `(component
+  ` + importA + `
+  (import "p" (instance (export "n" (instance
+    (alias outer 2 $r (type $r2))
+    (export "r" (type (eq $r2)))
+  ))))
+)`
+
+	for _, tc := range []struct {
+		name    string
+		guest   string
+		a       *wacogo.ComponentInstance
+		p       *wacogo.ComponentInstance
+		wantErr string
+	}{
+		{name: "same resource", guest: wantsNestedR, a: a, p: throughNested},
+		{name: "different resource", guest: wantsNestedR, a: other, p: throughNested, wantErr: "mismatched resource types"},
+		{name: "through a subcomponent", guest: wantsNestedR, a: a, p: throughSubcomponent},
+		{name: "different resource through a subcomponent", guest: wantsNestedR, a: other, p: throughSubcomponent, wantErr: "mismatched resource types"},
+		{name: "chained through a nested import", guest: wantsNestedR, a: a, p: chained},
+		{name: "different resource chained", guest: wantsNestedR, a: other, p: chained, wantErr: "mismatched resource types"},
+		{
+			name: "two levels deep",
+			guest: `(component
+  ` + importA + `
+  (import "p" (instance (export "n" (instance (export "i" (instance
+    (alias outer 3 $r (type $r2))
+    (export "r" (type (eq $r2)))
+  ))))))
+)`,
+			a: a, p: throughTwoLevels,
+		},
+		{
+			name: "two levels deep, different resource",
+			guest: `(component
+  ` + importA + `
+  (import "p" (instance (export "n" (instance (export "i" (instance
+    (alias outer 3 $r (type $r2))
+    (export "r" (type (eq $r2)))
+  ))))))
+)`,
+			a: other, p: throughTwoLevels, wantErr: "mismatched resource types",
+		},
+		{
+			name: "function over the resource",
+			guest: `(component
+  ` + importA + `
+  (import "p" (instance (export "n" (instance
+    (alias outer 2 $r (type $r2))
+    (export "r" (type (eq $r2)))
+    (type $o (own $r2))
+    (export "f" (func (param "h" $o)))
+  ))))
+)`,
+			a: a, p: withFunc,
+		},
+		{
+			name: "function over the resource, different resource",
+			guest: `(component
+  ` + importA + `
+  (import "p" (instance (export "n" (instance
+    (alias outer 2 $r (type $r2))
+    (export "r" (type (eq $r2)))
+    (type $o (own $r2))
+    (export "f" (func (param "h" $o)))
+  ))))
+)`,
+			a: other, p: withFunc, wantErr: "mismatched resource types",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := instantiateGuest(t, e, tc.guest, wacogo.WithInstanceImport("a", tc.a), wacogo.WithInstanceImport("p", tc.p))
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Instantiate: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Instantiate error = %v, want one containing %q", err, tc.wantErr)
+			}
+		})
+	}
+
+	// The resource comes from inside a nested instance of the import.
+	t.Run("from a nested import", func(t *testing.T) {
+		for _, tc := range []struct {
+			name    string
+			deep    *wacogo.ComponentInstance
+			wantErr string
+		}{
+			{name: "same", deep: nestedA},
+			{name: "different", deep: buildProvider(t, e, func(b *host.Builder) {
+				b.AddNestedInstance("deep").AddResource("r", nil)
+			}).Core(), wantErr: "mismatched resource types"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := instantiateGuest(t, e, `(component
+  (import "a" (instance $a (export "deep" (instance (export "r" (type (sub resource)))))))
+  (alias export $a "deep" (instance $d))
+  (alias export $d "r" (type $r))
+  (import "p" (instance
+    (export "n" (instance (alias outer 2 $r (type $r2)) (export "r" (type (eq $r2)))))
+    (alias outer 1 $r (type $r3))
+    (export "top" (type (eq $r3)))
+  ))
+)`, wacogo.WithInstanceImport("a", tc.deep), wacogo.WithInstanceImport("p", fromNestedImport))
+				if tc.wantErr == "" {
+					if err != nil {
+						t.Fatalf("Instantiate: %v", err)
+					}
+					return
+				}
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("Instantiate error = %v, want one containing %q", err, tc.wantErr)
+				}
+			})
+		}
+	})
+}

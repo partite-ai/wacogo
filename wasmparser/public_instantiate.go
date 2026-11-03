@@ -1,7 +1,9 @@
 package wasmparser
 
-import "fmt"
-
+import (
+	"fmt"
+	"slices"
+)
 
 // ComponentType is an opaque handle to a component's type signature —
 // imports and exports, resolved against the arena that parsed it.
@@ -92,13 +94,12 @@ func (i *InstanceType) SetResourceOrigin(origin map[ResourceID]ResourceOriginSpe
 	i.resourceOrigin = origin
 }
 
-// ComputeResourceOrigins walks this ComponentType's resource exports
-// and, for each export that is structurally an alias of a resource
-// defined by an instance import (rather than locally defined), records
-// the originating import's supplied *InstanceType and the resource's
-// ID in that lender's arena. Pass the result to
-// (*InstanceType).SetResourceOrigin on the instance handle minted from
-// this ComponentType.
+// ComputeResourceOrigins walks this ComponentType's resource exports, including
+// those of nested instances, and, for each export that is structurally an alias
+// of a resource defined by an instance import (rather than locally defined),
+// records the originating import's supplied *InstanceType and the resource's ID
+// in that lender's arena. Pass the result to (*InstanceType).SetResourceOrigin on
+// the instance handle minted from this ComponentType.
 //
 // suppliedImports maps each instance-import name on this ComponentType
 // to the *InstanceType supplied for that import. Names not present in
@@ -110,57 +111,91 @@ func (c *ComponentType) ComputeResourceOrigins(suppliedImports map[string]*Insta
 		return nil
 	}
 	ct := c.arena.ComponentTypes[c.id]
-	// Build a reverse index: ResID → (importName, exportName) if the
-	// resource is defined by some instance import. Resources NOT in
-	// this index are locally defined.
-	type lenderRef struct {
-		importName string
-		exportName string
-	}
-	lenderByRID := make(map[ResourceID]lenderRef)
+	// Build a reverse index of the resources instance imports define. Resources
+	// NOT in this index are locally defined.
+	lenders := make(map[ResourceID]resourceLender)
 	for impName, impEnt := range ct.Imports {
-		if impEnt.Kind != EntityInstance {
-			continue
-		}
-		impInst := c.arena.InstanceTypes[impEnt.InstID]
-		for _, res := range impInst.DefinedResources {
-			lenderByRID[res.ID] = lenderRef{importName: impName, exportName: res.Export}
+		if impEnt.Kind == EntityInstance {
+			c.collectResourceLenders(impEnt.InstID, impName, nil, lenders)
 		}
 	}
 	out := make(map[ResourceID]ResourceOriginSpec)
-	for _, ent := range ct.Exports {
-		if ent.Kind != EntityType || ent.TypeRef.Kind != AnyTypeResource {
-			continue
-		}
-		rid := ent.TypeRef.ResID
-		ref, ok := lenderByRID[rid]
-		if !ok {
-			// Try once through a resource alias — the export may have
-			// been minted as a fresh "created" identity with the
-			// import-bound resource as its defining source.
-			defining := c.arena.ResolveResourceAlias(rid)
-			if defining == rid {
-				continue // locally defined
-			}
-			ref, ok = lenderByRID[defining]
-			if !ok {
-				continue
-			}
-		}
-		lender := suppliedImports[ref.importName]
-		if lender == nil {
-			continue
-		}
-		lenderResID, ok := lender.ExportedResourceID(ref.exportName)
-		if !ok {
-			continue
-		}
-		out[rid] = ResourceOriginSpec{Lender: lender, LenderResID: lenderResID}
-	}
+	c.collectResourceOrigins(ct.Exports, lenders, suppliedImports, out)
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+// resourceLender locates a resource defined by an instance import: exportPath is
+// its path through that instance's exports.
+type resourceLender struct {
+	importName string
+	exportPath []string
+}
+
+func (c *ComponentType) collectResourceLenders(id ComponentInstanceTypeID, importName string, path []string, lenders map[ResourceID]resourceLender) {
+	it := c.arena.InstanceTypes[id]
+	for _, res := range it.DefinedResources {
+		lenders[res.ID] = resourceLender{importName: importName, exportPath: slices.Concat(path, []string{res.Export})}
+	}
+	for name, et := range it.Exports {
+		if et.Kind == EntityInstance {
+			c.collectResourceLenders(et.InstID, importName, slices.Concat(path, []string{name}), lenders)
+		}
+	}
+}
+
+func (c *ComponentType) collectResourceOrigins(exports map[string]ComponentEntityType, lenders map[ResourceID]resourceLender, suppliedImports map[string]*InstanceType, out map[ResourceID]ResourceOriginSpec) {
+	for _, ent := range exports {
+		if ent.Kind == EntityInstance {
+			c.collectResourceOrigins(c.arena.InstanceTypes[ent.InstID].Exports, lenders, suppliedImports, out)
+			continue
+		}
+		if ent.Kind != EntityType || ent.TypeRef.Kind != AnyTypeResource {
+			continue
+		}
+		rid := ent.TypeRef.ResID
+		lender, ok := lenders[rid]
+		if !ok {
+			// The export may have been minted as a fresh "created" identity with
+			// the import-bound resource as its defining source.
+			if lender, ok = lenders[c.arena.ResolveResourceAlias(rid)]; !ok {
+				continue
+			}
+		}
+		supplied := suppliedImports[lender.importName]
+		if supplied == nil {
+			continue
+		}
+		lenderResID, ok := supplied.resourceAt(lender.exportPath)
+		if !ok {
+			continue
+		}
+		out[rid] = ResourceOriginSpec{Lender: supplied, LenderResID: lenderResID}
+	}
+}
+
+// resourceAt returns the ResourceID of the resource at path through this
+// instance's exports.
+func (i *InstanceType) resourceAt(path []string) (ResourceID, bool) {
+	if i == nil || i.source == nil {
+		return 0, false
+	}
+	arena := i.source.arena
+	exports := arena.ComponentTypes[i.source.id].Exports
+	for _, name := range path[:len(path)-1] {
+		ent, ok := exports[name]
+		if !ok || ent.Kind != EntityInstance {
+			return 0, false
+		}
+		exports = arena.InstanceTypes[ent.InstID].Exports
+	}
+	ent, ok := exports[path[len(path)-1]]
+	if !ok || ent.Kind != EntityType || ent.TypeRef.Kind != AnyTypeResource {
+		return 0, false
+	}
+	return ent.TypeRef.ResID, true
 }
 
 // ExportedResourceID returns the ResourceID of the resource type this
@@ -169,15 +204,7 @@ func (c *ComponentType) ComputeResourceOrigins(suppliedImports map[string]*Insta
 // that need to align their own ResIDs with a lender instance's at
 // Instantiate time.
 func (i *InstanceType) ExportedResourceID(name string) (ResourceID, bool) {
-	if i == nil || i.source == nil {
-		return 0, false
-	}
-	ct := i.source.arena.ComponentTypes[i.source.id]
-	ent, ok := ct.Exports[name]
-	if !ok || ent.Kind != EntityType || ent.TypeRef.Kind != AnyTypeResource {
-		return 0, false
-	}
-	return ent.TypeRef.ResID, true
+	return i.resourceAt([]string{name})
 }
 
 // CheckInstantiation verifies that the supplied arguments satisfy the

@@ -997,8 +997,16 @@ func (step *planComponentInstantiateFromExports) execute(_ context.Context, s *i
 				kind:      SortComponent,
 				component: s.subComponents[exp.index],
 			}
+		case SortType:
+			if int(exp.index) >= len(s.types) {
+				return fmt.Errorf("wacogo: component instantiate-from-exports: type %d out of range (have %d)", exp.index, len(s.types))
+			}
+			inst.exports[exp.name] = exportEntry{
+				kind: SortType,
+				typ:  s.types[exp.index],
+			}
 		default:
-			// Other sorts (type, value) — not yet handled.
+			// Value exports aren't yet handled.
 		}
 	}
 	s.componentInstances = append(s.componentInstances, inst)
