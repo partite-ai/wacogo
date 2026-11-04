@@ -119,6 +119,9 @@ func (v *Validator) valTypeDepth(ivt ValTypeDesc) int {
 func (v *Validator) resolveDefinedType(cs *ComponentState, dt ComponentDefinedType) (DefinedTypeDesc, error) {
 	switch t := dt.(type) {
 	case PrimitiveValType:
+		if err := cs.checkPrimitiveEnabled(t); err != nil {
+			return DefinedTypeDesc{}, err
+		}
 		return DefinedTypeDesc{Kind: DefinedKindPrimitive, Primitive: t}, nil
 	case TypeIndexValType:
 		// Type alias - resolve to the underlying defined type

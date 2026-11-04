@@ -516,6 +516,9 @@ func (v *Validator) validateStartSection(p *ComponentStartSectionPayload) error 
 	if cs.kind != ComponentKindComponent {
 		return fmt.Errorf("start not allowed in type declarations")
 	}
+	if err := cs.checkValuesEnabled(); err != nil {
+		return err
+	}
 	if cs.hasStart {
 		return fmt.Errorf("multiple start sections")
 	}

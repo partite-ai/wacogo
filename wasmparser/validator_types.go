@@ -171,6 +171,9 @@ type ValTypeDesc struct {
 func internalValTypeFromParsed(cvt ComponentValType, cs *ComponentState) (ValTypeDesc, error) {
 	switch v := cvt.(type) {
 	case PrimitiveValType:
+		if err := cs.checkPrimitiveEnabled(v); err != nil {
+			return ValTypeDesc{}, err
+		}
 		return ValTypeDesc{IsPrimitive: true, Primitive: v}, nil
 	case TypeIndexValType:
 		idx := uint32(v)

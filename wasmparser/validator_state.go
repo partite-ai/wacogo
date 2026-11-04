@@ -186,6 +186,22 @@ func (cs *ComponentState) getFunc(idx uint32) (ComponentFuncTypeID, error) {
 	return cs.funcs[idx], nil
 }
 
+// checkValuesEnabled rejects a use of component values unless they're enabled.
+func (cs *ComponentState) checkValuesEnabled() error {
+	if !cs.features.Has(FeatureValues) {
+		return fmt.Errorf("support for component model `value`s is not enabled")
+	}
+	return nil
+}
+
+// checkPrimitiveEnabled rejects a primitive whose feature isn't enabled.
+func (cs *ComponentState) checkPrimitiveEnabled(p PrimitiveValType) error {
+	if p == PrimErrorContext && !cs.features.Has(FeatureErrorContext) {
+		return fmt.Errorf("`error-context` requires the component model error-context feature")
+	}
+	return nil
+}
+
 func (cs *ComponentState) getValue(idx uint32) (*valueEntry, error) {
 	if idx >= uint32(len(cs.values)) {
 		return nil, fmt.Errorf("value index out of bounds")
@@ -316,6 +332,9 @@ func (cs *ComponentState) typeRefToEntityType(tr ComponentTypeRef) (ComponentEnt
 		}
 		return ComponentEntityType{Kind: EntityFunc, FuncID: ComponentFuncTypeID(ty.Index)}, nil
 	case TypeRefValue:
+		if err := cs.checkValuesEnabled(); err != nil {
+			return ComponentEntityType{}, err
+		}
 		ivt, err := internalValTypeFromParsed(ref.Type, cs)
 		if err != nil {
 			return ComponentEntityType{}, err

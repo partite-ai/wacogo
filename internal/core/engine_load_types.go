@@ -8,8 +8,8 @@ import (
 
 // primitiveTypeFor maps a wasmparser primitive kind to the corresponding
 // root-package primitive Type singleton. PrimErrorContext has no current
-// root-package representation and triggers a panic — error-context support
-// is out of scope for the initial ABI.
+// root-package representation, so the engine doesn't enable its feature and the
+// validator rejects it before it gets here.
 func primitiveTypeFor(p wasmparser.PrimitiveValType) Type {
 	switch p {
 	case wasmparser.PrimBool:
@@ -196,16 +196,7 @@ func (l *componentLoader) arenaValType(arena *wasmparser.TypeArena, vt wasmparse
 	if !vt.IsPrimitive {
 		return l.arenaDefinedType(arena, vt.TypeID)
 	}
-	return arenaPrimitive(vt.Primitive)
-}
-
-// arenaPrimitive differs from primitiveTypeFor in reporting error-context, which
-// has no Type representation, as not determinable from its declaration.
-func arenaPrimitive(p wasmparser.PrimitiveValType) (typeResolver, bool) {
-	if p == wasmparser.PrimErrorContext {
-		return nil, false
-	}
-	return primitiveResolver{t: primitiveTypeFor(p)}, true
+	return primitiveResolver{t: primitiveTypeFor(vt.Primitive)}, true
 }
 
 func (l *componentLoader) arenaDefinedType(arena *wasmparser.TypeArena, id wasmparser.ComponentDefinedTypeID) (typeResolver, bool) {
@@ -236,7 +227,7 @@ func (l *componentLoader) buildArenaDefinedType(arena *wasmparser.TypeArena, dt 
 	var r typeResolver
 	switch dt.Kind {
 	case wasmparser.DefinedKindPrimitive:
-		return arenaPrimitive(dt.Primitive)
+		return primitiveResolver{t: primitiveTypeFor(dt.Primitive)}, true
 	case wasmparser.DefinedKindRecord:
 		fields := make([]recordResolverField, len(dt.Record.Fields))
 		for i, f := range dt.Record.Fields {
