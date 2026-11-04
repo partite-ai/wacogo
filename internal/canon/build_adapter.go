@@ -176,6 +176,9 @@ type adapterFunc struct {
 }
 
 func (a *adapterFunc) Call(ctx context.Context, mod api.Module, stack []uint64) {
+	if !a.caller.Instance.CanLeave() {
+		trapf("cannot leave component instance")
+	}
 	a.tc.caller = a.callerSide
 	a.tc.callee = a.calleeSide
 	a.tc.registers = stack
