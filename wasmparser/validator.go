@@ -160,6 +160,9 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		return fmt.Errorf("validator: unexpected EndPayload with empty component stack")
 	}
 	child := v.components[len(v.components)-1]
+	if err := v.checkImportsNameNoDefinedResources(child); err != nil {
+		return err
+	}
 	v.components = v.components[:len(v.components)-1]
 	if len(v.components) == 0 {
 		// Top-level component end: materialize its ComponentType.

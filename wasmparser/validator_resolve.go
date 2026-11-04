@@ -762,6 +762,35 @@ func (v *Validator) checkOuterAliasResourceScope(ty ComponentAnyTypeID, count ui
 	return nil
 }
 
+// checkImportsNameNoDefinedResources rejects a component whose imports refer to
+// a resource the component itself defines, which nothing outside it could supply.
+func (v *Validator) checkImportsNameNoDefinedResources(cs *ComponentState) error {
+	free := make(map[ResourceID]bool)
+	for _, et := range cs.imports {
+		v.collectResourceIDsFromEntity(et, free)
+	}
+	for id := range cs.definedResources {
+		if free[id] {
+			return fmt.Errorf("local resource type found in imports")
+		}
+	}
+	return nil
+}
+
+// addDefinedInstanceResources records the resources an instance type defines,
+// including through nested instances, as defined by cs.
+func (v *Validator) addDefinedInstanceResources(cs *ComponentState, id ComponentInstanceTypeID) {
+	it := v.arena.InstanceTypes[id]
+	for _, res := range it.DefinedResources {
+		cs.definedResources[res.ID] = true
+	}
+	for _, et := range it.Exports {
+		if et.Kind == EntityInstance {
+			v.addDefinedInstanceResources(cs, et.InstID)
+		}
+	}
+}
+
 // freeResources returns the resources a type refers to without defining them,
 // each as its defining ID.
 func (v *Validator) freeResources(ty ComponentAnyTypeID) map[ResourceID]bool {

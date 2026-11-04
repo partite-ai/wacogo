@@ -59,6 +59,11 @@ type ComponentState struct {
 	// DefinedResources without including outer-aliased resources.
 	locallyDefinedSubResources map[ResourceID]bool
 
+	// definedResources holds the resources this component itself brings into
+	// existence: those it declares, those a sub-instance gives it, and those a
+	// type declaration exports. Its imports can't name them.
+	definedResources map[ResourceID]bool
+
 	// resourceNames maps resource ID -> all extern names that refer to this
 	// resource in the current context (from imports, exports, or re-exports).
 	// A resource can have multiple names if it is exported/imported under
@@ -106,6 +111,7 @@ func newComponentState(features FeatureSet, arena *TypeArena, kind ComponentKind
 		importResourceNames: make(map[string]string),
 		localResources:             make(map[ResourceID]bool),
 		locallyDefinedSubResources: make(map[ResourceID]bool),
+		definedResources:           make(map[ResourceID]bool),
 		resourceNames:          make(map[ResourceID][]string),
 		exportResourceNamesMap: make(map[ResourceID][]string),
 		importedResourceIDs:    make(map[ResourceID]bool),

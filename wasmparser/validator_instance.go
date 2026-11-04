@@ -88,8 +88,15 @@ func (v *Validator) instantiateComponent(cs *ComponentState, inst Instantiate) e
 	instType := InstanceTypeDesc{
 		Exports: make(map[string]ComponentEntityType),
 	}
+	imported := maps.Clone(sc.resourceMapping)
 	for name, et := range compType.Exports {
 		instType.Exports[name] = sc.remapEntityType(et)
+	}
+	// Whatever the imports didn't bind is new with this instance.
+	for src, fresh := range sc.resourceMapping {
+		if _, ok := imported[src]; !ok {
+			cs.definedResources[fresh.id] = true
+		}
 	}
 
 	id := v.arena.pushInstanceType(instType)

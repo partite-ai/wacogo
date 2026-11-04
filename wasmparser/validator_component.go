@@ -387,6 +387,7 @@ func (v *Validator) addResourceType(cs *ComponentState, rt *ResourceType) error 
 	}
 	rid := v.arena.allocResourceID()
 	cs.localResources[rid] = true
+	cs.definedResources[rid] = true
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeResource, ResID: rid})
 	return nil
 }
@@ -408,6 +409,10 @@ func (v *Validator) addComponentTypeDecl(cs *ComponentState, ctd *ComponentTypeD
 		if err := v.processComponentTypeDecl(subCS, decl); err != nil {
 			return err
 		}
+	}
+
+	if err := v.checkImportsNameNoDefinedResources(subCS); err != nil {
+		return err
 	}
 
 	// Build the component type from subCS
@@ -863,6 +868,13 @@ func (v *Validator) addExportDecl(cs *ComponentState, exp ComponentExport) error
 	// Freshen resources for exported instances with defined resources
 	// (in type declarations, each export of the same instance type gets fresh resource IDs)
 	et = v.freshenInstanceResources(et)
+
+	switch {
+	case et.Kind == EntityInstance:
+		v.addDefinedInstanceResources(cs, et.InstID)
+	case exp.AscribedType.Valid && importTypeRefIsSubResource(exp.AscribedType.Value):
+		cs.definedResources[et.TypeRef.ResID] = true
+	}
 
 	// Note: type-entity exports inside a type declaration intentionally do
 	// NOT get a freshly minted identity. Their AscribedType always carries an
