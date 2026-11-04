@@ -190,12 +190,11 @@ func (b *Builder) Build(ctx context.Context) (*Component, error) {
 		return nil, err
 	}
 	stampPlaceholderRIDs(comp, b.arena.HostTypeBuilder())
-	ct, wpFuncTypes, err := buildComponentWpType(comp)
+	ct, err := buildComponentWpType(comp)
 	if err != nil {
 		return nil, err
 	}
 	comp.wpComponentType = ct
-	comp.wpFuncTypes = wpFuncTypes
 	cm, err := compileStubModule(ctx, core.WazeroRuntime(b.engine), comp)
 	if err != nil {
 		return nil, err

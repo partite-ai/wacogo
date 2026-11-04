@@ -40,7 +40,7 @@ Two layers, with a hard split:
   `Validated{Component,Import}SectionPayload` items, each carrying an
   opaque type handle (`*wasmparser.FuncType`, `*ModuleType`,
   `*ComponentType`, `*InstanceType`). Those handles ride along on
-  `ExportDesc.ParserFunctionType`, `CompiledModule.wpModuleType`,
+  `ExportedFunc.ParserFunctionType()`, `CompiledModule.wpModuleType`,
   `*Component.wpType`, and (from Instantiate)
   `*ComponentInstance.wpInstance`. No subtype check fires at load
   time, though a root export exposing a component at any depth is

@@ -12,11 +12,6 @@ type ExportDesc struct {
 	Name  string
 	Kind  Sort
 	Index uint32
-	// ParserFunctionType is the wasmparser function-type handle for
-	// this export. Non-nil for func exports loaded from a validated
-	// component. Use it for extended type information beyond the
-	// runtime API.
-	ParserFunctionType *wasmparser.FuncType
 }
 
 // ImportDesc describes a component import.

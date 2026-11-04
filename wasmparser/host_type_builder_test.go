@@ -83,19 +83,6 @@ func TestHostTypeBuilder_NewComponentTypeHandle(t *testing.T) {
 	}
 }
 
-func TestHostTypeBuilder_NewFuncTypeHandle(t *testing.T) {
-	arena := NewArena(DefaultFeatures())
-	b := arena.HostTypeBuilder()
-	id := b.PushFuncType(FuncTypeDesc{})
-	h := b.NewFuncTypeHandle(id)
-	if h == nil {
-		t.Fatal("want non-nil *FuncType")
-	}
-}
-
-// TestHostTypeBuilder_SynthComponentCheckInstantiation proves a
-// ComponentType built by HostTypeBuilder is a valid subtype target
-// for another component's EntityInstance import.
 func TestHostTypeBuilder_SynthComponentCheckInstantiation(t *testing.T) {
 	arena := NewArena(DefaultFeatures())
 	b := arena.HostTypeBuilder()

@@ -126,7 +126,7 @@ type instanceFrame struct {
 // parent binds to it only once it, and everything inside it, is complete.
 func evalInstance(arena *TypeArena, id ComponentTypeID, outer *instanceFrame, args instanceArgs) *InstanceType {
 	ct := arena.ComponentTypes[id]
-	self := &InstanceType{arena: arena, exports: ct.Exports}
+	self := &InstanceType{arena: arena, exports: ct.Exports, funcs: ct.Funcs}
 	self.scope = self
 	self.bindImports(ct, args)
 	if ct.body != nil {

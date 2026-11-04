@@ -241,7 +241,7 @@ func exportHandle(t *testing.T, ct *ComponentType, name string) any {
 	}
 	switch et.Kind {
 	case EntityFunc:
-		return &FuncType{arena: arena, id: et.FuncID}
+		return &FuncType{arena: arena, id: et.FuncID, scope: ct.NewInstance(nil, nil)}
 	case EntityModule:
 		return &ModuleType{arena: arena, id: et.ModuleID}
 	case EntityComponent:

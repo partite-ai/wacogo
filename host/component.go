@@ -28,10 +28,6 @@ type Component struct {
 	// resource import. Built once by Builder.Build; each Instantiate supplies
 	// those imports to NewInstance.
 	wpComponentType *wasmparser.ComponentType
-	// wpFuncTypes is parallel to allFuncs; each entry is a *FuncType
-	// handle into c.arena. Read by ExportedFunc.ParserFunctionType.
-	wpFuncTypes []*wasmparser.FuncType
-
 	// root is the *scopeRuntime tree mirroring the build-time scope tree.
 	root *scopeRuntime
 
@@ -187,8 +183,8 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 				return nil, err
 			}
 			// Exported funcs, flat across the tree and indexed parallel
-			// to c.allFuncs so wpFuncTypes[i] matches.
-			funcExports, err := c.buildFuncExports(inst, h, stubMod, stubMemory, reallocAPI, alloc, res.byComponentResourceTypeID)
+			// to c.allFuncs, which is the type's func index space.
+			funcExports, err := c.buildFuncExports(inst, wpInst, h, stubMod, stubMemory, reallocAPI, alloc, res.byComponentResourceTypeID)
 			if err != nil {
 				return nil, err
 			}
@@ -224,6 +220,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 // enters inst.
 func (c *Component) buildFuncExports(
 	inst *core.ComponentInstance,
+	wp *wasmparser.InstanceType,
 	h *ComponentInstance,
 	stubMod api.Module,
 	stubMemory api.Memory,
@@ -271,7 +268,7 @@ func (c *Component) buildFuncExports(
 		funcExports[i] = core.NewExportedFunc(
 			fr.exportName,
 			core.NewFunc(coreFT, binding),
-			c.wpFuncTypes[i],
+			wp.FuncType(i),
 		)
 	}
 	return funcExports, nil
@@ -469,10 +466,10 @@ func (c *Component) resolveResourceRefs(opts []resourceFromOpt) (map[*ResourceTy
 
 // buildComponentWpType pushes every wasmparser type the host Component
 // advertises into its arena, using each ResourceTypeRef's
-// placeholderRID for refs. Returns a frozen *ComponentType handle plus
-// the per-func *FuncType handle slice, indexed parallel to c.allFuncs.
-// Called once from Builder.Build; never reads per-Instantiate state.
-func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparser.FuncType, error) {
+// placeholderRID for refs. Returns a frozen *ComponentType handle, whose func
+// index space is parallel to c.allFuncs. Called once from Builder.Build; never
+// reads per-Instantiate state.
+func buildComponentWpType(c *Component) (*wasmparser.ComponentType, error) {
 	htb := c.arena.HostTypeBuilder()
 	xt := newInstTranslator(htb)
 
@@ -483,19 +480,17 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 		xt.refResID[rrd.ref] = rrd.placeholderRID
 	}
 
-	// Translate every func signature in build order so wpFuncTypes is
-	// indexed parallel to c.allFuncs.
-	wpFuncTypes := make([]*wasmparser.FuncType, len(c.allFuncs))
+	// Translate every func signature in build order so the func index space
+	// is parallel to c.allFuncs.
 	funcIDs := make([]wasmparser.ComponentFuncTypeID, len(c.allFuncs))
 	funcIdx := map[*funcRuntime]int{}
 	for i, fr := range c.allFuncs {
 		fd, err := xt.instTranslateFuncType(fr.userFT)
 		if err != nil {
-			return nil, nil, fmt.Errorf("wacogo/host: func %q: %w", fr.exportName, err)
+			return nil, fmt.Errorf("wacogo/host: func %q: %w", fr.exportName, err)
 		}
 		id := htb.PushFuncType(fd)
 		funcIDs[i] = id
-		wpFuncTypes[i] = htb.NewFuncTypeHandle(id)
 		funcIdx[fr] = i
 	}
 
@@ -582,7 +577,7 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 
 	exports, exportOrder, err := buildScopeExports(c.root)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	for _, rrd := range c.resourceRefs {
 		exports[rrd.name] = wasmparser.ComponentEntityType{
@@ -607,8 +602,9 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 		ImportOrder: importOrder,
 		Exports:     exports,
 		ExportOrder: exportOrder,
+		Funcs:       funcIDs,
 	})
-	return htb.NewComponentTypeHandle(ctID), wpFuncTypes, nil
+	return htb.NewComponentTypeHandle(ctID), nil
 }
 
 // buildResourceArgs names, for each ResourceTypeRef, the lender export that

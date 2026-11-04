@@ -55,12 +55,11 @@ type instantiationState struct {
 	// descendants reach it through parentState rather than the instance.
 	types []Type
 
-	// funcExportInfo, indexed by component func-index, supplies the
-	// export name and wasmparser function-type handle for funcs that
-	// will become exports of this instance. Populated before the plan
-	// runs so buildLiftedFunc can stamp them at construction. Funcs not
-	// destined for export have a zero entry (empty Name, nil type).
-	funcExportInfo []funcExportInfo
+	// funcExportNames, indexed by component func-index, supplies the export
+	// name for funcs that will become exports of this instance. Populated
+	// before the plan runs so buildLiftedFunc can stamp them at construction.
+	// Funcs not destined for export have an empty entry.
+	funcExportNames []string
 
 	// parentState provides access to the parent component's instantiation state,
 	// used to resolve outer aliases at runtime. Nil for top-level instantiations.
@@ -70,13 +69,6 @@ type instantiationState struct {
 type coreFunc struct {
 	instance api.Module
 	name     string
-}
-
-// funcExportInfo carries the export-time identity of a component func
-// so it can be stamped onto its *ExportedFunc at construction.
-type funcExportInfo struct {
-	name           string
-	parserFuncType *wasmparser.FuncType
 }
 
 type coreMemory struct {
@@ -230,7 +222,7 @@ func (e *Engine) instantiateWithParentCfg(ctx context.Context, component *Compon
 		compiledModules: compiledModules,
 		subComponents:   subComponents,
 		parentState:     parentState,
-		funcExportInfo:  buildFuncExportInfo(component.exports),
+		funcExportNames: buildFuncExportNames(component.exports),
 	}
 
 	// Run the plan-step loop with the instance locked against reentrant
@@ -647,34 +639,25 @@ func (s *instantiationState) resolveSubComponentClosures() {
 	}
 }
 
-// buildFuncExportInfo returns a slice indexed by component func-index,
-// populated with export-time identity (name + wasmparser type handle)
-// for each func that will be exported from this instance. The lift step
-// uses this to stamp the identity onto the *ExportedFunc at
-// construction time.
-func buildFuncExportInfo(exports []ExportDesc) []funcExportInfo {
-	var info []funcExportInfo
+// buildFuncExportNames returns a slice indexed by component func-index, holding
+// the export name of each func that will be exported from this instance.
+func buildFuncExportNames(exports []ExportDesc) []string {
+	var names []string
 	for _, exp := range exports {
 		if exp.Kind != SortFunc {
 			continue
 		}
-		if int(exp.Index) >= len(info) {
-			grown := make([]funcExportInfo, exp.Index+1)
-			copy(grown, info)
-			info = grown
+		if int(exp.Index) >= len(names) {
+			names = append(names, make([]string, int(exp.Index)+1-len(names))...)
 		}
-		info[exp.Index] = funcExportInfo{
-			name:           exp.Name,
-			parserFuncType: exp.ParserFunctionType,
-		}
+		names[exp.Index] = exp.Name
 	}
-	return info
+	return names
 }
 
 // buildLiftedFunc resolves a lift's canonical options against the current
-// instantiation state and returns a fully-constructed *ExportedFunc. The
-// export-time name and wasmparser function-type handle (if any) are
-// stamped from s.funcExportInfo at the upcoming index in s.funcs.
+// instantiation state and returns a fully-constructed *ExportedFunc. Its export
+// name, if any, and its type are those of the upcoming index in s.funcs.
 func (s *instantiationState) buildLiftedFunc(
 	cf coreFunc,
 	options canonicalOptions,
@@ -741,12 +724,12 @@ func (s *instantiationState) buildLiftedFunc(
 			s.inst.engine.maxLiftBytes,
 		),
 	}
-	idx := uint32(len(s.funcs))
-	var info funcExportInfo
-	if int(idx) < len(s.funcExportInfo) {
-		info = s.funcExportInfo[idx]
+	idx := len(s.funcs)
+	var name string
+	if idx < len(s.funcExportNames) {
+		name = s.funcExportNames[idx]
 	}
-	return NewExportedFunc(info.name, fn, info.parserFuncType), nil
+	return NewExportedFunc(name, fn, s.inst.wpInstance.FuncType(idx)), nil
 }
 
 func (step *planLift) execute(_ context.Context, s *instantiationState) error {

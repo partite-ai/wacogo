@@ -39,9 +39,10 @@ type InstanceType struct {
 	// resource one identity.
 	resourceRoots map[ResourceID]scopedResID
 
-	// instances is the instance index space of the instantiation this type
-	// describes, if it describes one.
+	// instances and funcs are the instance and func index spaces of the
+	// instantiation this type describes, if it describes one.
 	instances []*InstanceType
+	funcs     []ComponentFuncTypeID
 
 	// children and components hold the actual instances and components exported
 	// under each name. An ascription can hide them from exports.
@@ -56,13 +57,14 @@ type ResourceFrom struct {
 	Export string
 }
 
-// FuncType is an opaque handle to a component-level function type signature
-// in a validator arena. Obtain one from a ValidatedComponentExport /
-// ValidatedComponentImport item after parsing; it is not constructible
-// directly. Zero value is not usable.
+// FuncType is an opaque handle to the type of a func in a live instance, which
+// knows whose resources its signature names. Obtain one from
+// (*InstanceType).FuncType; it is not constructible directly. Zero value is not
+// usable.
 type FuncType struct {
 	arena *TypeArena
 	id    ComponentFuncTypeID
+	scope *InstanceType
 }
 
 // ModuleType is an opaque handle to a core-module type in a validator
@@ -99,6 +101,16 @@ func (i *InstanceType) SubInstance(index int) *InstanceType {
 		return nil
 	}
 	return i.instances[index]
+}
+
+// FuncType returns the type of the func at index in the func index space of the
+// component this type is an instantiation of, or nil if there is none. The
+// resources it names are this instance's.
+func (i *InstanceType) FuncType(index int) *FuncType {
+	if index < 0 || index >= len(i.funcs) {
+		return nil
+	}
+	return &FuncType{arena: i.arena, id: i.funcs[index], scope: i.scope}
 }
 
 // ExportedInstance returns the type of the instance this type exports under
@@ -224,7 +236,7 @@ func (c *ComponentType) CheckInstantiation(args map[string]any) error {
 				return fmt.Errorf("import %q: expected %s found function", importName, entityExpectedName(importType.Kind))
 			}
 			sc.aArena = a.arena
-			sc.aScope = nil
+			sc.aScope = a.scope
 			if err := sc.isFuncTypeSubtype(a.id, importType.FuncID); err != nil {
 				return fmt.Errorf("import %q: %w", importName, err)
 			}

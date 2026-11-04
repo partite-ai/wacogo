@@ -348,6 +348,8 @@ type ComponentTypeDesc struct {
 	// DefinedResources lists the resources a component type declaration introduces
 	// directly, through (sub resource) bounds.
 	DefinedResources []ResourceID
+	// Funcs is the func index space of a component definition.
+	Funcs []ComponentFuncTypeID
 	// body records how a component definition fills its index spaces. It is nil
 	// for a component type that is only declared.
 	body *componentBody

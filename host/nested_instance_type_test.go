@@ -175,3 +175,110 @@ func TestResourceRef_LenderMissingExport(t *testing.T) {
 		t.Fatalf("want a missing export reported, got: %v", err)
 	}
 }
+
+func noopFunc(context.Context, *core.CallContext, *host.ComponentInstance, []uint64) error {
+	return nil
+}
+
+const resourceFuncGuest = `(component
+  (import "a" (instance $a (export "r" (type (sub resource)))))
+  (alias export $a "r" (type $r))
+  (type $o (own $r))
+  (import "f" (func (param "x" $o))))`
+
+func TestHostFunc_ResourceIdentity(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+
+	b := e.NewHostBuilder("func-resource")
+	r := b.AddResource("r", nil)
+	own := &host.FuncType{Params: []host.Param{{Name: "x", Type: r.Own()}}}
+	b.AddFunction("f", own, noopFunc)
+	b.AddNestedInstance("n").AddFunction("g", own, noopFunc)
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	i1, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer i1.Close(ctx)
+	i2, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer i2.Close(ctx)
+
+	guest := loadGuest(t, e, resourceFuncGuest)
+	for name, tc := range map[string]struct {
+		fn      *wacogo.ExportedFunc
+		wantErr bool
+	}{
+		"root func, same instance":    {fn: i1.Core().ExportedFunc("f")},
+		"nested func, same instance":  {fn: i1.Core().ExportedInstance("n").ExportedFunc("g")},
+		"root func, other instance":   {fn: i2.Core().ExportedFunc("f"), wantErr: true},
+		"nested func, other instance": {fn: i2.Core().ExportedInstance("n").ExportedFunc("g"), wantErr: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := guest.Instantiate(ctx,
+				wacogo.WithInstanceImport("a", i1.Core()),
+				wacogo.WithFuncImport("f", tc.fn))
+			if tc.wantErr != (err != nil) {
+				t.Fatalf("wantErr=%v, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestHostFunc_ResourceRefIdentity(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+
+	lenderB := e.NewHostBuilder("func-lender")
+	lenderB.AddResource("r", nil)
+	lender, err := lenderB.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build lender: %v", err)
+	}
+	defer lender.Close(ctx)
+	l1, err := lender.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate lender: %v", err)
+	}
+	defer l1.Close(ctx)
+	l2, err := lender.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate lender: %v", err)
+	}
+	defer l2.Close(ctx)
+
+	b := e.NewHostBuilder("func-borrower")
+	ref := b.AddResourceRef("r")
+	b.AddFunction("f", &host.FuncType{Params: []host.Param{{Name: "x", Type: ref.Own()}}}, noopFunc)
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build borrower: %v", err)
+	}
+	defer comp.Close(ctx)
+	inst, err := comp.Instantiate(ctx, host.WithResourceFrom(ref, l1.Core(), "r"))
+	if err != nil {
+		t.Fatalf("Instantiate borrower: %v", err)
+	}
+	defer inst.Close(ctx)
+
+	guest := loadGuest(t, e, resourceFuncGuest)
+	if _, err := guest.Instantiate(ctx,
+		wacogo.WithInstanceImport("a", l1.Core()),
+		wacogo.WithFuncImport("f", inst.Core().ExportedFunc("f"))); err != nil {
+		t.Fatalf("want the lender's resource to match, got: %v", err)
+	}
+	if _, err := guest.Instantiate(ctx,
+		wacogo.WithInstanceImport("a", l2.Core()),
+		wacogo.WithFuncImport("f", inst.Core().ExportedFunc("f"))); err == nil {
+		t.Fatal("want another lender's resource to differ")
+	}
+}

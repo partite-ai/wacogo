@@ -168,6 +168,7 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 			ImportOrder: child.importOrder,
 			Exports:     child.exports,
 			ExportOrder: child.exportOrder,
+			Funcs:       child.funcs,
 			body:        child.body,
 		})
 		if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
@@ -185,6 +186,7 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		ct.ImportOrder = child.importOrder
 		ct.Exports = child.exports
 		ct.ExportOrder = child.exportOrder
+		ct.Funcs = child.funcs
 		ct.body = child.body
 		ct.DefinedResources = slices.Collect(maps.Keys(child.locallyDefinedSubResources))
 		size := v.arena.computeComponentTypeSize(ct)

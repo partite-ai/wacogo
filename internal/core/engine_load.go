@@ -465,9 +465,6 @@ func (l *componentLoader) processExportSection(sec *wasmparser.ValidatedComponen
 			Kind:  sort,
 			Index: item.Export.Index,
 		}
-		if sort == SortFunc {
-			desc.ParserFunctionType = item.FuncType()
-		}
 		l.exports = append(l.exports, desc)
 		switch sort {
 		case SortType:

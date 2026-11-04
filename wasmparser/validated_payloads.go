@@ -101,22 +101,12 @@ func (p *ValidatedComponentImportSectionPayload) Items() iter.Seq2[ValidatedComp
 }
 
 // ValidatedComponentExport is an export paired with the handle the
-// validator resolved for it. FuncType(), ModuleType(), and
-// ComponentType() each return a non-nil handle iff the export's Kind
-// matches; otherwise they return nil. InstanceType() is present for
-// API symmetry but always returns nil — see its comment.
+// validator resolved for it. ModuleType() and ComponentType() each return a
+// non-nil handle iff the export's Kind matches; otherwise they return nil.
 type ValidatedComponentExport struct {
 	Export *ComponentExport
 	et     ComponentEntityType
 	arena  *TypeArena
-}
-
-// FuncType returns the handle if this export is a func, else nil.
-func (v ValidatedComponentExport) FuncType() *FuncType {
-	if v.et.Kind != EntityFunc {
-		return nil
-	}
-	return &FuncType{arena: v.arena, id: v.et.FuncID}
 }
 
 // ModuleType returns the handle if this export is a core module, else nil.
@@ -135,33 +125,13 @@ func (v ValidatedComponentExport) ComponentType() *ComponentType {
 	return &ComponentType{arena: v.arena, id: v.et.CompID}
 }
 
-// InstanceType returns nil. Instance-typed exports do not surface as
-// *InstanceType through this API — *InstanceType represents a fresh
-// runtime instance minted via (*ComponentType).NewInstance, not the
-// static instance-type of a component export. This method exists so
-// the four-accessor shape across handle kinds is complete; callers
-// needing instance-type info should consult the raw Export directly.
-func (v ValidatedComponentExport) InstanceType() *InstanceType {
-	return nil
-}
-
 // ValidatedComponentImport is an import paired with the handle the
-// validator resolved for it. FuncType(), ModuleType(), and
-// ComponentType() each return a non-nil handle iff the import's Kind
-// matches; otherwise they return nil. InstanceType() is present for
-// API symmetry but always returns nil — see its comment.
+// validator resolved for it. ModuleType() and ComponentType() each return a
+// non-nil handle iff the import's Kind matches; otherwise they return nil.
 type ValidatedComponentImport struct {
 	Import *ComponentImport
 	et     ComponentEntityType
 	arena  *TypeArena
-}
-
-// FuncType returns the handle if this import is a func, else nil.
-func (v ValidatedComponentImport) FuncType() *FuncType {
-	if v.et.Kind != EntityFunc {
-		return nil
-	}
-	return &FuncType{arena: v.arena, id: v.et.FuncID}
 }
 
 // ModuleType returns the handle if this import is a core module, else nil.
@@ -178,16 +148,6 @@ func (v ValidatedComponentImport) ComponentType() *ComponentType {
 		return nil
 	}
 	return &ComponentType{arena: v.arena, id: v.et.CompID}
-}
-
-// InstanceType returns nil. Instance-typed imports do not surface as
-// *InstanceType through this API — *InstanceType represents a fresh
-// runtime instance minted via (*ComponentType).NewInstance, not the
-// static instance-type of a component import. This method exists so
-// the four-accessor shape across handle kinds is complete; callers
-// needing instance-type info should consult the raw Import directly.
-func (v ValidatedComponentImport) InstanceType() *InstanceType {
-	return nil
 }
 
 // IsInstanceRuntimeEmpty reports whether this import is an instance type

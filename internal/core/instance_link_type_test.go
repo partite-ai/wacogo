@@ -25,6 +25,10 @@ type linkCase struct {
 	providers []linkProvider
 	consumer  string
 	links     map[string]string
+	// funcLinks and typeLinks link a func or type export, named by a path whose
+	// last element is the export.
+	funcLinks map[string]string
+	typeLinks map[string]string
 	wantErr   string // empty if the link is valid
 
 	// uncomposable marks a link that can't be written inside one component,
@@ -61,7 +65,159 @@ func nestedSubInstances(depth int) string {
 	return c
 }
 
+// funcsWithResource exports a resource, a func naming it from the root, and
+// another from an inline instance.
+const funcsWithResource = `(component
+  ` + lifted + `
+  (type $r (resource (rep i32)))
+  (export $rx "r" (type $r))
+  (type $o (own $rx))
+  (func $f (param "x" $o) (canon lift (core func $i "f")))
+  (export "f" (func $f))
+  (func $g (param "x" $o) (canon lift (core func $i "f")))
+  (instance $n (export "g" (func $g)))
+  (export "n" (instance $n)))`
+
+const resourceFuncConsumer = `(component
+  (import "a" (instance $a (export "r" (type (sub resource)))))
+  (alias export $a "r" (type $r))
+  (type $o (own $r))
+  (import "f" (func (param "x" $o))))`
+
+const twoResourceFuncsConsumer = `(component
+  (import "r" (type $r (sub resource)))
+  (type $o (own $r))
+  (import "f" (func (param "x" $o)))
+  (import "g" (func (param "x" $o))))`
+
 var linkCases = []linkCase{
+	{
+		name: "func from a nested instance mismatch",
+		providers: []linkProvider{{label: "p", wat: `(component
+  ` + lifted + `
+  (func $f (param "x" s32) (canon lift (core func $i "f")))
+  (instance $n (export "f" (func $f)))
+  (export "n" (instance $n)))`}},
+		consumer:  `(component (import "f" (func (param "x" string))))`,
+		funcLinks: map[string]string{"f": "p.n.f"},
+		wantErr:   "expected primitive",
+	},
+	{
+		name: "func from a nested instance match",
+		providers: []linkProvider{{label: "p", wat: `(component
+  ` + lifted + `
+  (func $f (param "x" s32) (canon lift (core func $i "f")))
+  (instance $n (export "f" (func $f)))
+  (export "n" (instance $n)))`}},
+		consumer:  `(component (import "f" (func (param "x" s32))))`,
+		funcLinks: map[string]string{"f": "p.n.f"},
+	},
+	{
+		name:      "root func with its instance's resource",
+		providers: []linkProvider{{label: "p", wat: funcsWithResource}},
+		consumer:  resourceFuncConsumer,
+		links:     map[string]string{"a": "p"},
+		funcLinks: map[string]string{"f": "p.f"},
+	},
+	{
+		name:      "root func with another instance's resource",
+		providers: []linkProvider{{label: "p1", wat: funcsWithResource}, {label: "p2", wat: funcsWithResource}},
+		consumer:  resourceFuncConsumer,
+		links:     map[string]string{"a": "p1"},
+		funcLinks: map[string]string{"f": "p2.f"},
+		wantErr:   "mismatched resource types",
+	},
+	{
+		name:      "nested func with its instance's resource",
+		providers: []linkProvider{{label: "p", wat: funcsWithResource}},
+		consumer:  resourceFuncConsumer,
+		links:     map[string]string{"a": "p"},
+		funcLinks: map[string]string{"f": "p.n.g"},
+	},
+	{
+		name:      "nested func with another instance's resource",
+		providers: []linkProvider{{label: "p1", wat: funcsWithResource}, {label: "p2", wat: funcsWithResource}},
+		consumer:  resourceFuncConsumer,
+		links:     map[string]string{"a": "p1"},
+		funcLinks: map[string]string{"f": "p2.n.g"},
+		wantErr:   "mismatched resource types",
+	},
+	{
+		name:      "funcs from one instantiation share a resource",
+		providers: []linkProvider{{label: "p", wat: funcsWithResource}},
+		consumer:  twoResourceFuncsConsumer,
+		typeLinks: map[string]string{"r": "p.r"},
+		funcLinks: map[string]string{"f": "p.f", "g": "p.n.g"},
+	},
+	{
+		name:      "funcs from two instantiations differ",
+		providers: []linkProvider{{label: "p1", wat: funcsWithResource}, {label: "p2", wat: funcsWithResource}},
+		consumer:  twoResourceFuncsConsumer,
+		typeLinks: map[string]string{"r": "p1.r"},
+		funcLinks: map[string]string{"f": "p1.f", "g": "p2.f"},
+		wantErr:   "mismatched resource types",
+	},
+	{
+		name: "func from a sub-instance with the parent's view of its resource",
+		providers: []linkProvider{{label: "p", wat: `(component
+  (component $inner
+    ` + lifted + `
+    (type $r (resource (rep i32)))
+    (export $rx "r" (type $r))
+    (type $o (own $rx))
+    (func $f (param "x" $o) (canon lift (core func $i "f")))
+    (export "f" (func $f)))
+  (instance $s (instantiate $inner))
+  (alias export $s "r" (type $r))
+  (export "r" (type $r))
+  (export "s" (instance $s)))`}},
+		consumer:  resourceFuncConsumer,
+		links:     map[string]string{"a": "p"},
+		funcLinks: map[string]string{"f": "p.s.f"},
+	},
+	{
+		name: "func re-exported by the parent of the sub-instance that lifted it",
+		providers: []linkProvider{{label: "p", wat: `(component
+  (component $inner
+    ` + lifted + `
+    (type $r (resource (rep i32)))
+    (export $rx "r" (type $r))
+    (type $o (own $rx))
+    (func $f (param "x" $o) (canon lift (core func $i "f")))
+    (export "f" (func $f)))
+  (instance $s (instantiate $inner))
+  (alias export $s "r" (type $r))
+  (alias export $s "f" (func $sf))
+  (export $rx "r" (type $r))
+  (type $o (own $rx))
+  (export "g" (func $sf) (func (param "x" $o))))`}},
+		consumer:  resourceFuncConsumer,
+		links:     map[string]string{"a": "p"},
+		funcLinks: map[string]string{"f": "p.g"},
+	},
+	{
+		name: "func from an imported sub-component",
+		providers: []linkProvider{{label: "p", wat: `(component
+  (component $impl
+    ` + lifted + `
+    (type $r (resource (rep i32)))
+    (export $rx "r" (type $r))
+    (type $o (own $rx))
+    (func $f (param "x" $o) (canon lift (core func $i "f")))
+    (export "f" (func $f)))
+  (component $user
+    (import "c" (component $c
+      (export "r" (type $r (sub resource)))
+      (type $o (own $r))
+      (export "f" (func (param "x" $o)))))
+    (instance $made (instantiate $c))
+    (export "made" (instance $made)))
+  (instance $u (instantiate $user (with "c" (component $impl))))
+  (export "u" (instance $u)))`}},
+		consumer:  resourceFuncConsumer,
+		links:     map[string]string{"a": "p.u.made"},
+		funcLinks: map[string]string{"f": "p.u.made.f"},
+	},
 	{
 		name: "nested instance mismatch",
 		providers: []linkProvider{{label: "p", wat: `(component
@@ -465,6 +621,16 @@ func composeLink(c linkCase) string {
 		fmt.Fprintf(&b, "(instance $%s (instantiate $c_%s%s))\n", p.label, p.label, args)
 	}
 	args := instantiate("$consumer", c.consumer[:len(c.consumer)-1], c.links)
+	item := func(kind string, links map[string]string) {
+		for imp, path := range links {
+			split := strings.LastIndex(path, ".")
+			next := fmt.Sprintf("$%s_%s", kind, imp)
+			fmt.Fprintf(&b, "(alias export %s %q (%s %s))\n", ref(path[:split]), path[split+1:], kind, next)
+			args += fmt.Sprintf(" (with %q (%s %s))", imp, kind, next)
+		}
+	}
+	item("func", c.funcLinks)
+	item("type", c.typeLinks)
 	fmt.Fprintf(&b, "(instance (instantiate $consumer%s)))\n", args)
 	return b.String()
 }
@@ -511,10 +677,13 @@ func resolveLinkPath(t *testing.T, insts map[string]*ComponentInstance, path str
 func assertInstanceTypesAligned(t *testing.T, path string, inst *ComponentInstance) {
 	t.Helper()
 	for name, exp := range inst.exports {
+		childPath := path + "." + name
+		if exp.kind == SortFunc && exp.funcVal.ParserFunctionType() == nil {
+			t.Errorf("%s: func has no type", childPath)
+		}
 		if exp.kind != SortInstance {
 			continue
 		}
-		childPath := path + "." + name
 		want := inst.wpInstance.ExportedInstance(name)
 		if want == nil {
 			t.Errorf("%s: no type evaluated", childPath)
@@ -550,6 +719,10 @@ func TestInstanceLinkTypes(t *testing.T) {
 				return out
 			}
 
+			parent := func(insts map[string]*ComponentInstance, path string) (*ComponentInstance, string) {
+				split := strings.LastIndex(path, ".")
+				return resolveLinkPath(t, insts, path[:split]), path[split+1:]
+			}
 			insts := map[string]*ComponentInstance{}
 			for _, p := range c.providers {
 				inst, err := load(p.wat).Instantiate(ctx, opts(insts, p.with)...)
@@ -560,7 +733,20 @@ func TestInstanceLinkTypes(t *testing.T) {
 				assertInstanceTypesAligned(t, p.label, inst)
 			}
 
-			_, err := load(c.consumer).Instantiate(ctx, opts(insts, c.links)...)
+			consumerOpts := opts(insts, c.links)
+			for name, path := range c.funcLinks {
+				inst, export := parent(insts, path)
+				fn := inst.ExportedFunc(export)
+				if fn == nil {
+					t.Fatalf("path %q: no func", path)
+				}
+				consumerOpts = append(consumerOpts, WithFuncImport(name, fn))
+			}
+			for name, path := range c.typeLinks {
+				inst, export := parent(insts, path)
+				consumerOpts = append(consumerOpts, WithTypeImport(name, inst.ExportedType(export)))
+			}
+			_, err := load(c.consumer).Instantiate(ctx, consumerOpts...)
 			switch {
 			case c.wantErr == "" && err != nil:
 				t.Fatalf("want link accepted, got: %v", err)
