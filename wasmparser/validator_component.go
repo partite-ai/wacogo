@@ -2,8 +2,6 @@ package wasmparser
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 )
 
@@ -421,7 +419,8 @@ func (v *Validator) addComponentTypeDecl(cs *ComponentState, ctd *ComponentTypeD
 		ImportOrder:      subCS.importOrder,
 		Exports:          subCS.exports,
 		ExportOrder:      subCS.exportOrder,
-		DefinedResources: slices.Collect(maps.Keys(subCS.locallyDefinedSubResources)),
+		ImportedResources: importedResources(subCS),
+		DefinedResources:  v.exposedDefinedResources(subCS),
 	}
 	id := v.arena.pushComponentType(compType)
 	if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
@@ -670,29 +669,14 @@ func (v *Validator) freshenInstanceResources(et ComponentEntityType) ComponentEn
 	if et.Kind != EntityInstance {
 		return et
 	}
-	instType := v.arena.InstanceTypes[et.InstID]
-
 	sc := v.newSubtypeCheckerWithRemapping()
-	// Resources and defined types visible in an enclosing scope were aliased in
-	// from outside the instance type. They keep their identity; only what the
-	// type itself introduces, including inside nested instances, is fresh.
-	for _, cs := range v.components {
-		for _, ty := range cs.types {
-			switch ty.Kind {
-			case AnyTypeResource:
-				sc.resourceMapping[ty.ResID] = scopedResID{arena: v.arena, id: ty.ResID}
-			case AnyTypeDefined:
-				id := ComponentDefinedTypeID(ty.Index)
-				sc.definedTypeRemap[id] = id
-			}
-		}
+	v.forEachInstanceResource(et.InstID, func(id ResourceID) {
+		sc.resourceMapping[id] = scopedResID{arena: v.arena, id: v.arena.allocResourceID()}
+	})
+	if len(sc.resourceMapping) == 0 {
+		return et
 	}
-	for _, res := range instType.DefinedResources {
-		sc.resourceMapping[res.ID] = scopedResID{arena: v.arena, id: v.arena.allocResourceID()}
-	}
-
-	newInstID := sc.remapInstanceType(et.InstID)
-	return ComponentEntityType{Kind: EntityInstance, InstID: newInstID}
+	return ComponentEntityType{Kind: EntityInstance, InstID: sc.remapInstanceType(et.InstID)}
 }
 
 // addImportDecl handles an import within a type declaration.

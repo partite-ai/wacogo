@@ -2,8 +2,6 @@ package wasmparser
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 )
 
 // Types is a sentinel returned by (*Validator).Types to indicate that
@@ -173,6 +171,9 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 			ExportOrder: child.exportOrder,
 			Funcs:       child.funcs,
 			body:        child.body,
+
+			ImportedResources: importedResources(child),
+			DefinedResources:  v.exposedDefinedResources(child),
 		})
 		if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
 			return fmt.Errorf("effective type size exceeds the limit")
@@ -191,7 +192,8 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		ct.ExportOrder = child.exportOrder
 		ct.Funcs = child.funcs
 		ct.body = child.body
-		ct.DefinedResources = slices.Collect(maps.Keys(child.locallyDefinedSubResources))
+		ct.ImportedResources = importedResources(child)
+		ct.DefinedResources = v.exposedDefinedResources(child)
 		size := v.arena.computeComponentTypeSize(ct)
 		v.arena.ComponentTypeSizes[compTypeID] = size
 		if size > MaxEffectiveTypeSize {

@@ -84,19 +84,18 @@ func (v *Validator) instantiateComponent(cs *ComponentState, inst Instantiate) e
 		}
 	}
 
-	// Build instance exports from the component's exports, remapping resource IDs
+	// Build instance exports from the component's exports: its imports are now what
+	// was supplied, and what it creates is new with this instance.
 	instType := InstanceTypeDesc{
 		Exports: make(map[string]ComponentEntityType),
 	}
-	imported := maps.Clone(sc.resourceMapping)
+	for _, res := range compType.DefinedResources {
+		fresh := v.arena.allocResourceID()
+		sc.resourceMapping[res] = scopedResID{arena: v.arena, id: fresh}
+		cs.definedResources[fresh] = true
+	}
 	for name, et := range compType.Exports {
 		instType.Exports[name] = sc.remapEntityType(et)
-	}
-	// Whatever the imports didn't bind is new with this instance.
-	for src, fresh := range sc.resourceMapping {
-		if _, ok := imported[src]; !ok {
-			cs.definedResources[fresh.id] = true
-		}
 	}
 
 	id := v.arena.pushInstanceType(instType)

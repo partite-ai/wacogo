@@ -777,17 +777,66 @@ func (v *Validator) checkImportsNameNoDefinedResources(cs *ComponentState) error
 	return nil
 }
 
-// addDefinedInstanceResources records the resources an instance type defines,
-// including through nested instances, as defined by cs.
-func (v *Validator) addDefinedInstanceResources(cs *ComponentState, id ComponentInstanceTypeID) {
+// forEachInstanceResource visits the resources an instance type defines, including
+// through nested instances.
+func (v *Validator) forEachInstanceResource(id ComponentInstanceTypeID, visit func(ResourceID)) {
 	it := v.arena.InstanceTypes[id]
 	for _, res := range it.DefinedResources {
-		cs.definedResources[res.ID] = true
+		visit(res.ID)
 	}
 	for _, et := range it.Exports {
 		if et.Kind == EntityInstance {
-			v.addDefinedInstanceResources(cs, et.InstID)
+			v.forEachInstanceResource(et.InstID, visit)
 		}
+	}
+}
+
+// addDefinedInstanceResources records the resources an instance type defines as
+// defined by cs.
+func (v *Validator) addDefinedInstanceResources(cs *ComponentState, id ComponentInstanceTypeID) {
+	v.forEachInstanceResource(id, func(res ResourceID) { cs.definedResources[res] = true })
+}
+
+// importedResources returns the resources cs's type imports leave to its
+// instantiator.
+func importedResources(cs *ComponentState) []ResourceID {
+	var imported []ResourceID
+	for _, name := range cs.importOrder {
+		et := cs.imports[name]
+		if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource && cs.locallyDefinedSubResources[et.TypeRef.ResID] {
+			imported = append(imported, et.TypeRef.ResID)
+		}
+	}
+	return imported
+}
+
+// exposedDefinedResources returns the resources cs defines that its exports can
+// reach. Those that stay inside can't be told apart between instantiations, so an
+// instantiation has no need of its own copy of them.
+func (v *Validator) exposedDefinedResources(cs *ComponentState) []ResourceID {
+	reachable := make(map[ResourceID]bool)
+	for _, et := range cs.exports {
+		v.collectExportedResources(et, reachable)
+	}
+	var defined []ResourceID
+	for id := range reachable {
+		if cs.definedResources[id] {
+			defined = append(defined, id)
+		}
+	}
+	slices.Sort(defined)
+	return defined
+}
+
+// collectExportedResources adds the resources an entity's instances expose, which
+// unlike those of an instance type aren't bound within it.
+func (v *Validator) collectExportedResources(et ComponentEntityType, set map[ResourceID]bool) {
+	if et.Kind != EntityInstance {
+		v.collectResourceIDsFromEntity(et, set)
+		return
+	}
+	for _, sub := range v.arena.InstanceTypes[et.InstID].Exports {
+		v.collectExportedResources(sub, set)
 	}
 }
 
@@ -867,6 +916,9 @@ func (v *Validator) collectResourceIDsFromComponent(id ComponentTypeID, set map[
 			v.collectResourceIDsFromEntity(et, free)
 		}
 	}
+	for _, rid := range ct.ImportedResources {
+		delete(free, rid)
+	}
 	for _, rid := range ct.DefinedResources {
 		delete(free, rid)
 	}
@@ -885,15 +937,7 @@ func (v *Validator) collectResourceIDsFromComponent(id ComponentTypeID, set map[
 // removeInstanceResources removes from set the resources an instance type
 // defines, including through nested instances.
 func (v *Validator) removeInstanceResources(id ComponentInstanceTypeID, set map[ResourceID]bool) {
-	it := v.arena.InstanceTypes[id]
-	for _, res := range it.DefinedResources {
-		delete(set, res.ID)
-	}
-	for _, et := range it.Exports {
-		if et.Kind == EntityInstance {
-			v.removeInstanceResources(et.InstID, set)
-		}
-	}
+	v.forEachInstanceResource(id, func(res ResourceID) { delete(set, res) })
 }
 
 func (v *Validator) collectResourceIDsFromEntity(et ComponentEntityType, set map[ResourceID]bool) {

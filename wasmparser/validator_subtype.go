@@ -523,7 +523,7 @@ func (sc *SubtypeChecker) isComponentSubtype(a, b ComponentTypeID) error {
 	// A resource is named again by each (eq) referring to it, under the same ID, so
 	// each is bound once, where the type introduces it.
 	open := make(map[ResourceID]bool)
-	for _, res := range at.DefinedResources {
+	for _, res := range at.ImportedResources {
 		open[res] = true
 	}
 	for _, name := range at.ImportOrder {
@@ -542,11 +542,6 @@ func (sc *SubtypeChecker) isComponentSubtype(a, b ComponentTypeID) error {
 	clear(open)
 	for _, res := range bt.DefinedResources {
 		open[res] = true
-	}
-	for _, name := range bt.ImportOrder {
-		if et := bt.Imports[name]; et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-			delete(open, et.TypeRef.ResID)
-		}
 	}
 	for _, name := range bt.ExportOrder {
 		aExport, ok := at.Exports[name]
@@ -618,10 +613,10 @@ func (sc *SubtypeChecker) isTypeSubtype(a, b ComponentAnyTypeID) error {
 	return nil
 }
 
-// remapEntityType copies an entity type from aArena, rewriting resource
-// references through resourceMapping and writing any derived types into
-// writeArena. Used by validator-internal paths that stage the result of
-// an instantiation; not used by the read-only CheckInstantiation path.
+// remapEntityType applies resourceMapping and definedTypeMapping to an entity
+// type: whatever they name is replaced, everything else keeps its identity, and a
+// type is copied into writeArena only if something in it was replaced. The caller
+// decides what is replaced; nothing here decides that a resource is new.
 func (sc *SubtypeChecker) remapEntityType(et ComponentEntityType) ComponentEntityType {
 	if sc.resourceMapping == nil {
 		return et
@@ -647,42 +642,40 @@ func (sc *SubtypeChecker) remapEntityType(et ComponentEntityType) ComponentEntit
 			Kind:    EntityValue,
 			ValType: sc.remapValType(et.ValType),
 		}
+	case EntityComponent:
+		return ComponentEntityType{
+			Kind:   EntityComponent,
+			CompID: sc.remapComponentType(et.CompID),
+		}
 	default:
 		return et
 	}
 }
 
-// mintMapped returns a resource ID in writeArena corresponding to the
-// source-arena resource srcID. Reuses any previously-minted ID for the
-// same source so `(eq $r)` constraints across a single remap session
-// stay consistent. resourceMapping keys are source-arena IDs (in aArena
-// convention for remap use) and values are writeArena-scoped IDs.
-//
-// When srcID is the export-alias half of a fresh→defining pair recorded on
-// the arena, mintMapped also mints the defining ID and records the alias
-// pair in writeArena so the alias relationship survives into the new arena.
-// That way a re-exported resource (e.g. borrower exports the lender's "r")
-// continues to resolve to the source after instantiation freshens it.
-func (sc *SubtypeChecker) mintMapped(srcID ResourceID) ResourceID {
-	if mapped, ok := sc.resourceMapping[srcID]; ok && mapped.arena == sc.writeArena {
+// remapResource returns what a resource reference becomes. An export alias of a
+// replaced resource becomes a new alias of its replacement, so that re-exports
+// still resolve to it.
+func (sc *SubtypeChecker) remapResource(id ResourceID) ResourceID {
+	if mapped, ok := sc.resourceMapping[id]; ok {
 		return mapped.id
 	}
-	fresh := sc.writeArena.allocResourceID()
-	sc.resourceMapping[srcID] = scopedResID{arena: sc.writeArena, id: fresh}
-	if defining := sc.aArena.ResolveResourceAlias(srcID); defining != srcID {
-		definingFresh := sc.mintMapped(defining)
-		if sc.writeArena.resourceAliases == nil {
-			sc.writeArena.resourceAliases = make(map[ResourceID]ResourceID)
-		}
-		sc.writeArena.resourceAliases[fresh] = definingFresh
+	mapped, ok := sc.resourceMapping[sc.aArena.ResolveResourceAlias(id)]
+	if !ok {
+		return id
 	}
-	return fresh
+	alias := sc.writeArena.allocResourceID()
+	if sc.writeArena.resourceAliases == nil {
+		sc.writeArena.resourceAliases = make(map[ResourceID]ResourceID)
+	}
+	sc.writeArena.resourceAliases[alias] = sc.writeArena.ResolveResourceAlias(mapped.id)
+	sc.resourceMapping[id] = scopedResID{arena: sc.writeArena, id: alias}
+	return alias
 }
 
 func (sc *SubtypeChecker) remapAnyTypeID(id ComponentAnyTypeID) ComponentAnyTypeID {
 	switch id.Kind {
 	case AnyTypeResource:
-		return ComponentAnyTypeID{Kind: AnyTypeResource, ResID: sc.mintMapped(id.ResID)}
+		return ComponentAnyTypeID{Kind: AnyTypeResource, ResID: sc.remapResource(id.ResID)}
 	case AnyTypeDefined:
 		newID := sc.remapDefinedType(ComponentDefinedTypeID(id.Index))
 		return ComponentAnyTypeID{Kind: AnyTypeDefined, Index: uint32(newID)}
@@ -726,11 +719,7 @@ func (sc *SubtypeChecker) remapDefinedType(id ComponentDefinedTypeID) ComponentD
 		}
 	}
 	dt := sc.aArena.DefinedTypes[id]
-	needsRebuild := sc.definedTypeHasResources(&dt)
-	if !needsRebuild && len(sc.definedTypeMapping) > 0 {
-		needsRebuild = sc.definedTypeReferencesMapped(&dt)
-	}
-	if !needsRebuild && sc.aArena == sc.writeArena {
+	if !sc.definedTypeChanges(&dt) && sc.aArena == sc.writeArena {
 		if sc.definedTypeRemap != nil {
 			sc.definedTypeRemap[id] = id
 		}
@@ -740,9 +729,9 @@ func (sc *SubtypeChecker) remapDefinedType(id ComponentDefinedTypeID) ComponentD
 	newDT := dt // copy
 	switch dt.Kind {
 	case DefinedKindOwn:
-		newDT.Own = sc.mintMapped(dt.Own)
+		newDT.Own = sc.remapResource(dt.Own)
 	case DefinedKindBorrow:
-		newDT.Borrow = sc.mintMapped(dt.Borrow)
+		newDT.Borrow = sc.remapResource(dt.Borrow)
 	case DefinedKindRecord:
 		if dt.Record != nil {
 			fields := make([]FieldDesc, len(dt.Record.Fields))
@@ -787,127 +776,35 @@ func (sc *SubtypeChecker) remapDefinedType(id ComponentDefinedTypeID) ComponentD
 	return newID
 }
 
-// definedTypeReferencesMapped returns true if any subtree of dt references a
-// defined type that has a binding in definedTypeMapping. Used to decide whether
-// remapDefinedType must rebuild a type even when it doesn't carry resources.
-func (sc *SubtypeChecker) definedTypeReferencesMapped(dt *DefinedTypeDesc) bool {
-	switch dt.Kind {
-	case DefinedKindRecord:
-		if dt.Record != nil {
-			for _, f := range dt.Record.Fields {
-				if sc.valTypeReferencesMapped(f.Type) {
-					return true
-				}
-			}
-		}
-	case DefinedKindVariant:
-		if dt.Variant != nil {
-			for _, c := range dt.Variant.Cases {
-				if c.Type.Valid && sc.valTypeReferencesMapped(c.Type.Value) {
-					return true
-				}
-			}
-		}
-	case DefinedKindList:
-		return sc.valTypeReferencesMapped(dt.List)
-	case DefinedKindTuple:
-		for _, t := range dt.Tuple {
-			if sc.valTypeReferencesMapped(t) {
-				return true
-			}
-		}
-	case DefinedKindOption:
-		return sc.valTypeReferencesMapped(dt.Option)
-	case DefinedKindResult:
-		if dt.ResultOk.Valid && sc.valTypeReferencesMapped(dt.ResultOk.Value) {
-			return true
-		}
-		if dt.ResultErr.Valid && sc.valTypeReferencesMapped(dt.ResultErr.Value) {
-			return true
-		}
+func (sc *SubtypeChecker) resourceChanges(id ResourceID) bool {
+	if _, ok := sc.resourceMapping[id]; ok {
+		return true
 	}
-	return false
+	_, ok := sc.resourceMapping[sc.aArena.ResolveResourceAlias(id)]
+	return ok
 }
 
-func (sc *SubtypeChecker) valTypeReferencesMapped(vt ValTypeDesc) bool {
+func (sc *SubtypeChecker) valTypeChanges(vt ValTypeDesc) bool {
 	if vt.IsPrimitive {
 		return false
 	}
 	if _, ok := sc.definedTypeMapping[vt.TypeID]; ok {
 		return true
 	}
-	dt := sc.aArena.DefinedTypes[vt.TypeID]
-	return sc.definedTypeReferencesMapped(&dt)
+	return sc.definedTypeChanges(&sc.aArena.DefinedTypes[vt.TypeID])
 }
 
-// entityTypeReferencesMapped is the entity-level analogue: returns true when
-// any defined-type ID anywhere inside et appears in definedTypeMapping. Used
-// by remapInstanceType / remapComponentType to decide whether to rebuild even
-// when no resources are present.
-func (sc *SubtypeChecker) entityTypeReferencesMapped(et ComponentEntityType) bool {
-	switch et.Kind {
-	case EntityType:
-		switch et.TypeRef.Kind {
-		case AnyTypeDefined:
-			id := ComponentDefinedTypeID(et.TypeRef.Index)
-			if _, ok := sc.definedTypeMapping[id]; ok {
-				return true
-			}
-			dt := sc.aArena.DefinedTypes[id]
-			return sc.definedTypeReferencesMapped(&dt)
-		case AnyTypeFunc:
-			ft := sc.aArena.FuncTypes[et.TypeRef.Index]
-			for _, p := range ft.Params {
-				if sc.valTypeReferencesMapped(p.Type) {
-					return true
-				}
-			}
-			for _, r := range ft.Results {
-				if sc.valTypeReferencesMapped(r.Type) {
-					return true
-				}
-			}
-		case AnyTypeInstance:
-			it := sc.aArena.InstanceTypes[et.TypeRef.Index]
-			for _, sub := range it.Exports {
-				if sc.entityTypeReferencesMapped(sub) {
-					return true
-				}
-			}
-		}
-	case EntityFunc:
-		ft := sc.aArena.FuncTypes[et.FuncID]
-		for _, p := range ft.Params {
-			if sc.valTypeReferencesMapped(p.Type) {
-				return true
-			}
-		}
-		for _, r := range ft.Results {
-			if sc.valTypeReferencesMapped(r.Type) {
-				return true
-			}
-		}
-	case EntityValue:
-		return sc.valTypeReferencesMapped(et.ValType)
-	case EntityInstance:
-		it := sc.aArena.InstanceTypes[et.InstID]
-		for _, sub := range it.Exports {
-			if sc.entityTypeReferencesMapped(sub) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (sc *SubtypeChecker) definedTypeHasResources(dt *DefinedTypeDesc) bool {
+// definedTypeChanges reports whether remapping would replace anything in dt.
+func (sc *SubtypeChecker) definedTypeChanges(dt *DefinedTypeDesc) bool {
 	switch dt.Kind {
-	case DefinedKindOwn, DefinedKindBorrow:
-		return true
+	case DefinedKindOwn:
+		return sc.resourceChanges(dt.Own)
+	case DefinedKindBorrow:
+		return sc.resourceChanges(dt.Borrow)
 	case DefinedKindRecord:
 		if dt.Record != nil {
 			for _, f := range dt.Record.Fields {
-				if sc.valTypeHasResources(f.Type) {
+				if sc.valTypeChanges(f.Type) {
 					return true
 				}
 			}
@@ -915,34 +812,77 @@ func (sc *SubtypeChecker) definedTypeHasResources(dt *DefinedTypeDesc) bool {
 	case DefinedKindVariant:
 		if dt.Variant != nil {
 			for _, c := range dt.Variant.Cases {
-				if c.Type.Valid && sc.valTypeHasResources(c.Type.Value) {
+				if c.Type.Valid && sc.valTypeChanges(c.Type.Value) {
 					return true
 				}
 			}
 		}
 	case DefinedKindList:
-		return sc.valTypeHasResources(dt.List)
+		return sc.valTypeChanges(dt.List)
 	case DefinedKindTuple:
-		return slices.ContainsFunc(dt.Tuple, sc.valTypeHasResources)
+		return slices.ContainsFunc(dt.Tuple, sc.valTypeChanges)
 	case DefinedKindOption:
-		return sc.valTypeHasResources(dt.Option)
+		return sc.valTypeChanges(dt.Option)
 	case DefinedKindResult:
-		if dt.ResultOk.Valid && sc.valTypeHasResources(dt.ResultOk.Value) {
-			return true
-		}
-		if dt.ResultErr.Valid && sc.valTypeHasResources(dt.ResultErr.Value) {
+		return (dt.ResultOk.Valid && sc.valTypeChanges(dt.ResultOk.Value)) ||
+			(dt.ResultErr.Valid && sc.valTypeChanges(dt.ResultErr.Value))
+	}
+	return false
+}
+
+func (sc *SubtypeChecker) funcTypeChanges(id ComponentFuncTypeID) bool {
+	ft := sc.aArena.FuncTypes[id]
+	changes := func(p FuncParamDesc) bool { return sc.valTypeChanges(p.Type) }
+	return slices.ContainsFunc(ft.Params, changes) || slices.ContainsFunc(ft.Results, changes)
+}
+
+func (sc *SubtypeChecker) entitiesChange(entities map[string]ComponentEntityType) bool {
+	for _, et := range entities {
+		if sc.entityTypeChanges(et) {
 			return true
 		}
 	}
 	return false
 }
 
-func (sc *SubtypeChecker) valTypeHasResources(vt ValTypeDesc) bool {
-	if vt.IsPrimitive {
-		return false
+func (sc *SubtypeChecker) instanceTypeChanges(id ComponentInstanceTypeID) bool {
+	return sc.entitiesChange(sc.aArena.InstanceTypes[id].Exports)
+}
+
+func (sc *SubtypeChecker) componentTypeChanges(id ComponentTypeID) bool {
+	ct := sc.aArena.ComponentTypes[id]
+	return sc.entitiesChange(ct.Imports) || sc.entitiesChange(ct.Exports)
+}
+
+func (sc *SubtypeChecker) entityTypeChanges(et ComponentEntityType) bool {
+	switch et.Kind {
+	case EntityType:
+		switch et.TypeRef.Kind {
+		case AnyTypeResource:
+			return sc.resourceChanges(et.TypeRef.ResID)
+		case AnyTypeDefined:
+			id := ComponentDefinedTypeID(et.TypeRef.Index)
+			if _, ok := sc.definedTypeMapping[id]; ok {
+				return true
+			}
+			return sc.definedTypeChanges(&sc.aArena.DefinedTypes[id])
+		case AnyTypeFunc:
+			return sc.funcTypeChanges(ComponentFuncTypeID(et.TypeRef.Index))
+		case AnyTypeInstance:
+			return sc.instanceTypeChanges(ComponentInstanceTypeID(et.TypeRef.Index))
+		case AnyTypeComponent:
+			return sc.componentTypeChanges(ComponentTypeID(et.TypeRef.Index))
+		}
+	case EntityFunc:
+		return sc.funcTypeChanges(et.FuncID)
+	case EntityInstance:
+		return sc.instanceTypeChanges(et.InstID)
+	case EntityComponent:
+		return sc.componentTypeChanges(et.CompID)
+	case EntityValue:
+		return sc.valTypeChanges(et.ValType)
 	}
-	dt := sc.aArena.DefinedTypes[vt.TypeID]
-	return sc.definedTypeHasResources(&dt)
+	return false
 }
 
 func (sc *SubtypeChecker) remapFuncType(id ComponentFuncTypeID) ComponentFuncTypeID {
@@ -952,38 +892,7 @@ func (sc *SubtypeChecker) remapFuncType(id ComponentFuncTypeID) ComponentFuncTyp
 		}
 	}
 	ft := sc.aArena.FuncTypes[id]
-	hasRes := false
-	for _, p := range ft.Params {
-		if sc.valTypeHasResources(p.Type) {
-			hasRes = true
-			break
-		}
-	}
-	if !hasRes {
-		for _, r := range ft.Results {
-			if sc.valTypeHasResources(r.Type) {
-				hasRes = true
-				break
-			}
-		}
-	}
-	if !hasRes && len(sc.definedTypeMapping) > 0 {
-		for _, p := range ft.Params {
-			if sc.valTypeReferencesMapped(p.Type) {
-				hasRes = true
-				break
-			}
-		}
-		if !hasRes {
-			for _, r := range ft.Results {
-				if sc.valTypeReferencesMapped(r.Type) {
-					hasRes = true
-					break
-				}
-			}
-		}
-	}
-	if !hasRes && sc.aArena == sc.writeArena {
+	if !sc.funcTypeChanges(id) && sc.aArena == sc.writeArena {
 		if sc.funcTypeRemap != nil {
 			sc.funcTypeRemap[id] = id
 		}
@@ -1012,22 +921,7 @@ func (sc *SubtypeChecker) remapInstanceType(id ComponentInstanceTypeID) Componen
 		}
 	}
 	it := sc.aArena.InstanceTypes[id]
-	hasRes := false
-	for _, et := range it.Exports {
-		if sc.entityTypeHasResources(et) {
-			hasRes = true
-			break
-		}
-	}
-	if !hasRes && len(sc.definedTypeMapping) > 0 {
-		for _, et := range it.Exports {
-			if sc.entityTypeReferencesMapped(et) {
-				hasRes = true // reuse the rebuild path
-				break
-			}
-		}
-	}
-	if !hasRes && sc.aArena == sc.writeArena {
+	if !sc.instanceTypeChanges(id) && sc.aArena == sc.writeArena {
 		if sc.instanceTypeRemap != nil {
 			sc.instanceTypeRemap[id] = id
 		}
@@ -1060,22 +954,7 @@ func (sc *SubtypeChecker) remapInstanceType(id ComponentInstanceTypeID) Componen
 
 func (sc *SubtypeChecker) remapComponentType(id ComponentTypeID) ComponentTypeID {
 	ct := sc.aArena.ComponentTypes[id]
-	hasRes := false
-	for _, et := range ct.Imports {
-		if sc.entityTypeHasResources(et) {
-			hasRes = true
-			break
-		}
-	}
-	if !hasRes {
-		for _, et := range ct.Exports {
-			if sc.entityTypeHasResources(et) {
-				hasRes = true
-				break
-			}
-		}
-	}
-	if !hasRes && sc.aArena == sc.writeArena {
+	if !sc.componentTypeChanges(id) && sc.aArena == sc.writeArena {
 		return id
 	}
 
@@ -1087,42 +966,22 @@ func (sc *SubtypeChecker) remapComponentType(id ComponentTypeID) ComponentTypeID
 	for name, et := range ct.Exports {
 		exports[name] = sc.remapEntityType(et)
 	}
-	definedResources := slices.Clone(ct.DefinedResources)
-	for i, rid := range definedResources {
-		if mapped, ok := sc.resourceMapping[rid]; ok {
-			definedResources[i] = mapped.id
-		}
-	}
-	return sc.writeArena.pushComponentType(ComponentTypeDesc{Imports: imports, ImportOrder: ct.ImportOrder, Exports: exports, ExportOrder: ct.ExportOrder, DefinedResources: definedResources})
+	remapped := ct
+	remapped.Imports = imports
+	remapped.Exports = exports
+	remapped.ImportedResources = sc.remapResourceList(ct.ImportedResources)
+	remapped.DefinedResources = sc.remapResourceList(ct.DefinedResources)
+	return sc.writeArena.pushComponentType(remapped)
 }
 
-func (sc *SubtypeChecker) entityTypeHasResources(et ComponentEntityType) bool {
-	switch et.Kind {
-	case EntityType:
-		return et.TypeRef.Kind == AnyTypeResource || (et.TypeRef.Kind == AnyTypeDefined && sc.definedTypeHasResources(&sc.aArena.DefinedTypes[et.TypeRef.Index]))
-	case EntityFunc:
-		ft := sc.aArena.FuncTypes[et.FuncID]
-		for _, p := range ft.Params {
-			if sc.valTypeHasResources(p.Type) {
-				return true
-			}
+func (sc *SubtypeChecker) remapResourceList(ids []ResourceID) []ResourceID {
+	out := slices.Clone(ids)
+	for i, id := range out {
+		if mapped, ok := sc.resourceMapping[id]; ok {
+			out[i] = mapped.id
 		}
-		for _, r := range ft.Results {
-			if sc.valTypeHasResources(r.Type) {
-				return true
-			}
-		}
-	case EntityInstance:
-		it := sc.aArena.InstanceTypes[et.InstID]
-		for _, exp := range it.Exports {
-			if sc.entityTypeHasResources(exp) {
-				return true
-			}
-		}
-	case EntityValue:
-		return sc.valTypeHasResources(et.ValType)
 	}
-	return false
+	return out
 }
 
 // primitiveName returns the string name for a primitive value type.

@@ -433,3 +433,31 @@ func TestCheckInstantiationRejectsModuleWrongKind(t *testing.T) {
 		t.Fatal("expected kind-mismatch error, got nil")
 	}
 }
+
+// A root component's own imports stand for whatever its instantiator supplies, as
+// a nested component's do.
+func TestCheckInstantiation_RootComponentArg(t *testing.T) {
+	load := func(src string) *ComponentType {
+		t.Helper()
+		vp := NewValidatingParser(bytes.NewReader(wat2wasm(t, src)), DefaultFeatures())
+		for {
+			_, err := vp.Next()
+			if err == io.EOF {
+				return vp.TopLevelComponentType()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	provider := load(`(component
+  (import "r" (type $r (sub resource)))
+  (export "x" (type $r)))`)
+	consumer := load(`(component
+  (import "c" (component
+    (import "r" (type $r (sub resource)))
+    (export "x" (type (eq $r))))))`)
+	if err := consumer.CheckInstantiation(map[string]any{"c": provider}); err != nil {
+		t.Fatalf("want root component accepted, got: %v", err)
+	}
+}

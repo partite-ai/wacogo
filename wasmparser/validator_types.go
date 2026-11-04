@@ -345,8 +345,12 @@ type ComponentTypeDesc struct {
 	ImportOrder []string // preserves insertion order for deterministic iteration
 	Exports     map[string]ComponentEntityType
 	ExportOrder []string // preserves insertion order for deterministic iteration
-	// DefinedResources lists the resources a component type declaration introduces
-	// directly, through (sub resource) bounds.
+	// ImportedResources lists the resources its instantiator must supply through
+	// (sub resource) type imports. Those of its instance imports are in their types.
+	ImportedResources []ResourceID
+	// DefinedResources lists the resources each instantiation creates anew and its
+	// exports expose. Anything else its exports name is either what its imports were
+	// given, or from outside it and so stays what it is.
 	DefinedResources []ResourceID
 	// Funcs is the func index space of a component definition.
 	Funcs []ComponentFuncTypeID
@@ -385,7 +389,7 @@ type TypeArena struct {
 	// resourceAliases maps a freshly minted "export-alias" ResourceID to the
 	// underlying defining ResourceID it aliases. Two-level only — fresh →
 	// defining, no chains. Populated by freshenTypeEntityCreated and queried
-	// by SubtypeChecker.checkResourceMatch / mintMapped to resolve cross-
+	// by SubtypeChecker.checkResourceMatch / remapResource to resolve cross-
 	// component re-exports back to the resource they ultimately reference.
 	// Keyed globally because ResourceIDs are unique across the arena and the
 	// alias relationship is stable for the lifetime of the arena.
