@@ -230,6 +230,9 @@ func stampPlaceholderRIDs(comp *Component, htb *wasmparser.HostTypeBuilder) {
 // whole tree, populating comp.allFuncs, comp.allResources, and the
 // parallel comp.root *scopeRuntime tree.
 func buildScopeTree(b *Builder, comp *Component, root *scope) error {
+	// Aliases are resolved once the whole tree has registered its resources,
+	// since one may target a resource in a scope visited after its own.
+	var resolveAliases []func() error
 	var visit func(s *scope, scopePath string) (*scopeRuntime, error)
 	visit = func(s *scope, scopePath string) (*scopeRuntime, error) {
 		seen := map[string]bool{}
@@ -295,11 +298,16 @@ func buildScopeTree(b *Builder, comp *Component, root *scope) error {
 			if err := check(ad.name); err != nil {
 				return nil, err
 			}
-			rr := findResourceRuntime(comp, ad.rt)
-			if rr == nil {
-				return nil, fmt.Errorf("wacogo/host: AddResourceAlias %q: target *ResourceType is not registered with this Builder", ad.name)
-			}
-			sr.aliases = append(sr.aliases, aliasRuntime{exportName: ad.name, target: rr})
+			at := len(sr.aliases)
+			sr.aliases = append(sr.aliases, aliasRuntime{exportName: ad.name})
+			resolveAliases = append(resolveAliases, func() error {
+				rr := findResourceRuntime(comp, ad.rt)
+				if rr == nil {
+					return fmt.Errorf("wacogo/host: AddResourceAlias %q: target *ResourceType is not registered with this Builder", ad.name)
+				}
+				sr.aliases[at].target = rr
+				return nil
+			})
 		}
 		for i := range s.coreModules {
 			cmd := &s.coreModules[i]
@@ -346,6 +354,11 @@ func buildScopeTree(b *Builder, comp *Component, root *scope) error {
 	rootRT, err := visit(root, "")
 	if err != nil {
 		return err
+	}
+	for _, resolve := range resolveAliases {
+		if err := resolve(); err != nil {
+			return err
+		}
 	}
 	comp.root = rootRT
 	return nil
