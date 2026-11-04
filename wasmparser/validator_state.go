@@ -64,19 +64,13 @@ type ComponentState struct {
 	// type declaration exports. Its imports can't name them.
 	definedResources map[ResourceID]bool
 
-	// resourceNames maps resource ID -> all extern names that refer to this
-	// resource in the current context (from imports, exports, or re-exports).
-	// A resource can have multiple names if it is exported/imported under
-	// several aliases, e.g. `(export "r" (type $r))` plus
-	// `(export "r-alt" (type $r))`. Bracket-prefixed func names
-	// (`[constructor]X`, `[method]X.Y`, `[static]X.Y`) match if X equals any
-	// entry in the slice.
-	resourceNames map[ResourceID][]string
-
-	// exportResourceNamesMap is the subset of resourceNames contributed by
-	// export declarations. Exports may only reference resources that appear
-	// here (imports can reference anything in resourceNames).
-	exportResourceNamesMap map[ResourceID][]string
+	// importRefNames and exportRefNames give the extern name of each resource
+	// reference a top-level import or export creates. Bracket-prefixed func names
+	// (`[constructor]X`, `[method]X.Y`) must match the name of the reference their
+	// signature uses, in their own context: another reference to the same resource
+	// has its own name, and an import can't attach to an export's.
+	importRefNames map[ResourceID]string
+	exportRefNames map[ResourceID]string
 
 	// importedResourceIDs tracks resource IDs that have been imported (or are accessible
 	// through imports). Imported resources are valid for use in both imports and exports.
@@ -112,8 +106,8 @@ func newComponentState(features FeatureSet, arena *TypeArena, kind ComponentKind
 		localResources:             make(map[ResourceID]bool),
 		locallyDefinedSubResources: make(map[ResourceID]bool),
 		definedResources:           make(map[ResourceID]bool),
-		resourceNames:          make(map[ResourceID][]string),
-		exportResourceNamesMap: make(map[ResourceID][]string),
+		importRefNames:         make(map[ResourceID]string),
+		exportRefNames:         make(map[ResourceID]string),
 		importedResourceIDs:    make(map[ResourceID]bool),
 		exportedResourceIDs:    make(map[ResourceID]bool),
 		importedDefinedTypes:   make(map[ComponentDefinedTypeID]bool),

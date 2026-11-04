@@ -2,6 +2,8 @@ package wasmparser
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -581,9 +583,8 @@ func (v *Validator) addImport(cs *ComponentState, imp *ComponentImport) (Compone
 		return ComponentEntityType{}, err
 	}
 
-	// If this is a type import with SubResource bounds, register the resource name
 	if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-		addResourceName(v.arena, cs.resourceNames, et.TypeRef.ResID, imp.Name.Name)
+		cs.importRefNames[et.TypeRef.ResID] = imp.Name.Name
 	}
 
 	// Add entity to index space
@@ -754,11 +755,8 @@ func (v *Validator) addExport(cs *ComponentState, exp *ComponentExport) (Compone
 		return ComponentEntityType{}, err
 	}
 
-	// If this is a type export with a resource, register the resource name.
-	// A resource may be exported under multiple names; all are valid.
 	if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-		addResourceName(v.arena, cs.resourceNames, et.TypeRef.ResID, exp.Name.Name)
-		addResourceName(v.arena, cs.exportResourceNamesMap, et.TypeRef.ResID, exp.Name.Name)
+		cs.exportRefNames[et.TypeRef.ResID] = exp.Name.Name
 	}
 
 	// Add the exported entity to the appropriate index space
@@ -839,11 +837,8 @@ func (v *Validator) addExportDecl(cs *ComponentState, exp ComponentExport) error
 		return err
 	}
 
-	// If this is a type export with a resource, register the resource name.
-	// A resource may be exported under multiple names; all are valid.
 	if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-		addResourceName(v.arena, cs.resourceNames, et.TypeRef.ResID, exp.Name.Name)
-		addResourceName(v.arena, cs.exportResourceNamesMap, et.TypeRef.ResID, exp.Name.Name)
+		cs.exportRefNames[et.TypeRef.ResID] = exp.Name.Name
 	}
 
 	// Add entities to their respective index spaces
@@ -921,13 +916,8 @@ func (v *Validator) validateBracketName(cs *ComponentState, name string, et Comp
 		if et.Kind != EntityFunc {
 			return fmt.Errorf("%s name `%s` is not valid: %s is not a func", kind, name, et.Desc())
 		}
-		// Check resource name is known
-		if !v.isKnownResourceName(cs, resourceName) {
+		if !slices.Contains(slices.Collect(maps.Values(contextRefNames(cs, kind))), resourceName) {
 			return fmt.Errorf("static resource name is not known in this context")
-		}
-		// Validate function type resources have names in this context
-		if err := v.checkFuncResourcesHaveNames(cs, et.FuncID); err != nil {
-			return err
 		}
 		return nil
 	}

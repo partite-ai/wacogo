@@ -268,6 +268,11 @@ func (sc *SubtypeChecker) isDefinedTypeSubtypeImpl(a, b ComponentDefinedTypeID) 
 	}
 
 	switch at.Kind {
+	case DefinedKindPrimitive:
+		if at.Primitive != bt.Primitive {
+			return fmt.Errorf("expected primitive `%s` found primitive `%s`", primitiveName(bt.Primitive), primitiveName(at.Primitive))
+		}
+		return nil
 	case DefinedKindRecord:
 		return sc.isRecordSubtype(at.Record, bt.Record)
 	case DefinedKindVariant:

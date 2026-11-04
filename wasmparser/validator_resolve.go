@@ -103,42 +103,26 @@ func (v *Validator) isResultOfOwn(ivt ValTypeDesc) bool {
 	return v.isOwnType(dt.ResultOk.Value)
 }
 
-// contextResourceNames returns the appropriate resource name map for the given kind
-// (import or export). For imports, both imported and exported names are visible.
-// For exports, only exported names are visible.
-func contextResourceNames(cs *ComponentState, kind string) map[ResourceID][]string {
+// contextRefNames returns the names of the resource references in the given
+// context, import or export.
+func contextRefNames(cs *ComponentState, kind string) map[ResourceID]string {
 	if kind == "import" {
-		return cs.resourceNames // imports can see all named resources
+		return cs.importRefNames
 	}
-	return cs.exportResourceNamesMap // exports can only see export-named resources
+	return cs.exportRefNames
 }
 
-// addResourceName appends a name to the slice of names for a resource ID if
-// it isn't already present. A resource can accumulate multiple names when it
-// is exported or imported under several aliases; bracket-prefixed func names
-// match against any of them.
-//
-// When rid is an export-alias half of a fresh→defining pair, the name is
-// also recorded under the defining ResourceID so a subsequent lookup that
-// resolves an alias to its defining still finds the alias's name.
-func addResourceName(arena *TypeArena, m map[ResourceID][]string, rid ResourceID, name string) {
-	addOne := func(id ResourceID) {
-		if slices.Contains(m[id], name) {
-			return
-		}
-		m[id] = append(m[id], name)
+// checkRefName checks that the resource reference a func signature uses has the
+// name its bracket-prefixed func name expects.
+func checkRefName(cs *ComponentState, kind string, id ResourceID, want string) error {
+	name, ok := contextRefNames(cs, kind)[id]
+	if !ok {
+		return fmt.Errorf("resource used in function does not have a name in this context")
 	}
-	addOne(rid)
-	if arena != nil {
-		if defining := arena.ResolveResourceAlias(rid); defining != rid {
-			addOne(defining)
-		}
+	if name != want {
+		return fmt.Errorf("function does not match expected resource name `%s`", name)
 	}
-}
-
-// resourceHasName reports whether any recorded name for rid equals name.
-func resourceHasName(names []string, name string) bool {
-	return slices.Contains(names, name)
+	return nil
 }
 
 // checkFuncResourceName checks that a constructor function's return type resource
@@ -162,16 +146,7 @@ func (v *Validator) checkFuncResourceName(cs *ComponentState, resourceName strin
 	} else {
 		return nil
 	}
-	// Check that the resource has a name in the appropriate context
-	nameMap := contextResourceNames(cs, kind)
-	names, ok := v.namesForResource(nameMap, rid)
-	if !ok {
-		return fmt.Errorf("resource used in function does not have a name in this context")
-	}
-	if !resourceHasName(names, resourceName) {
-		return fmt.Errorf("function does not match expected resource name `%s`", names[0])
-	}
-	return nil
+	return checkRefName(cs, kind, rid, resourceName)
 }
 
 // checkMethodResourceName checks that a method's borrow parameter references
@@ -184,88 +159,7 @@ func (v *Validator) checkMethodResourceName(cs *ComponentState, resourceName str
 	if dt.Kind != DefinedKindBorrow {
 		return nil
 	}
-	rid := dt.Borrow
-	nameMap := contextResourceNames(cs, kind)
-	names, ok := v.namesForResource(nameMap, rid)
-	if !ok {
-		return fmt.Errorf("resource used in function does not have a name in this context")
-	}
-	if !resourceHasName(names, resourceName) {
-		return fmt.Errorf("function does not match expected resource name `%s`", names[0])
-	}
-	return nil
-}
-
-// namesForResource returns every name recorded for rid, including names
-// recorded under other resource IDs that alias to the same defining resource.
-// This makes bracket-name validation see all aliases as referring to the
-// same underlying resource type, regardless of which specific alias was
-// used in the func signature.
-func (v *Validator) namesForResource(m map[ResourceID][]string, rid ResourceID) ([]string, bool) {
-	defining := v.arena.ResolveResourceAlias(rid)
-	var out []string
-	if names, ok := m[rid]; ok {
-		out = append(out, names...)
-	}
-	if defining != rid {
-		if names, ok := m[defining]; ok {
-			for _, n := range names {
-				if !slices.Contains(out, n) {
-					out = append(out, n)
-				}
-			}
-		}
-	}
-	if len(out) == 0 {
-		return nil, false
-	}
-	return out, true
-}
-
-func (v *Validator) isKnownResourceName(cs *ComponentState, name string) bool {
-	for _, names := range cs.resourceNames {
-		if resourceHasName(names, name) {
-			return true
-		}
-	}
-	return false
-}
-
-// checkFuncResourcesHaveNames validates that all resources referenced in a function type
-// have names in the current context. This is required for non-bracket import/export names.
-func (v *Validator) checkFuncResourcesHaveNames(cs *ComponentState, funcID ComponentFuncTypeID) error {
-	ft := v.arena.FuncTypes[funcID]
-	for _, p := range ft.Params {
-		if err := v.checkValTypeResourcesHaveNames(cs, p.Type); err != nil {
-			return err
-		}
-	}
-	for _, r := range ft.Results {
-		if err := v.checkValTypeResourcesHaveNames(cs, r.Type); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (v *Validator) checkValTypeResourcesHaveNames(cs *ComponentState, ivt ValTypeDesc) error {
-	var checkErr error
-	v.walkValType(ivt, func(dt *DefinedTypeDesc) bool {
-		switch dt.Kind {
-		case DefinedKindOwn:
-			if _, ok := cs.resourceNames[dt.Own]; !ok {
-				checkErr = fmt.Errorf("resource used in function does not have a name in this context")
-				return true
-			}
-		case DefinedKindBorrow:
-			if _, ok := cs.resourceNames[dt.Borrow]; !ok {
-				checkErr = fmt.Errorf("resource used in function does not have a name in this context")
-				return true
-			}
-		}
-		return false
-	})
-	return checkErr
+	return checkRefName(cs, kind, dt.Borrow, resourceName)
 }
 
 // validateAndRegisterNamedTypes validates that an entity type is valid for use as an
