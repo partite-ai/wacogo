@@ -9,6 +9,7 @@ import (
 	"github.com/partite-ai/wacogo/internal/canon"
 	"github.com/partite-ai/wacogo/internal/wasm"
 	"github.com/partite-ai/wacogo/wasmparser"
+	"github.com/tetratelabs/wazero"
 )
 
 // loadInstanceInfo tracks a component instance in the component instance index space.
@@ -63,12 +64,13 @@ func (s *loadScope) walkUp(count uint32) *loadScope {
 
 // componentLoader accumulates mutable state during component loading.
 type componentLoader struct {
-	engine  *Engine
-	scope   *loadScope
-	parser  *wasmparser.ValidatingParser
-	plan    []planStep
-	exports []ExportDesc
-	imports []ImportDesc
+	engine   *Engine
+	compiled *[]wazero.CompiledModule
+	scope    *loadScope
+	parser   *wasmparser.ValidatingParser
+	plan     []planStep
+	exports  []ExportDesc
+	imports  []ImportDesc
 
 	// resourceDtors maps a resource TypeID to the core func index of its
 	// destructor, captured at load time. Consumed by planResourceDrop to
@@ -110,12 +112,20 @@ func (l *componentLoader) allocType(r typeResolver) uint32 {
 
 // LoadComponent parses and compiles a component binary into a Component
 // ready for instantiation.
-func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, error) {
+func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (_ *Component, err error) {
 	if e.closed.Load() {
 		return nil, ErrEngineClosed
 	}
+	var compiled []wazero.CompiledModule
+	defer func() {
+		if err != nil {
+			for _, m := range compiled {
+				_ = m.Close(ctx)
+			}
+		}
+	}()
 	vp := wasmparser.NewValidatingParser(r, e.features, wasmparser.WithParseLimits(e.parseLimits))
-	comp, err := e.loadComponentFromParser(ctx, vp, nil)
+	comp, err := e.loadComponentFromParser(ctx, vp, nil, &compiled)
 	if err != nil {
 		return nil, err
 	}
@@ -137,9 +147,12 @@ func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, er
 // loadComponentFromParser reads payloads from a single component's parser,
 // recursively loading sub-components. Unlike ParseAll which flattens nesting,
 // this tracks component boundaries so sub-components get their own Component.
-func (e *Engine) loadComponentFromParser(ctx context.Context, parser *wasmparser.ValidatingParser, parentScope *loadScope) (*Component, error) {
+//
+// compiled collects every module compiled, for the whole of the top-level load.
+func (e *Engine) loadComponentFromParser(ctx context.Context, parser *wasmparser.ValidatingParser, parentScope *loadScope, compiled *[]wazero.CompiledModule) (*Component, error) {
 	l := &componentLoader{
-		engine: e,
+		engine:   e,
+		compiled: compiled,
 		scope: &loadScope{
 			parent:                 parentScope,
 			outerModuleClosures:    make(map[int]outerRef),
@@ -166,7 +179,7 @@ func (e *Engine) loadComponentFromParser(ctx context.Context, parser *wasmparser
 				return nil, err
 			}
 		case *wasmparser.ComponentSectionPayload:
-			subComp, err := e.loadComponentFromParser(ctx, sec.ValidatingParser, l.scope)
+			subComp, err := e.loadComponentFromParser(ctx, sec.ValidatingParser, l.scope, compiled)
 			if err != nil {
 				return nil, fmt.Errorf("wacogo: load sub-component: %w", err)
 			}
@@ -221,6 +234,7 @@ func (l *componentLoader) processModuleSection(ctx context.Context, sec *wasmpar
 	if err != nil {
 		return fmt.Errorf("wacogo: compile module: %w", err)
 	}
+	*l.compiled = append(*l.compiled, compiled)
 	l.scope.compiledModules = append(l.scope.compiledModules, CompiledModule{
 		module:        compiled,
 		syntheticName: syntheticName,
