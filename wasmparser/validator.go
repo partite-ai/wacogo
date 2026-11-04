@@ -59,7 +59,9 @@ type Validator struct {
 	lastCanonicalEntries []ValidatedCanonicalFunction
 }
 
-// NewValidator creates a new Validator with the given feature set.
+// NewValidator creates a new Validator with the given feature set. Limits on what
+// has been decoded by the time it reaches the Validator are the Parser's to enforce,
+// so give the Parser or ParseAll the same options.
 func NewValidator(features FeatureSet, opts ...ParseOption) *Validator {
 	return &Validator{
 		state:    validatorStateUnparsed,

@@ -121,7 +121,9 @@ func (l ParseLimits) resolved() ParseLimits {
 
 var defaultParseLimits = ParseLimits{}.resolved()
 
-// ParseOption configures a Parser, Validator or ValidatingParser.
+// ParseOption configures a Parser, Validator or ValidatingParser. A Parser enforces
+// what limits the binary's encoding, and a Validator what limits its meaning, so
+// when using them separately, give both the same options.
 type ParseOption func(*ParseLimits)
 
 // WithParseLimits sets the limits to parse or validate with.
