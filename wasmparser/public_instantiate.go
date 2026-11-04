@@ -158,28 +158,19 @@ func (i *InstanceType) setComponent(name string, c *componentValue) {
 	i.components[name] = c
 }
 
-// ExposesComponent reports whether an instance of this component would export a
-// component, either directly or from an instance at any depth, whatever the
-// component's exports declare about them.
-func (c *ComponentType) ExposesComponent() bool {
-	return c.NewInstance(nil, nil).exposesComponent()
+// ImportsComponent reports whether this component imports a component, either
+// directly or from an imported instance at any depth.
+func (c *ComponentType) ImportsComponent() bool {
+	return exportsComponent(c.arena, c.arena.ComponentTypes[c.id].Imports)
 }
 
-func (i *InstanceType) exposesComponent() bool {
-	if len(i.components) > 0 {
-		return true
-	}
-	for _, child := range i.children {
-		if child.exposesComponent() {
-			return true
-		}
-	}
-	for name, ent := range i.exports {
+func exportsComponent(arena *TypeArena, entities map[string]ComponentEntityType) bool {
+	for _, ent := range entities {
 		switch ent.Kind {
 		case EntityComponent:
 			return true
 		case EntityInstance:
-			if _, actual := i.children[name]; !actual && i.ExportedInstance(name).exposesComponent() {
+			if exportsComponent(arena, arena.InstanceTypes[ent.InstID].Exports) {
 				return true
 			}
 		}

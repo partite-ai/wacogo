@@ -120,8 +120,17 @@ func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, er
 		return nil, err
 	}
 	comp.wpType = vp.TopLevelComponentType()
-	if comp.wpType.ExposesComponent() {
-		return nil, fmt.Errorf("wacogo: exporting a component from the root component is not supported")
+	if comp.wpType.ImportsComponent() {
+		return nil, fmt.Errorf("wacogo: root-level component imports are not supported")
+	}
+	// wasmtime also rejects a component exported from an instance at any depth.
+	// That component is left alone here: with no component imports, no other
+	// instantiation can receive it, and spotting one hidden by an ascription
+	// would mean evaluating every instantiation in the binary.
+	for _, exp := range comp.exports {
+		if exp.Kind == SortComponent {
+			return nil, fmt.Errorf("wacogo: exporting a component from the root component is not supported")
+		}
 	}
 	return comp, nil
 }
@@ -640,14 +649,6 @@ func (l *componentLoader) buildComponent(parentScope *loadScope) (*Component, er
 		typeResolvers:          l.typeResolvers,
 		outerModuleClosures:    outerModuleClosures,
 		outerComponentClosures: outerComponentClosures,
-	}
-
-	if parentScope == nil {
-		for _, imp := range l.imports {
-			if imp.Kind == SortComponent {
-				return nil, fmt.Errorf("wacogo: root-level component imports are not supported")
-			}
-		}
 	}
 
 	return comp, nil

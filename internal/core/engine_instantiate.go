@@ -92,6 +92,9 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 	if e.closed.Load() {
 		return nil, ErrEngineClosed
 	}
+	if component.wpType == nil {
+		return nil, fmt.Errorf("wacogo: instantiate: a nested component can only be instantiated by its parent")
+	}
 	cfg := &instantiateConfig{}
 	for _, opt := range opts {
 		opt(cfg)

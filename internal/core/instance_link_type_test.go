@@ -926,22 +926,65 @@ func TestInstanceLinkTypes_TypelessInstanceSkipped(t *testing.T) {
 	}
 }
 
-func TestRootExportExposingComponentRejected(t *testing.T) {
+func TestRootComponentImportRejected(t *testing.T) {
 	ctx := context.Background()
 	engine := NewEngine(ctx)
 	defer engine.Close(ctx)
 
 	for name, wat := range map[string]string{
-		"component": `(component (component $c) (export "c" (component $c)))`,
+		"component":      `(component (import "c" (component)))`,
+		"in an instance": `(component (import "i" (instance (export "c" (component)))))`,
+		"in a nested instance": `(component
+  (import "i" (instance (export "j" (instance (export "c" (component)))))))`,
+		"used": `(component
+  (import "i" (instance $i (export "c" (component))))
+  (alias export $i "c" (component $c))
+  (instance (instantiate $c)))`,
+		"re-exported": `(component
+  (import "i" (instance $i (export "c" (component))))
+  (export "i" (instance $i)))`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat)))
+			if err == nil || !strings.Contains(err.Error(), "root-level component imports are not supported") {
+				t.Fatalf("want root import rejected, got: %v", err)
+			}
+		})
+	}
+
+	// A component type isn't a component, and only the root's imports matter.
+	for _, wat := range []string{
+		`(component (import "i" (instance (type (component)) (export "t" (type (eq 0))))))`,
+		`(component (component (import "i" (instance (export "c" (component))))))`,
+	} {
+		if _, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat))); err != nil {
+			t.Fatalf("want %s accepted, got: %v", wat, err)
+		}
+	}
+}
+
+func TestRootComponentExport(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+
+	_, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, `(component (component $c) (export "c" (component $c)))`)))
+	if err == nil || !strings.Contains(err.Error(), "exporting a component from the root component is not supported") {
+		t.Fatalf("want direct export rejected, got: %v", err)
+	}
+
+	// A component exported from an instance loads and stays out of reach, however
+	// the instance got it and whatever its exports declare.
+	for name, wat := range map[string]string{
 		"inline instance": `(component
   (component $c)
   (instance $i (export "c" (component $c)))
   (export "i" (instance $i)))`,
 		"nested inline instance": `(component
   (component $c)
-  (instance $i (export "c" (component $c)))
-  (instance $j (export "i" (instance $i)))
-  (export "j" (instance $j)))`,
+  (instance $h (export "c" (component $c)))
+  (instance $i (export "h" (instance $h)) (export "c" (component $c)))
+  (export "i" (instance $i)))`,
 		"sub-instance": `(component
   (component $k (component $c) (export "c" (component $c)))
   (instance $i (instantiate $k))
@@ -950,45 +993,42 @@ func TestRootExportExposingComponentRejected(t *testing.T) {
   (component $c)
   (instance $i (export "c" (component $c)))
   (export "i" (instance $i) (instance)))`,
-		"hidden inside a sub-instance": `(component
-  (component $k
-    (component $c)
-    (instance $i (export "c" (component $c)))
-    (export "i" (instance $i) (instance)))
-  (instance $s (instantiate $k))
-  (export "s" (instance $s)))`,
-		"imported and re-exported": `(component
-  (import "i" (instance $i (export "c" (component))))
-  (export "i" (instance $i)))`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat)))
-			if err == nil || !strings.Contains(err.Error(), "exporting a component from the root component is not supported") {
-				t.Fatalf("want root export rejected, got: %v", err)
+			comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat)))
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			inst, err := comp.Instantiate(ctx)
+			if err != nil {
+				t.Fatalf("instantiate: %v", err)
+			}
+			defer inst.Close(ctx)
+			nested := inst.ExportedInstance("i").ExportedComponent("c")
+			if nested == nil {
+				t.Fatal("want the nested component returned")
+			}
+			_, err = nested.Instantiate(ctx)
+			if err == nil || !strings.Contains(err.Error(), "can only be instantiated by its parent") {
+				t.Fatalf("want nested component refused, got: %v", err)
 			}
 		})
 	}
 
-	// A component type export isn't a component, and an instance holding one is
-	// fine as long as it stays inside.
-	for _, wat := range []string{
-		`(component (type $t (component)) (export "t" (type $t)))`,
-		`(component (component $c) (instance $i (export "c" (component $c))))`,
-	} {
-		if _, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat))); err != nil {
-			t.Fatalf("want %s accepted, got: %v", wat, err)
-		}
-	}
-
-	// An inner component can still export one to its parent.
-	comp := `(component
+	// An inner component can still export one to its parent, which instantiates it.
+	comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, `(component
   (component $k (component $c) (export "c" (component $c)))
   (instance $i (instantiate $k))
   (alias export $i "c" (component $c))
-  (instance (instantiate $c)))`
-	if _, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, comp))); err != nil {
+  (instance (instantiate $c)))`)))
+	if err != nil {
 		t.Fatalf("want inner component export accepted, got: %v", err)
 	}
+	inst, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("want inner component instantiated, got: %v", err)
+	}
+	defer inst.Close(ctx)
 }
 
 // A type import's name is matched like any other import's, whichever version of

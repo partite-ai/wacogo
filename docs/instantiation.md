@@ -43,8 +43,11 @@ Two layers, with a hard split:
   `ExportedFunc.ParserFunctionType()`, `CompiledModule.wpModuleType`,
   `*Component.wpType`, and (from Instantiate)
   `*ComponentInstance.wpInstance`. No subtype check fires at load
-  time, though a root export exposing a component at any depth is
-  rejected, as in wasmtime.
+  time. A root component that imports a component, directly or from
+  an imported instance at any depth, or that exports one directly, is
+  rejected. Unlike wasmtime, a component exported from an instance is
+  allowed: nothing can import it, and a nested component can only be
+  instantiated by its parent.
 
 - **Instantiate** (`internal/core/engine_instantiate.go`,
   `(*Engine).instantiate`). Right after option parsing and before the
