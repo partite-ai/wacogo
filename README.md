@@ -91,7 +91,7 @@ For exports nested inside an interface, use
 `inst.ExportedInstance("ns:pkg/iface").ExportedFunc("name")`. To wire
 individual imports manually, use `wacogo.WithInstanceImport`,
 `wacogo.WithFuncImport`, `wacogo.WithModuleImport`,
-`wacogo.WithComponentImport`, or `wacogo.WithTypeImport`.
+`wacogo.WithComponentImport`, or `wacogo.WithResourceTypeImport`.
 
 Runnable demo: [`examples/wasi-greet/`](examples/wasi-greet/).
 

@@ -16,6 +16,8 @@ type linkProvider struct {
 	label string
 	wat   string
 	with  map[string]string
+	// typeWith maps its resource type imports to paths, as in linkCase.typeLinks.
+	typeWith map[string]string
 }
 
 // linkCase links instances, named by paths such as "p.n.m" (the export n.m of
@@ -90,7 +92,116 @@ const twoResourceFuncsConsumer = `(component
   (import "f" (func (param "x" $o)))
   (import "g" (func (param "x" $o))))`
 
+const typeAndInstanceConsumer = `(component
+  (import "r" (type $r (sub resource)))
+  (import "a" (instance (export "r" (type (eq $r))))))`
+
+const eqTypeImportConsumer = `(component
+  (import "r" (type $r (sub resource)))
+  (import "s" (type (eq $r))))`
+
+// reexportsTypeImport exports its resource type import, from its root and from
+// an inline instance.
+const reexportsTypeImport = `(component
+  (import "r" (type $r (sub resource)))
+  (instance $n (export "r" (type $r)))
+  (export "r" (type $r))
+  (export "n" (instance $n)))`
+
 var linkCases = []linkCase{
+	{
+		name:      "resource type import pins an instance's resource",
+		providers: []linkProvider{{label: "l", wat: resourceAndChild}},
+		consumer:  typeAndInstanceConsumer,
+		typeLinks: map[string]string{"r": "l.r"},
+		links:     map[string]string{"a": "l"},
+	},
+	{
+		name:      "resource type import from another instantiation than an instance",
+		providers: []linkProvider{{label: "l1", wat: resourceAndChild}, {label: "l2", wat: resourceAndChild}},
+		consumer:  typeAndInstanceConsumer,
+		typeLinks: map[string]string{"r": "l1.r"},
+		links:     map[string]string{"a": "l2"},
+		wantErr:   "mismatched resource types",
+	},
+	{
+		name:      "resource type import from another instantiation than a func",
+		providers: []linkProvider{{label: "p1", wat: funcsWithResource}, {label: "p2", wat: funcsWithResource}},
+		consumer:  twoResourceFuncsConsumer,
+		typeLinks: map[string]string{"r": "p1.r"},
+		funcLinks: map[string]string{"f": "p2.f", "g": "p2.n.g"},
+		wantErr:   "mismatched resource types",
+	},
+	{
+		name: "re-exported resource type import is the lender's",
+		providers: []linkProvider{
+			{label: "l", wat: resourceAndChild},
+			{label: "p", wat: reexportsTypeImport, typeWith: map[string]string{"r": "l.r"}},
+		},
+		consumer: eqResourceConsumer,
+		links:    map[string]string{"a": "l", "b": "p"},
+	},
+	{
+		name: "resource type import re-exported through an inline instance",
+		providers: []linkProvider{
+			{label: "l", wat: resourceAndChild},
+			{label: "p", wat: reexportsTypeImport, typeWith: map[string]string{"r": "l.r"}},
+		},
+		consumer: eqResourceConsumer,
+		links:    map[string]string{"a": "l.n", "b": "p.n"},
+	},
+	{
+		name: "re-exported resource type import is not another lender's",
+		providers: []linkProvider{
+			{label: "l1", wat: resourceAndChild},
+			{label: "l2", wat: resourceAndChild},
+			{label: "p", wat: reexportsTypeImport, typeWith: map[string]string{"r": "l1.r"}},
+		},
+		consumer: eqResourceConsumer,
+		links:    map[string]string{"a": "l2", "b": "p"},
+		wantErr:  "mismatched resource types",
+	},
+	{
+		name:      "eq type import of the same resource",
+		providers: []linkProvider{{label: "l", wat: resourceAndChild}},
+		consumer:  eqTypeImportConsumer,
+		typeLinks: map[string]string{"r": "l.r", "s": "l.n.r"},
+	},
+	{
+		name:      "eq type import of another resource",
+		providers: []linkProvider{{label: "l1", wat: resourceAndChild}, {label: "l2", wat: resourceAndChild}},
+		consumer:  eqTypeImportConsumer,
+		typeLinks: map[string]string{"r": "l1.r", "s": "l2.r"},
+		wantErr:   "mismatched resource types",
+	},
+	{
+		name:      "resource type import given a non-resource",
+		providers: []linkProvider{{label: "l", wat: `(component (type $u u32) (export "u" (type $u)))`}},
+		consumer:  `(component (import "r" (type (sub resource))))`,
+		typeLinks: map[string]string{"r": "l.u"},
+		wantErr:   "no resource export `u`",
+	},
+	{
+		name:      "resource type import of a missing export",
+		providers: []linkProvider{{label: "l", wat: resourceAndChild}},
+		consumer:  `(component (import "r" (type (sub resource))))`,
+		typeLinks: map[string]string{"r": "l.nope"},
+		wantErr:   "no resource export `nope`",
+	},
+	{
+		name:      "non-resource type import given a resource",
+		providers: []linkProvider{{label: "l", wat: resourceAndChild}},
+		consumer:  `(component (type $u u32) (import "t" (type (eq $u))))`,
+		typeLinks: map[string]string{"t": "l.r"},
+		wantErr:   "found resource",
+	},
+	{
+		name:      "func import given a resource",
+		providers: []linkProvider{{label: "l", wat: resourceAndChild}},
+		consumer:  `(component (import "f" (func)))`,
+		typeLinks: map[string]string{"f": "l.r"},
+		wantErr:   "expected function found resource",
+	},
 	{
 		name: "func from a nested instance mismatch",
 		providers: []linkProvider{{label: "p", wat: `(component
@@ -616,21 +727,24 @@ func composeLink(c linkCase) string {
 		}
 		return args.String()
 	}
+	item := func(kind, owner string, links map[string]string) string {
+		var args strings.Builder
+		for imp, path := range links {
+			split := strings.LastIndex(path, ".")
+			next := fmt.Sprintf("$%s_%s_%s", kind, owner, imp)
+			fmt.Fprintf(&b, "(alias export %s %q (%s %s))\n", ref(path[:split]), path[split+1:], kind, next)
+			fmt.Fprintf(&args, " (with %q (%s %s))", imp, kind, next)
+		}
+		return args.String()
+	}
 	for _, p := range c.providers {
 		args := instantiate("$c_"+p.label, p.wat[:len(p.wat)-1], p.with)
+		args += item("type", p.label, p.typeWith)
 		fmt.Fprintf(&b, "(instance $%s (instantiate $c_%s%s))\n", p.label, p.label, args)
 	}
 	args := instantiate("$consumer", c.consumer[:len(c.consumer)-1], c.links)
-	item := func(kind string, links map[string]string) {
-		for imp, path := range links {
-			split := strings.LastIndex(path, ".")
-			next := fmt.Sprintf("$%s_%s", kind, imp)
-			fmt.Fprintf(&b, "(alias export %s %q (%s %s))\n", ref(path[:split]), path[split+1:], kind, next)
-			args += fmt.Sprintf(" (with %q (%s %s))", imp, kind, next)
-		}
-	}
-	item("func", c.funcLinks)
-	item("type", c.typeLinks)
+	args += item("func", "consumer", c.funcLinks)
+	args += item("type", "consumer", c.typeLinks)
 	fmt.Fprintf(&b, "(instance (instantiate $consumer%s)))\n", args)
 	return b.String()
 }
@@ -723,9 +837,17 @@ func TestInstanceLinkTypes(t *testing.T) {
 				split := strings.LastIndex(path, ".")
 				return resolveLinkPath(t, insts, path[:split]), path[split+1:]
 			}
+			typeOpts := func(insts map[string]*ComponentInstance, links map[string]string) []InstantiateOption {
+				var out []InstantiateOption
+				for name, path := range links {
+					inst, export := parent(insts, path)
+					out = append(out, WithResourceTypeImport(name, inst, export))
+				}
+				return out
+			}
 			insts := map[string]*ComponentInstance{}
 			for _, p := range c.providers {
-				inst, err := load(p.wat).Instantiate(ctx, opts(insts, p.with)...)
+				inst, err := load(p.wat).Instantiate(ctx, append(opts(insts, p.with), typeOpts(insts, p.typeWith)...)...)
 				if err != nil {
 					t.Fatalf("instantiate %s: %v", p.label, err)
 				}
@@ -742,10 +864,7 @@ func TestInstanceLinkTypes(t *testing.T) {
 				}
 				consumerOpts = append(consumerOpts, WithFuncImport(name, fn))
 			}
-			for name, path := range c.typeLinks {
-				inst, export := parent(insts, path)
-				consumerOpts = append(consumerOpts, WithTypeImport(name, inst.ExportedType(export)))
-			}
+			consumerOpts = append(consumerOpts, typeOpts(insts, c.typeLinks)...)
 			_, err := load(c.consumer).Instantiate(ctx, consumerOpts...)
 			switch {
 			case c.wantErr == "" && err != nil:
@@ -869,5 +988,103 @@ func TestRootExportExposingComponentRejected(t *testing.T) {
   (instance (instantiate $c)))`
 	if _, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, comp))); err != nil {
 		t.Fatalf("want inner component export accepted, got: %v", err)
+	}
+}
+
+// A type import's name is matched like any other import's, whichever version of
+// it the caller names.
+func TestResourceTypeImport_VersionedName(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+	load := func(wat string) *Component {
+		comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat)))
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		return comp
+	}
+	lender := load(resourceAndChild)
+	l1, err := lender.Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l2, err := lender.Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := load(`(component
+  (import "a:b/c@1.2.3" (type $r (sub resource)))
+  (export "r" (type $r)))`).Instantiate(ctx, WithResourceTypeImport("a:b/c@1.2.0", l1, "r"))
+	if err != nil {
+		t.Fatalf("instantiate: %v", err)
+	}
+	if p.ExportedType("r") != l1.ExportedType("r") {
+		t.Fatal("want the import to be the lender's runtime resource")
+	}
+	consumer := load(eqResourceConsumer)
+	if _, err := consumer.Instantiate(ctx, WithInstanceImport("a", l1), WithInstanceImport("b", p)); err != nil {
+		t.Fatalf("want the lender's resource re-exported, got: %v", err)
+	}
+	if _, err := consumer.Instantiate(ctx, WithInstanceImport("a", l2), WithInstanceImport("b", p)); err == nil {
+		t.Fatal("want another lender's resource to differ")
+	}
+}
+
+func TestResourceTypeImport_BadLender(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+	consumer, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, `(component (import "r" (type (sub resource))))`)))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		lender  *ComponentInstance
+		wantErr string
+	}{
+		"nil":      {nil, "no instance supplied"},
+		"typeless": {&ComponentInstance{}, "no resource export `r`"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := consumer.Instantiate(ctx, WithResourceTypeImport("r", tc.lender, "r"))
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("want error containing %q, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+	if _, err := consumer.Instantiate(ctx); err == nil || !strings.Contains(err.Error(), "was not found") {
+		t.Fatalf("want a missing resource type import rejected, got: %v", err)
+	}
+}
+
+// An omitted instance's type names a resource its placeholder can't supply at
+// runtime.
+func TestResourceTypeImport_LenderIsRuntimeEmptyPlaceholder(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+	load := func(wat string) *Component {
+		comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat)))
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		return comp
+	}
+	l, err := load(resourceAndChild).Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := load(`(component
+  (import "r" (type $r (sub resource)))
+  (import "e" (instance $e (export "r" (type (eq $r)))))
+  (export "e" (instance $e)))`).Instantiate(ctx, WithResourceTypeImport("r", l, "r"))
+	if err != nil {
+		t.Fatalf("instantiate: %v", err)
+	}
+	_, err = load(`(component (import "r" (type (sub resource))))`).
+		Instantiate(ctx, WithResourceTypeImport("r", p.ExportedInstance("e"), "r"))
+	if err == nil || !strings.Contains(err.Error(), "no resource export `r`") {
+		t.Fatalf("want a placeholder's resource rejected, got: %v", err)
 	}
 }

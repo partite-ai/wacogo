@@ -78,7 +78,7 @@ type ModuleType struct {
 
 // NewInstance returns the type of a fresh instance of this component, including
 // those of the instances inside it. instances and resources give what is supplied
-// to its imports, by import name, literal or canonical for instances.
+// to its imports, by import name, literal or canonical.
 //
 // Each call opens a new scope: two separate NewInstance calls produce instances
 // with distinct resources; supplying the same handle twice shares identity.
@@ -193,10 +193,10 @@ func (i *InstanceType) resourceAt(path []string) (ResourceID, bool) {
 // CheckInstantiation verifies that the supplied arguments satisfy the
 // component's declared imports. Accepts any of: *InstanceType (for
 // instance imports), *ComponentType (for component imports),
-// *FuncType (for func imports), *ModuleType (for core-module imports).
-// Missing imports are silently skipped — callers that require all
-// imports be supplied must enforce that separately. Value and type
-// imports are not checked here.
+// *FuncType (for func imports), *ModuleType (for core-module imports),
+// ResourceFrom (for resource type imports). Missing imports are silently
+// skipped — callers that require all imports be supplied must enforce
+// that separately. Value imports are not checked here.
 //
 // args may be keyed by either the component's literal import name or
 // its canonical interface name (see CanonicalizeImportName); if the
@@ -238,6 +238,22 @@ func (c *ComponentType) CheckInstantiation(args map[string]any) error {
 			sc.aArena = a.arena
 			sc.aScope = a.scope
 			if err := sc.isFuncTypeSubtype(a.id, importType.FuncID); err != nil {
+				return fmt.Errorf("import %q: %w", importName, err)
+			}
+		case ResourceFrom:
+			if importType.Kind != EntityType {
+				return fmt.Errorf("import %q: expected %s found resource", importName, entityExpectedName(importType.Kind))
+			}
+			if importType.TypeRef.Kind != AnyTypeResource {
+				return fmt.Errorf("import %q: expected %s, found resource", importName, importType.TypeRef.Desc())
+			}
+			lenderRes, ok := a.Lender.resourceAt([]string{a.Export})
+			if !ok {
+				return fmt.Errorf("import %q: instance has no resource export `%s`", importName, a.Export)
+			}
+			sc.aArena = a.Lender.arena
+			sc.aScope = a.Lender.scope
+			if err := sc.checkResourceMatch(lenderRes, importType.TypeRef.ResID); err != nil {
 				return fmt.Errorf("import %q: %w", importName, err)
 			}
 		case *ModuleType:

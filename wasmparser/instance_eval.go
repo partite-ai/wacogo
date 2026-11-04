@@ -149,7 +149,11 @@ func (i *InstanceType) bindImports(ct ComponentTypeDesc, args instanceArgs) {
 				i.bindImportedInstance(imp.InstID, lender, nil)
 			}
 		case imp.Kind == EntityType && imp.TypeRef.Kind == AnyTypeResource:
-			if root, ok := args.resources[name]; ok {
+			root, ok := args.resources[name]
+			if !ok {
+				root, ok = args.resources[CanonicalizeImportName(name)]
+			}
+			if ok {
 				i.setRoot(i.arena.ResolveResourceAlias(imp.TypeRef.ResID), root)
 			}
 		}

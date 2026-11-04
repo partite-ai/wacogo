@@ -147,6 +147,65 @@ func TestResourceRef_LentByNestedInstance(t *testing.T) {
 	}
 }
 
+func TestResourceTypeImport_HostLender(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+
+	b := e.NewHostBuilder("type-import-lender")
+	r := b.AddResource("r", nil)
+	b.AddNestedInstance("n").AddResource("s", nil)
+	if err := b.AddNestedInstance("m").AddResourceAlias("r", r); err != nil {
+		t.Fatalf("AddResourceAlias: %v", err)
+	}
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	l1, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer l1.Close(ctx)
+	l2, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer l2.Close(ctx)
+
+	consumer := loadGuest(t, e, `(component
+  (import "r" (type $r (sub resource)))
+  (import "a" (instance (export "r" (type (eq $r))))))`)
+
+	for _, tc := range []struct {
+		name     string
+		lender   *core.ComponentInstance
+		instance *core.ComponentInstance
+		wantErr  bool
+	}{
+		{"root and own root", l1.Core(), l1.Core(), false},
+		{"root and own nested scope", l1.Core(), l1.Core().ExportedInstance("m"), false},
+		{"nested scope and root", l1.Core().ExportedInstance("m"), l1.Core(), false},
+		{"another instantiation", l1.Core(), l2.Core(), true},
+		{"another instantiation's nested scope", l1.Core(), l2.Core().ExportedInstance("m"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := consumer.Instantiate(ctx,
+				wacogo.WithResourceTypeImport("r", tc.lender, "r"),
+				wacogo.WithInstanceImport("a", tc.instance))
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("wantErr=%v, got: %v", tc.wantErr, err)
+			}
+		})
+	}
+
+	nested := loadGuest(t, e, `(component (import "r" (type (sub resource))))`)
+	if _, err := nested.Instantiate(ctx, wacogo.WithResourceTypeImport("r", l1.Core().ExportedInstance("n"), "s")); err != nil {
+		t.Fatalf("want a resource defined in a nested scope accepted, got: %v", err)
+	}
+}
+
 func TestResourceRef_LenderMissingExport(t *testing.T) {
 	ctx := context.Background()
 	e := wacogo.NewEngine(ctx)

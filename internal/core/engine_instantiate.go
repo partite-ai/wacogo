@@ -101,6 +101,7 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 	// the plan. Imports with no typed handle fall through to the existing
 	// runtime machinery.
 	args := make(map[string]any, len(cfg.imports))
+	suppliedResources := make(map[string]wasmparser.ResourceFrom)
 	for name, v := range cfg.imports {
 		switch ap := v.(type) {
 		case *ComponentInstance:
@@ -119,10 +120,30 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 			if ap.wpType != nil {
 				args[name] = ap.wpType
 			}
+		case resourceTypeImport:
+			if ap.lender == nil {
+				return nil, fmt.Errorf("wacogo: instantiate: import %q: no instance supplied", name)
+			}
+			if ap.lender.wpInstance != nil {
+				from := wasmparser.ResourceFrom{Lender: ap.lender.wpInstance, Export: ap.export}
+				args[name] = from
+				suppliedResources[name] = from
+			}
 		}
 	}
 	if err := component.wpType.CheckInstantiation(args); err != nil {
 		return nil, fmt.Errorf("wacogo: instantiate: %w", err)
+	}
+
+	// The plan reads a type import as the lender's runtime Type.
+	for name, v := range cfg.imports {
+		if ap, ok := v.(resourceTypeImport); ok {
+			res, ok := ap.lender.exportedType(ap.export).(*TypeResource)
+			if !ok {
+				return nil, fmt.Errorf("wacogo: instantiate: import %q: instance has no resource export `%s`", name, ap.export)
+			}
+			cfg.imports[name] = res
+		}
 	}
 
 	// Each top-level instance gets fresh resources, apart from those it imports.
@@ -133,7 +154,7 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 		}
 	}
 
-	return e.instantiateWithParentCfg(ctx, component, nil, component.wpType.NewInstance(suppliedInstanceImports, nil), cfg)
+	return e.instantiateWithParentCfg(ctx, component, nil, component.wpType.NewInstance(suppliedInstanceImports, suppliedResources), cfg)
 }
 
 func (e *Engine) instantiateWithParent(ctx context.Context, component *Component, parentState *instantiationState, wpInst *wasmparser.InstanceType, opts ...InstantiateOption) (*ComponentInstance, error) {
@@ -904,7 +925,7 @@ func (step *planInstantiateComponent) execute(ctx context.Context, s *instantiat
 			if t == nil {
 				return fmt.Errorf("wacogo: instantiate component: arg %q references unresolved type %d", arg.name, arg.index)
 			}
-			opts = append(opts, WithTypeImport(arg.name, t))
+			opts = append(opts, withResolvedType(arg.name, t))
 		case SortValue:
 			// Value args not yet supported but don't block instantiation.
 			continue
@@ -1213,7 +1234,7 @@ func (step *planResolveType) execute(_ context.Context, s *instantiationState) e
 	typ := r.resolve(&resolverCtx{inst: s.inst, imports: s.imports, state: s})
 	if typ == nil {
 		if ir, ok := r.(importResolver); ok {
-			if _, supplied := s.imports[ir.importName]; !supplied {
+			if _, supplied := s.imports[wasmparser.CanonicalizeImportName(ir.importName)]; !supplied {
 				return fmt.Errorf("wacogo: import %q: was not found", ir.importName)
 			}
 		}

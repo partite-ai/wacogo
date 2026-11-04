@@ -134,13 +134,13 @@ The concrete kinds:
 | `resourceResolver` | fresh `&TypeResource{...}` | the only intentionally non-pure resolver |
 | `instanceImportResolver` | `rc.inst.instances[idx].exportedType(name)` | uniformly covers imported and locally-instantiated sub-instances since both share the instance index space |
 | `aliasResolver` | walks `rc.inst.parent` `outerDepth` times, returns `target.types[idx]` | outer aliases never cross siblings |
-| `importResolver` | `rc.imports[importName].(Type)` | direct component-level type imports |
+| `importResolver` | `rc.imports[importName].(Type)` | direct component-level type imports, already resolved from `WithResourceTypeImport` or a sub-component's type argument |
 | `instanceTypeResolver`, `componentTypeResolver` | `&InstanceType{}` / `&ComponentType{}` | placeholders |
 
 `funcResolver` returns `nil` rather than panicking when a child resolver
 returns nil. That's the load-time fall-back path for function signatures whose
-type imports are not plumbed through the `WithTypeImport` carrier — the caller
-treats the absent `*FuncType` like the pre-resolver behaviour.
+type imports are not supplied — the caller treats the absent `*FuncType` like
+the pre-resolver behaviour.
 
 ### Invariants
 

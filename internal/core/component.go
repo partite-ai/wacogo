@@ -89,9 +89,10 @@ type InstantiateOption func(*instantiateConfig)
 // instantiateConfig stores the arguments passed to a component instantiation.
 // Each imports entry maps an import name to the supplied value: *Func for
 // func imports, *ComponentInstance for instance imports, *CompiledModule for
-// core module imports, *Component for component imports, Type for type
-// imports, Val for value imports. The runtime validates the Go-level type
-// matches the import's declared Sort before running the plan.
+// core module imports, *Component for component imports, resourceTypeImport
+// or a resolved Type for type imports, Val for value imports. The runtime
+// validates the Go-level type matches the import's declared Sort before
+// running the plan.
 type instantiateConfig struct {
 	imports map[string]any
 }
@@ -123,8 +124,22 @@ func WithComponentImport(name string, c *Component) InstantiateOption {
 	return func(cfg *instantiateConfig) { cfg.put(name, c) }
 }
 
-// WithTypeImport satisfies a named type import with the given Type.
-func WithTypeImport(name string, t Type) InstantiateOption {
+// WithResourceTypeImport satisfies a named resource type import with the
+// resource that lender exports under the given name.
+func WithResourceTypeImport(name string, lender *ComponentInstance, export string) InstantiateOption {
+	return func(cfg *instantiateConfig) { cfg.put(name, resourceTypeImport{lender: lender, export: export}) }
+}
+
+// resourceTypeImport is the supplied value of a resource type import until
+// Instantiate has checked it and replaced it with the lender's Type.
+type resourceTypeImport struct {
+	lender *ComponentInstance
+	export string
+}
+
+// withResolvedType supplies a type argument to a sub-component. The validator
+// has already checked it against the sub-component's import.
+func withResolvedType(name string, t Type) InstantiateOption {
 	return func(cfg *instantiateConfig) { cfg.put(name, t) }
 }
 

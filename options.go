@@ -48,7 +48,8 @@ func WithComponentImport(name string, c *Component) InstantiateOption {
 	return core.WithComponentImport(name, c)
 }
 
-// WithTypeImport satisfies a named type import with the given Type.
-func WithTypeImport(name string, t Type) InstantiateOption {
-	return core.WithTypeImport(name, t)
+// WithResourceTypeImport satisfies a named resource type import with the
+// resource that lender exports under the given name.
+func WithResourceTypeImport(name string, lender *ComponentInstance, export string) InstantiateOption {
+	return core.WithResourceTypeImport(name, lender, export)
 }

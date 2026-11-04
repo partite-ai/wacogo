@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+
+	"github.com/partite-ai/wacogo/wasmparser"
 )
 
 // typeResolver constructs a Type value for one slot in a component's type
@@ -305,7 +307,7 @@ func (r aliasResolver) resolve(rc *resolverCtx) Type {
 type importResolver struct{ importName string }
 
 func (r importResolver) resolve(rc *resolverCtx) Type {
-	arg, ok := rc.imports[r.importName]
+	arg, ok := rc.imports[wasmparser.CanonicalizeImportName(r.importName)]
 	if !ok {
 		return nil
 	}

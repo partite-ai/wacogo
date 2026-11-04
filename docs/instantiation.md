@@ -127,12 +127,20 @@ must have been pinned by at least one provided export referring to it.
 If not, the missing export is reported by name (the same
 `export `%s` was not found` phrasing the spec suite checks for).
 
-### Value and type imports
+### Type and value imports
 
-Out of scope for `CheckInstantiation`. The runtime path
-(`validateImportKind`) verifies the Go-level kind for type imports, but
-no structural check runs. A future change could add handles for these
-once a concrete spec case demands it.
+A resource type import is supplied as `wacogo.WithResourceTypeImport(name,
+lender, export)`. `Instantiate` passes it to `CheckInstantiation` as a
+`wasmparser.ResourceFrom`, which binds the import to the lender's resource in
+import order, so later imports naming it must agree. It passes the same value
+to `NewInstance`, so a re-export of the import is the lender's resource, and
+then hands the plan the lender's runtime `*TypeResource`.
+
+Non-resource type imports have nothing to supply: their declaration fully
+determines them, and they may be omitted. Supplying a resource for one is an
+error.
+
+Value imports are out of scope for `CheckInstantiation`.
 
 ## Resource identity and `(eq $r)` constraints
 
