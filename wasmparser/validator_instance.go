@@ -110,7 +110,7 @@ func (v *Validator) instantiateComponent(cs *ComponentState, inst Instantiate) e
 	}
 
 	id := v.arena.pushInstanceType(instType)
-	if v.arena.InstanceTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.InstanceTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.instances = append(cs.instances, id)
@@ -159,7 +159,7 @@ func (v *Validator) instantiateFromExports(cs *ComponentState, inst InstantiateF
 	}
 
 	id := v.arena.pushInstanceType(instType)
-	if v.arena.InstanceTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.InstanceTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.instances = append(cs.instances, id)
@@ -193,6 +193,7 @@ func (v *Validator) addCoreInstance(cs *ComponentState, inst Instance) error {
 	if cs.kind != ComponentKindComponent {
 		return fmt.Errorf("core instances cannot be defined in type declarations")
 	}
+	cs.body.coreInstances++
 	switch i := inst.(type) {
 	case CoreInstantiate:
 		return v.coreInstantiate(cs, i)

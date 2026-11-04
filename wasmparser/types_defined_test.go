@@ -15,7 +15,7 @@ func TestRecordType(t *testing.T) {
 		0x03, 'a', 'g', 'e',          // field name "age"
 		0x79,                          // type: u32
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -44,7 +44,7 @@ func TestRecordType(t *testing.T) {
 // TestListType tests decoding list<u8>
 func TestListType(t *testing.T) {
 	data := []byte{0x70, 0x7d} // list, u8
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -61,7 +61,7 @@ func TestListType(t *testing.T) {
 // TestOptionType tests decoding option<string>
 func TestOptionType(t *testing.T) {
 	data := []byte{0x6b, 0x73} // option, string
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -79,7 +79,7 @@ func TestOptionType(t *testing.T) {
 // Encoding: 0x6a, ok-present=0x01, string=0x73, err-present=0x01, u32=0x79
 func TestResultType_BothPresent(t *testing.T) {
 	data := []byte{0x6a, 0x01, 0x73, 0x01, 0x79}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -106,7 +106,7 @@ func TestResultType_BothPresent(t *testing.T) {
 // Encoding: 0x6a, 0x00 (ok absent), 0x00 (err absent)
 func TestResultType_BothAbsent(t *testing.T) {
 	data := []byte{0x6a, 0x00, 0x00}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -131,7 +131,7 @@ func TestEnumType(t *testing.T) {
 		0x03, 'r', 'e', 'd',              // "red"
 		0x04, 'b', 'l', 'u', 'e',         // "blue"
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -154,7 +154,7 @@ func TestEnumType(t *testing.T) {
 // TestOwnType tests decoding own<0>
 func TestOwnType(t *testing.T) {
 	data := []byte{0x69, 0x00} // own, u32=0
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -171,7 +171,7 @@ func TestOwnType(t *testing.T) {
 // TestBorrowType tests decoding borrow<1>
 func TestBorrowType(t *testing.T) {
 	data := []byte{0x68, 0x01} // borrow, u32=1
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -193,7 +193,7 @@ func TestTupleType(t *testing.T) {
 		0x7d,  // u8
 		0x73,  // string
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -221,7 +221,7 @@ func TestFlagsType(t *testing.T) {
 		0x04, 'r', 'e', 'a', 'd',               // "read"
 		0x05, 'w', 'r', 'i', 't', 'e',          // "write"
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -256,7 +256,7 @@ func TestVariantType(t *testing.T) {
 		0x00,                          // no type
 		0x00,                          // no refines
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -291,7 +291,7 @@ func TestVariantType(t *testing.T) {
 // TestReadComponentDefinedType_Primitive tests that a primitive opcode is decoded as PrimitiveValType
 func TestReadComponentDefinedType_Primitive(t *testing.T) {
 	data := []byte{0x7f} // bool
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	dt, err := readComponentDefinedType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -308,7 +308,7 @@ func TestReadComponentDefinedType_Primitive(t *testing.T) {
 // TestReadComponentDefinedType_UnknownOpcode tests that an unknown opcode returns an error
 func TestReadComponentDefinedType_UnknownOpcode(t *testing.T) {
 	data := []byte{0x00} // unknown
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	_, err := readComponentDefinedType(r)
 	if err == nil {
 		t.Fatal("expected error for unknown opcode, got nil")

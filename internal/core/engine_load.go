@@ -114,7 +114,7 @@ func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, er
 	if e.closed.Load() {
 		return nil, ErrEngineClosed
 	}
-	vp := wasmparser.NewValidatingParser(r, e.features)
+	vp := wasmparser.NewValidatingParser(r, e.features, wasmparser.WithParseLimits(e.parseLimits))
 	comp, err := e.loadComponentFromParser(ctx, vp, nil)
 	if err != nil {
 		return nil, err

@@ -24,10 +24,10 @@ type ValidatingParser struct {
 // types from other NewValidatingParser calls. Cross-parse handles (e.g.
 // supplying one component's *InstanceType as an instance-import arg to
 // another) are wired by the cross-arena resolver in CheckInstantiation.
-func NewValidatingParser(r io.Reader, features FeatureSet) *ValidatingParser {
+func NewValidatingParser(r io.Reader, features FeatureSet, opts ...ParseOption) *ValidatingParser {
 	return &ValidatingParser{
-		parser:    NewParser(r),
-		validator: NewValidator(features),
+		parser:    NewParser(r, opts...),
+		validator: NewValidator(features, opts...),
 	}
 }
 

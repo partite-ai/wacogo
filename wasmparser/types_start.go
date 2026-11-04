@@ -18,8 +18,8 @@ func (s *ComponentStartFunction) unmarshalBinary(r *BinaryReader) error {
 	if err != nil {
 		return err
 	}
-	if argCount > MaxStartArgs {
-		return errfAt(r.Offset(), "start function arg count %d exceeds maximum %d", argCount, MaxStartArgs)
+	if argCount > r.limits.StartArgs {
+		return errfAt(r.Offset(), "start function arg count %d exceeds maximum %d", argCount, r.limits.StartArgs)
 	}
 	s.Args = make([]uint32, 0, argCount)
 	for range argCount {

@@ -23,6 +23,7 @@ const (
 
 // Validator validates a stream of Payload values from ParseAll.
 type Validator struct {
+	limits *ParseLimits
 	state      validatorState
 	features   FeatureSet
 	components []*ComponentState // stack, one per nesting level
@@ -56,10 +57,11 @@ type Validator struct {
 }
 
 // NewValidator creates a new Validator with the given feature set.
-func NewValidator(features FeatureSet) *Validator {
+func NewValidator(features FeatureSet, opts ...ParseOption) *Validator {
 	return &Validator{
 		state:    validatorStateUnparsed,
 		features: features,
+		limits:   newParseLimits(opts),
 		arena:    newTypeArena(features),
 	}
 }
@@ -175,8 +177,11 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 			ImportedResources: importedResources(child),
 			DefinedResources:  v.exposedDefinedResources(child),
 		})
-		if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
+		if v.arena.ComponentTypeSizes[id] > v.limits.EffectiveTypeSize {
 			return fmt.Errorf("effective type size exceeds the limit")
+		}
+		if err := checkInstanceLimits(v.arena, id, v.limits); err != nil {
+			return err
 		}
 		v.topLevelComponentTypeID = id
 		v.topLevelValid = true
@@ -196,7 +201,7 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		ct.DefinedResources = v.exposedDefinedResources(child)
 		size := v.arena.computeComponentTypeSize(ct)
 		v.arena.ComponentTypeSizes[compTypeID] = size
-		if size > MaxEffectiveTypeSize {
+		if size > v.limits.EffectiveTypeSize {
 			return fmt.Errorf("effective type size exceeds the limit")
 		}
 	}

@@ -14,22 +14,23 @@ type BinaryReader struct {
 	r      *bufio.Reader
 	offset uint64 // current position in the original stream (for error reporting)
 	// nesting tracks recursive parsing depth (nested components/modules,
-	// recursive type declarations). Bounded by MaxNestingDepth.
+	// recursive type declarations). Bounded by limits.NestingDepth.
 	nesting int
+	limits  *ParseLimits
 }
 
 // NewBinaryReader creates a BinaryReader that reads from r.
 // For byte slices, use NewBinaryReader(bytes.NewReader(data)).
 // For bounded reads, use NewBinaryReader(io.LimitReader(r, n)).
 func NewBinaryReader(r io.Reader) *BinaryReader {
-	return &BinaryReader{r: bufio.NewReader(r)}
+	return &BinaryReader{r: bufio.NewReader(r), limits: &defaultParseLimits}
 }
 
 // newBinaryReaderAt creates a BinaryReader with a base offset for error reporting.
 // Used internally for sub-parsers and section readers where the data originates
 // at a known position in the original stream.
-func newBinaryReaderAt(r io.Reader, offset uint64) *BinaryReader {
-	return &BinaryReader{r: bufio.NewReader(r), offset: offset}
+func newBinaryReaderAt(r io.Reader, offset uint64, limits *ParseLimits) *BinaryReader {
+	return &BinaryReader{r: bufio.NewReader(r), offset: offset, limits: limits}
 }
 
 // Offset returns the current stream position (base offset + bytes consumed).
@@ -72,6 +73,10 @@ func (r *BinaryReader) ReadByte() (byte, error) {
 func (r *BinaryReader) ReadBytes(n int) ([]byte, error) {
 	if n == 0 {
 		return []byte{}, nil
+	}
+	if n < 0 {
+		// A length from the binary that didn't fit in an int on this platform.
+		return nil, errfAt(r.Offset(), "length out of range")
 	}
 	buf := make([]byte, n)
 	_, err := io.ReadFull(r.r, buf)
@@ -279,14 +284,14 @@ func (r *BinaryReader) ReadS64() (int64, error) {
 
 // ReadString reads a length-prefixed UTF-8 string.
 // The length is a u32 LEB128 value. Returns an error if the string exceeds
-// MaxStringSize or contains invalid UTF-8.
+// the limit on string size or contains invalid UTF-8.
 func (r *BinaryReader) ReadString() (string, error) {
 	length, err := r.ReadU32()
 	if err != nil {
 		return "", err
 	}
-	if length > MaxStringSize {
-		return "", errfAt(r.Offset(), "string length %d exceeds maximum %d", length, MaxStringSize)
+	if length > r.limits.StringSize {
+		return "", errfAt(r.Offset(), "string length %d exceeds maximum %d", length, r.limits.StringSize)
 	}
 	bs, err := r.ReadBytes(int(length))
 	if err != nil {

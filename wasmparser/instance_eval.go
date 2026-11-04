@@ -1,6 +1,9 @@
 package wasmparser
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+)
 
 // componentBody records how a component fills its instance and component index
 // spaces, in order. It is what makes an instance's type, and those of the
@@ -8,6 +11,9 @@ import "slices"
 // to its imports.
 type componentBody struct {
 	steps []bodyStep
+	// coreInstances is the size of the component's core instance index space,
+	// which holds nothing that isn't created by the component itself.
+	coreInstances uint64
 }
 
 // bodyStep appends one entry to an instance or component index space.
@@ -164,11 +170,47 @@ func (n nestedBindings) resource(res ImportedResource) (scopedResID, bool) {
 	return resolveResource(self.scope, self.arena, id, nil), true
 }
 
+// instanceBudget counts the instances an evaluation creates, against limits.
+type instanceBudget struct {
+	maxCore, maxComponent uint32
+	core, component       uint64
+}
+
+func (b *instanceBudget) charge(body *componentBody) {
+	b.component++
+	if body != nil {
+		b.core += body.coreInstances
+	}
+}
+
+func (b *instanceBudget) err() error {
+	if b.maxCore != Unlimited && b.core > uint64(b.maxCore) {
+		return fmt.Errorf("%w: more than %d core instances", ErrInstanceLimitExceeded, b.maxCore)
+	}
+	if b.maxComponent != Unlimited && b.component > uint64(b.maxComponent) {
+		return fmt.Errorf("%w: more than %d component instances", ErrInstanceLimitExceeded, b.maxComponent)
+	}
+	return nil
+}
+
+// checkInstanceLimits evaluates an instantiation of component id, which stops
+// descending once the limits are passed, so that this takes time proportional to
+// the limits however many instances the component would create.
+func checkInstanceLimits(arena *TypeArena, id ComponentTypeID, limits *ParseLimits) error {
+	if limits.CoreInstances == Unlimited && limits.ComponentInstances == Unlimited {
+		return nil
+	}
+	budget := &instanceBudget{maxCore: limits.CoreInstances, maxComponent: limits.ComponentInstances}
+	evalInstance(arena, id, nil, noBindings{}, budget)
+	return budget.err()
+}
+
 // instanceFrame holds the index spaces of one instantiation being evaluated.
 type instanceFrame struct {
 	self       *InstanceType
 	outer      *instanceFrame
 	bindings   evalBindings
+	budget     *instanceBudget
 	instances  []*InstanceType
 	components []*componentValue
 }
@@ -179,13 +221,14 @@ type instanceFrame struct {
 // Evaluation order is what lets resourceRoots be resolved as they are recorded:
 // an instantiation's imports refer to instances evaluated before it, and its
 // parent binds to it only once it, and everything inside it, is complete.
-func evalInstance(arena *TypeArena, id ComponentTypeID, outer *instanceFrame, bindings evalBindings) *InstanceType {
+func evalInstance(arena *TypeArena, id ComponentTypeID, outer *instanceFrame, bindings evalBindings, budget *instanceBudget) *InstanceType {
 	ct := arena.ComponentTypes[id]
+	budget.charge(ct.body)
 	self := &InstanceType{arena: arena, exports: ct.Exports, funcs: ct.Funcs}
 	self.scope = self
 	self.bindImports(ct, bindings)
 	if ct.body != nil {
-		f := &instanceFrame{self: self, outer: outer, bindings: bindings}
+		f := &instanceFrame{self: self, outer: outer, bindings: bindings, budget: budget}
 		for _, step := range ct.body.steps {
 			f.run(step)
 		}
@@ -318,8 +361,12 @@ func (f *instanceFrame) instantiate(s stepInstantiate) *InstanceType {
 		// reports that; until then all that's known is the declared type.
 		return f.declared(s.view)
 	}
+	if f.budget.err() != nil {
+		// The verdict is in, so stop descending and let the evaluation unwind.
+		return f.declared(s.view)
+	}
 	self := f.self
-	child := evalInstance(self.arena, comp.id, comp.frame, nestedBindings{f, s})
+	child := evalInstance(self.arena, comp.id, comp.frame, nestedBindings{f, s}, f.budget)
 	self.bindSubInstance(self.arena.InstanceTypes[s.view].Exports, child, child.exports)
 	return child
 }

@@ -45,8 +45,8 @@ func (ft *ComponentFuncType) unmarshalBinary(r *BinaryReader) error {
 	if err != nil {
 		return err
 	}
-	if paramCount > MaxFunctionParams {
-		return errfAt(r.Offset(), "func param count %d exceeds maximum %d", paramCount, MaxFunctionParams)
+	if paramCount > r.limits.FunctionParams {
+		return errfAt(r.Offset(), "func param count %d exceeds maximum %d", paramCount, r.limits.FunctionParams)
 	}
 	ft.Params = make([]FuncParam, 0, paramCount)
 	for range paramCount {
@@ -177,15 +177,15 @@ func (*InstanceTypeDecl) componentTypeDef() {}
 func (it *InstanceTypeDecl) unmarshalBinary(r *BinaryReader) error {
 	r.nesting++
 	defer func() { r.nesting-- }()
-	if r.nesting > MaxNestingDepth {
-		return errfAt(r.Offset(), "instance type declaration nesting depth %d exceeds maximum %d", r.nesting, MaxNestingDepth)
+	if uint32(r.nesting) > r.limits.NestingDepth {
+		return errfAt(r.Offset(), "instance type declaration nesting depth %d exceeds maximum %d", r.nesting, r.limits.NestingDepth)
 	}
 	count, err := r.ReadU32()
 	if err != nil {
 		return err
 	}
-	if count > MaxInstanceTypeDeclarations {
-		return errfAt(r.Offset(), "instance type declaration count %d exceeds maximum %d", count, MaxInstanceTypeDeclarations)
+	if count > r.limits.InstanceTypeDeclarations {
+		return errfAt(r.Offset(), "instance type declaration count %d exceeds maximum %d", count, r.limits.InstanceTypeDeclarations)
 	}
 	it.Declarations = make([]InstanceTypeDeclaration, 0, count)
 	for range count {
@@ -274,15 +274,15 @@ func (*ComponentTypeDecl) componentTypeDef() {}
 func (ct *ComponentTypeDecl) unmarshalBinary(r *BinaryReader) error {
 	r.nesting++
 	defer func() { r.nesting-- }()
-	if r.nesting > MaxNestingDepth {
-		return errfAt(r.Offset(), "component type declaration nesting depth %d exceeds maximum %d", r.nesting, MaxNestingDepth)
+	if uint32(r.nesting) > r.limits.NestingDepth {
+		return errfAt(r.Offset(), "component type declaration nesting depth %d exceeds maximum %d", r.nesting, r.limits.NestingDepth)
 	}
 	count, err := r.ReadU32()
 	if err != nil {
 		return err
 	}
-	if count > MaxComponentTypeDeclarations {
-		return errfAt(r.Offset(), "component type declaration count %d exceeds maximum %d", count, MaxComponentTypeDeclarations)
+	if count > r.limits.ComponentTypeDeclarations {
+		return errfAt(r.Offset(), "component type declaration count %d exceeds maximum %d", count, r.limits.ComponentTypeDeclarations)
 	}
 	ct.Declarations = make([]ComponentTypeDeclaration, 0, count)
 	for range count {

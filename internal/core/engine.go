@@ -22,6 +22,7 @@ type EngineOption func(*engineConfig)
 type engineConfig struct {
 	runtimeConfig wazero.RuntimeConfig
 	maxLiftBytes  uint64
+	parseLimits   wasmparser.ParseLimits
 }
 
 // WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
@@ -47,12 +48,31 @@ func WithMaxLiftBytes(n uint64) EngineOption {
 // arguments or results exceed the limit set by WithMaxLiftBytes.
 var ErrLiftLimitExceeded = canon.ErrLiftLimitExceeded
 
+// ParseLimits bounds what LoadComponent accepts. A zero field means the default
+// given for it, and Unlimited means no limit.
+type ParseLimits = wasmparser.ParseLimits
+
+// Unlimited is the ParseLimits value for a limit that is not enforced.
+const Unlimited = wasmparser.Unlimited
+
+// WithParseLimits sets the limits components are loaded with. Fields left at
+// zero keep their defaults.
+func WithParseLimits(limits ParseLimits) EngineOption {
+	return func(c *engineConfig) { c.parseLimits = limits }
+}
+
+// ErrInstanceLimitExceeded is wrapped by the error LoadComponent reports when
+// one instantiation of a component would create more instances than ParseLimits
+// allows.
+var ErrInstanceLimitExceeded = wasmparser.ErrInstanceLimitExceeded
+
 // Engine owns the wazero runtime and is the entry point for loading components.
 type Engine struct {
 	runtime      wazero.Runtime
 	canonHost    *canon.Host
 	features     wasmparser.FeatureSet
 	maxLiftBytes uint64
+	parseLimits  ParseLimits
 	closed       atomic.Bool
 
 	// bridges caches compiled instantiate-from-exports bridge modules by
@@ -77,6 +97,7 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 		canonHost:    canon.NewHost(rt, cfg.maxLiftBytes),
 		features:     wasmparser.DefaultFeatures(),
 		maxLiftBytes: cfg.maxLiftBytes,
+		parseLimits:  cfg.parseLimits,
 		bridges:      map[string]wazero.CompiledModule{},
 	}
 }

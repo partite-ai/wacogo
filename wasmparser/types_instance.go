@@ -45,8 +45,8 @@ func readComponentInstance(r *BinaryReader) (ComponentInstance, error) {
 		if err != nil {
 			return nil, err
 		}
-		if argCount > MaxInstantiationArgs {
-			return nil, errfAt(r.Offset(), "instantiation arg count %d exceeds maximum %d", argCount, MaxInstantiationArgs)
+		if argCount > r.limits.InstantiationArgs {
+			return nil, errfAt(r.Offset(), "instantiation arg count %d exceeds maximum %d", argCount, r.limits.InstantiationArgs)
 		}
 		args := make([]InstantiationArg, 0, argCount)
 		for range argCount {
@@ -71,7 +71,7 @@ func readComponentInstance(r *BinaryReader) (ComponentInstance, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := checkCount(r.Offset(), count, MaxComponentExternNames, "component instance export"); err != nil {
+		if err := checkCount(r.Offset(), count, r.limits.ComponentExternNames, "component instance export"); err != nil {
 			return nil, err
 		}
 		exports := make([]ComponentExport, 0, count)
@@ -140,8 +140,8 @@ func readInstance(r *BinaryReader) (Instance, error) {
 		if err != nil {
 			return nil, err
 		}
-		if argCount > MaxInstantiationArgs {
-			return nil, errfAt(r.Offset(), "core instantiation arg count %d exceeds maximum %d", argCount, MaxInstantiationArgs)
+		if argCount > r.limits.InstantiationArgs {
+			return nil, errfAt(r.Offset(), "core instantiation arg count %d exceeds maximum %d", argCount, r.limits.InstantiationArgs)
 		}
 		args := make([]CoreInstantiationArg, 0, argCount)
 		for range argCount {
@@ -166,7 +166,7 @@ func readInstance(r *BinaryReader) (Instance, error) {
 		if err != nil {
 			return nil, err
 		}
-		if err := checkCount(r.Offset(), count, MaxExports, "core instance export"); err != nil {
+		if err := checkCount(r.Offset(), count, r.limits.Exports, "core instance export"); err != nil {
 			return nil, err
 		}
 		exports := make([]CoreExportItem, 0, count)

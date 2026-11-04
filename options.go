@@ -28,6 +28,24 @@ func WithMaxLiftBytes(n uint64) EngineOption {
 // arguments or results exceed the limit set by WithMaxLiftBytes.
 var ErrLiftLimitExceeded = core.ErrLiftLimitExceeded
 
+// ParseLimits bounds what LoadComponent accepts. A zero field means the default
+// given for it, and Unlimited means no limit.
+type ParseLimits = core.ParseLimits
+
+// Unlimited is the ParseLimits value for a limit that is not enforced.
+const Unlimited = core.Unlimited
+
+// WithParseLimits sets the limits components are loaded with. Fields left at
+// zero keep their defaults.
+func WithParseLimits(limits ParseLimits) EngineOption {
+	return core.WithParseLimits(limits)
+}
+
+// ErrInstanceLimitExceeded is wrapped by the error LoadComponent reports when
+// one instantiation of a component would create more instances than ParseLimits
+// allows.
+var ErrInstanceLimitExceeded = core.ErrInstanceLimitExceeded
+
 // WithFuncImport satisfies a named func import with the given *ExportedFunc.
 func WithFuncImport(name string, f *ExportedFunc) InstantiateOption {
 	return core.WithFuncImport(name, f)

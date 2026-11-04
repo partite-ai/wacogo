@@ -54,7 +54,7 @@ func (v *Validator) addDefinedType(cs *ComponentState, dt ComponentDefinedType) 
 		return fmt.Errorf("type nesting is too deep")
 	}
 	id := v.arena.pushDefinedType(idt)
-	if v.arena.DefinedTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.DefinedTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeDefined, Index: uint32(id)})
@@ -224,8 +224,8 @@ func (v *Validator) resolveDefinedType(cs *ComponentState, dt ComponentDefinedTy
 		if len(t.Labels) == 0 {
 			return DefinedTypeDesc{}, fmt.Errorf("flags must have at least one entry")
 		}
-		if len(t.Labels) > 32 {
-			return DefinedTypeDesc{}, fmt.Errorf("cannot have more than 32 flags")
+		if len(t.Labels) > maxFlagNames {
+			return DefinedTypeDesc{}, fmt.Errorf("cannot have more than %d flags", maxFlagNames)
 		}
 		flagNames := make(map[string]string)
 		for _, l := range t.Labels {
@@ -354,7 +354,7 @@ func (v *Validator) addFuncType(cs *ComponentState, ft *ComponentFuncType) error
 		}
 	}
 	id := v.arena.pushFuncType(FuncTypeDesc{Params: params, Results: results})
-	if v.arena.FuncTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.FuncTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeFunc, Index: uint32(id)})
@@ -396,8 +396,8 @@ func (v *Validator) addResourceType(cs *ComponentState, rt *ResourceType) error 
 }
 
 func (v *Validator) addComponentTypeDecl(cs *ComponentState, ctd *ComponentTypeDecl) error {
-	if len(v.components) >= MaxNestingDepth {
-		return fmt.Errorf("component nesting depth %d exceeds maximum %d", len(v.components), MaxNestingDepth)
+	if uint32(len(v.components)) >= v.limits.NestingDepth {
+		return fmt.Errorf("component nesting depth %d exceeds maximum %d", len(v.components), v.limits.NestingDepth)
 	}
 	// Create a sub-state for the component type declarations
 	subCS := newComponentState(v.features, v.arena, ComponentKindComponentType)
@@ -428,7 +428,7 @@ func (v *Validator) addComponentTypeDecl(cs *ComponentState, ctd *ComponentTypeD
 		DefinedResources:  v.exposedDefinedResources(subCS),
 	}
 	id := v.arena.pushComponentType(compType)
-	if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.ComponentTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeComponent, Index: uint32(id)})
@@ -457,8 +457,8 @@ func (v *Validator) processComponentTypeDecl(subCS *ComponentState, decl Compone
 }
 
 func (v *Validator) addInstanceTypeDecl(cs *ComponentState, itd *InstanceTypeDecl) error {
-	if len(v.components) >= MaxNestingDepth {
-		return fmt.Errorf("instance nesting depth %d exceeds maximum %d", len(v.components), MaxNestingDepth)
+	if uint32(len(v.components)) >= v.limits.NestingDepth {
+		return fmt.Errorf("instance nesting depth %d exceeds maximum %d", len(v.components), v.limits.NestingDepth)
 	}
 	// Create a sub-state for the instance type declarations
 	subCS := newComponentState(v.features, v.arena, ComponentKindInstanceType)
@@ -499,7 +499,7 @@ func (v *Validator) addInstanceTypeDecl(cs *ComponentState, itd *InstanceTypeDec
 		DefinedResources: definedResources,
 	}
 	id := v.arena.pushInstanceType(instType)
-	if v.arena.InstanceTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.InstanceTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeInstance, Index: uint32(id)})

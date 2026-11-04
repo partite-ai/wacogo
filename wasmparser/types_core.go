@@ -210,8 +210,8 @@ func readCoreFuncType(r *BinaryReader) (*CoreFuncType, error) {
 	if err != nil {
 		return nil, err
 	}
-	if paramCount > MaxFunctionParams {
-		return nil, errfAt(r.Offset(), "function param count %d exceeds maximum %d", paramCount, MaxFunctionParams)
+	if paramCount > r.limits.FunctionParams {
+		return nil, errfAt(r.Offset(), "function param count %d exceeds maximum %d", paramCount, r.limits.FunctionParams)
 	}
 	params := make([]CoreValParam, paramCount)
 	for i := range paramCount {
@@ -227,8 +227,8 @@ func readCoreFuncType(r *BinaryReader) (*CoreFuncType, error) {
 	if err != nil {
 		return nil, err
 	}
-	if resultCount > MaxFunctionResults {
-		return nil, errfAt(r.Offset(), "function result count %d exceeds maximum %d", resultCount, MaxFunctionResults)
+	if resultCount > r.limits.FunctionResults {
+		return nil, errfAt(r.Offset(), "function result count %d exceeds maximum %d", resultCount, r.limits.FunctionResults)
 	}
 	results := make([]CoreValParam, resultCount)
 	for i := range resultCount {
@@ -247,8 +247,8 @@ func readCoreModuleType(r *BinaryReader) (*CoreModuleType, error) {
 	if err != nil {
 		return nil, err
 	}
-	if count > MaxModuleTypeDeclarations {
-		return nil, errfAt(r.Offset(), "module type declaration count %d exceeds maximum %d", count, MaxModuleTypeDeclarations)
+	if count > r.limits.ModuleTypeDeclarations {
+		return nil, errfAt(r.Offset(), "module type declaration count %d exceeds maximum %d", count, r.limits.ModuleTypeDeclarations)
 	}
 
 	decls := make([]ModuleTypeDeclaration, 0, count)
@@ -376,7 +376,7 @@ func readModuleDeclFuncType(r *BinaryReader) (*ModuleDeclType, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkCount(r.Offset(), paramCount, MaxFunctionParams, "module type function param"); err != nil {
+	if err := checkCount(r.Offset(), paramCount, r.limits.FunctionParams, "module type function param"); err != nil {
 		return nil, err
 	}
 	params := make([]CoreValParam, paramCount)
@@ -391,7 +391,7 @@ func readModuleDeclFuncType(r *BinaryReader) (*ModuleDeclType, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := checkCount(r.Offset(), resultCount, MaxFunctionResults, "module type function result"); err != nil {
+	if err := checkCount(r.Offset(), resultCount, r.limits.FunctionResults, "module type function result"); err != nil {
 		return nil, err
 	}
 	results := make([]CoreValParam, resultCount)

@@ -16,7 +16,7 @@ func TestComponentFuncType_SingleResult(t *testing.T) {
 		0x00,                    // single unnamed result
 		0x73,                    // string
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	ct, err := readComponentTypeDef(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -52,7 +52,7 @@ func TestComponentFuncType_NoResults(t *testing.T) {
 		0x00,       // 0 params
 		0x01, 0x00, // named result list with 0 entries = no results
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	ct, err := readComponentTypeDef(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -76,7 +76,7 @@ func TestComponentFuncType_InvalidResultByte(t *testing.T) {
 		0x00,       // 0 params
 		0x01, 0x01, // named result list with invalid inner byte (must be 0x00)
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	_, err := readComponentTypeDef(r)
 	if err == nil {
 		t.Fatal("expected error for invalid result encoding")
@@ -90,7 +90,7 @@ func TestResourceType_NoDtor(t *testing.T) {
 		0x7f, // i32 rep
 		0x00, // no dtor
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	ct, err := readComponentTypeDef(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -115,7 +115,7 @@ func TestResourceType_WithDtor(t *testing.T) {
 		0x01, // dtor present
 		0x05, // dtor func index 5
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	ct, err := readComponentTypeDef(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -169,7 +169,7 @@ func TestReadComponentType_DefinedType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := newBinaryReaderAt(bytes.NewReader(tt.data), 0)
+			r := newBinaryReaderAt(bytes.NewReader(tt.data), 0, &defaultParseLimits)
 			ct, err := readComponentTypeDef(r)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
