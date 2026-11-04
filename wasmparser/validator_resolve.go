@@ -308,29 +308,12 @@ func (v *Validator) validateEntityForExtern(cs *ComponentState, et ComponentEnti
 		}
 		return nil
 	case EntityInstance:
+		// Each export names its types once validated, so it can use what's declared
+		// before it, and only that.
 		instType := v.arena.InstanceTypes[et.InstID]
-		// Pre-register every type-entity export so the instance's type exports
-		// can reference each other independently of map iteration order, and so
-		// later func/value exports of the instance see those types as named.
-		for _, expET := range instType.Exports {
-			if expET.Kind == EntityType {
-				v.registerTypeEntity(cs, expET.TypeRef, kind)
-			}
-		}
-		// Validate types and nested instances.
-		for _, expET := range instType.Exports {
-			if expET.Kind == EntityType || expET.Kind == EntityInstance {
-				if err := v.validateEntityForExtern(cs, expET, kind); err != nil {
-					return fmt.Errorf("instance not valid to be used as %s", kind)
-				}
-			}
-		}
-		// Validate funcs/values now that types are registered.
-		for _, expET := range instType.Exports {
-			if expET.Kind != EntityType && expET.Kind != EntityInstance {
-				if err := v.validateEntityForExtern(cs, expET, kind); err != nil {
-					return fmt.Errorf("instance not valid to be used as %s", kind)
-				}
+		for _, name := range instType.ExportOrder {
+			if err := v.validateEntityForExtern(cs, instType.Exports[name], kind); err != nil {
+				return fmt.Errorf("instance not valid to be used as %s", kind)
 			}
 		}
 		return nil

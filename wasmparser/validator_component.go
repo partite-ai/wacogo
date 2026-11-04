@@ -493,6 +493,7 @@ func (v *Validator) addInstanceTypeDecl(cs *ComponentState, itd *InstanceTypeDec
 	}
 	instType := InstanceTypeDesc{
 		Exports:          subCS.exports,
+		ExportOrder:      subCS.exportOrder,
 		DefinedResources: definedResources,
 	}
 	id := v.arena.pushInstanceType(instType)
@@ -809,13 +810,11 @@ func (v *Validator) addExportDecl(cs *ComponentState, exp ComponentExport) error
 		cs.definedResources[et.TypeRef.ResID] = true
 	}
 
-	// Note: type-entity exports inside a type declaration intentionally do
-	// NOT get a freshly minted identity. Their AscribedType always carries an
-	// (eq ...) or (sub resource) bound, and our representation encodes the eq
-	// constraint by reusing the referenced type's ID — minting a fresh ID here
-	// would break that linkage and cause downstream subtype checks to lose the
-	// eq relationship between, e.g., two instance imports that reference the
-	// same alias.
+	// An (eq) export is a new reference to the type it names, as in a component
+	// definition. Comparing types looks through it; only it is named.
+	if exp.AscribedType.Valid {
+		et = v.freshenTypeEntityCreated(cs, et, importTypeRefIsSubResource(exp.AscribedType.Value))
+	}
 
 	// Validate the name
 	if err := ValidateExportNameStr(exp.Name); err != nil {

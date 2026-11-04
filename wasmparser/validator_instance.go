@@ -97,7 +97,8 @@ func (v *Validator) instantiateComponent(cs *ComponentState, inst Instantiate) e
 	// Build instance exports from the component's exports: its imports are now what
 	// was supplied, and what it creates is new with this instance.
 	instType := InstanceTypeDesc{
-		Exports: make(map[string]ComponentEntityType),
+		Exports:     make(map[string]ComponentEntityType),
+		ExportOrder: compType.ExportOrder,
 	}
 	for _, res := range compType.DefinedResources {
 		fresh := v.arena.allocResourceID()
@@ -154,6 +155,7 @@ func (v *Validator) instantiateFromExports(cs *ComponentState, inst InstantiateF
 		}
 
 		instType.Exports[exp.Name.Name] = et
+		instType.ExportOrder = append(instType.ExportOrder, exp.Name.Name)
 	}
 
 	id := v.arena.pushInstanceType(instType)

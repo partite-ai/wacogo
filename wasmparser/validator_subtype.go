@@ -935,6 +935,7 @@ func (sc *SubtypeChecker) remapInstanceType(id ComponentInstanceTypeID) Componen
 	}
 	newID := sc.writeArena.pushInstanceType(InstanceTypeDesc{
 		Exports:          exports,
+		ExportOrder:      it.ExportOrder,
 		DefinedResources: definedResources,
 	})
 	if sc.instanceTypeRemap != nil {

@@ -332,6 +332,9 @@ type FuncParamDesc struct {
 // InstanceTypeDesc holds the exports of a component instance.
 type InstanceTypeDesc struct {
 	Exports          map[string]ComponentEntityType
+	// ExportOrder is the declaration order of Exports, which decides what each
+	// export can name.
+	ExportOrder      []string
 	DefinedResources []DefinedResource // resources defined (not just referenced) by this instance type
 }
 

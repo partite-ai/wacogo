@@ -44,14 +44,14 @@ func TestShape_VariantRoundTrip(t *testing.T) {
 	importerWAT := `(component
   (import "h" (instance $h
     (type $pt (record (field "x" u32) (field "y" u32)))
-    (export "point" (type (eq $pt)))
+    (export "point" (type $p (eq $pt)))
     (type $sk (variant
       (case "circle" u32)
-      (case "rect" $pt)
+      (case "rect" $p)
       (case "none")
     ))
-    (export "shape-kind" (type (eq $sk)))
-    (export "describe" (func (param "s" $sk) (result string)))
+    (export "shape-kind" (type $k (eq $sk)))
+    (export "describe" (func (param "s" $k) (result string)))
   ))
   (alias export $h "describe" (func $d))
   (export "describe" (func $d))
