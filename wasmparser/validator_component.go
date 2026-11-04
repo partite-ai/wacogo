@@ -444,7 +444,8 @@ func (v *Validator) processComponentTypeDecl(subCS *ComponentState, decl Compone
 	case InstanceDeclExport:
 		return v.addExportDecl(subCS, d.Export)
 	case ComponentDeclImport:
-		return v.addImportDecl(subCS, d.Import)
+		_, err := v.addImport(subCS, &d.Import)
+		return err
 	default:
 		return fmt.Errorf("unknown component type declaration %T", decl)
 	}
@@ -529,7 +530,7 @@ func (v *Validator) validateImportSection(p *ComponentImportSectionPayload) erro
 		if err != nil {
 			return err
 		}
-		et, err := v.addImportCapturing(cs, imp)
+		et, err := v.addImport(cs, imp)
 		if err != nil {
 			return err
 		}
@@ -538,12 +539,9 @@ func (v *Validator) validateImportSection(p *ComponentImportSectionPayload) erro
 	return nil
 }
 
-func (v *Validator) addImport(cs *ComponentState, imp *ComponentImport) error {
-	_, err := v.addImportCapturing(cs, imp)
-	return err
-}
-
-func (v *Validator) addImportCapturing(cs *ComponentState, imp *ComponentImport) (ComponentEntityType, error) {
+// addImport adds an import to a component definition or a component type, where
+// it means the same thing: what an instantiator must supply.
+func (v *Validator) addImport(cs *ComponentState, imp *ComponentImport) (ComponentEntityType, error) {
 	// Check name uniqueness first (before format validation)
 	if err := cs.checkImportName(imp.Name.Name); err != nil {
 		return ComponentEntityType{}, err
@@ -679,53 +677,6 @@ func (v *Validator) freshenInstanceResources(et ComponentEntityType) ComponentEn
 	return ComponentEntityType{Kind: EntityInstance, InstID: sc.remapInstanceType(et.InstID)}
 }
 
-// addImportDecl handles an import within a type declaration.
-func (v *Validator) addImportDecl(cs *ComponentState, imp ComponentImport) error {
-	// Validate the name
-	if err := ValidateImportName(imp.Name); err != nil {
-		return fmt.Errorf("`%s` is not a valid extern name: %s", imp.Name.Name, err)
-	}
-
-	// Check name uniqueness
-	if err := cs.checkImportName(imp.Name.Name); err != nil {
-		return err
-	}
-
-	// Resolve type ref to entity type
-	et, err := cs.typeRefToEntityType(imp.Type)
-	if err != nil {
-		return err
-	}
-
-	// Mint a fresh "created" identity for type entities (see addImportCapturing).
-	et = v.freshenTypeEntityCreated(cs, et, importTypeRefIsSubResource(imp.Type))
-
-	// Validate that the entity type is valid for use as an import
-	if err := v.validateAndRegisterNamedTypes(cs, et, "import"); err != nil {
-		return err
-	}
-
-	// Validate bracket-prefixed names
-	if err := v.validateBracketName(cs, imp.Name.Name, et, "import"); err != nil {
-		return err
-	}
-
-	// If this is a type import with SubResource bounds, register the resource name
-	if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-		addResourceName(v.arena, cs.resourceNames, et.TypeRef.ResID, imp.Name.Name)
-	}
-
-	// Add entity to index space
-	if err := cs.addEntity(et); err != nil {
-		return err
-	}
-
-	// Record in imports map
-	cs.imports[imp.Name.Name] = et
-	cs.importOrder = append(cs.importOrder, imp.Name.Name)
-	return nil
-}
-
 // ---------- Export Section ----------
 
 func (v *Validator) validateExportSection(p *ComponentExportSectionPayload) error {
@@ -738,7 +689,7 @@ func (v *Validator) validateExportSection(p *ComponentExportSectionPayload) erro
 		if err != nil {
 			return err
 		}
-		et, err := v.addExportCapturing(cs, exp)
+		et, err := v.addExport(cs, exp)
 		if err != nil {
 			return err
 		}
@@ -747,12 +698,7 @@ func (v *Validator) validateExportSection(p *ComponentExportSectionPayload) erro
 	return nil
 }
 
-func (v *Validator) addExport(cs *ComponentState, exp *ComponentExport) error {
-	_, err := v.addExportCapturing(cs, exp)
-	return err
-}
-
-func (v *Validator) addExportCapturing(cs *ComponentState, exp *ComponentExport) (ComponentEntityType, error) {
+func (v *Validator) addExport(cs *ComponentState, exp *ComponentExport) (ComponentEntityType, error) {
 	// Get entity type from the exported index first (check bounds before name validation)
 	et, err := v.resolveExportedEntity(cs, exp.Kind, exp.Index)
 	if err != nil {
