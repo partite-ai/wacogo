@@ -204,6 +204,9 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		if size > v.limits.EffectiveTypeSize {
 			return fmt.Errorf("effective type size exceeds the limit")
 		}
+		parent := v.current()
+		parent.components = append(parent.components, compTypeID)
+		parent.record(stepDefineComponent{id: compTypeID})
 	}
 	return nil
 }
@@ -244,13 +247,13 @@ func (v *Validator) validateComponentSection(_ *ComponentSectionPayload) error {
 	}
 	// Push a placeholder component type. The actual type info is filled in
 	// when the sub-component's EndPayload is validated (either by the caller
-	// traversing the sub-ValidatingParser, or by lazy draining).
+	// traversing the sub-ValidatingParser, or by lazy draining), which is also
+	// when it enters this component's index space: until then it isn't a
+	// preceding definition, and nothing can be referring to it.
 	compTypeID := v.arena.pushComponentType(ComponentTypeDesc{
 		Imports: make(map[string]ComponentEntityType),
 		Exports: make(map[string]ComponentEntityType),
 	})
-	cs.components = append(cs.components, compTypeID)
-	cs.record(stepDefineComponent{id: compTypeID})
 	v.pendingCompTypeIDs = append(v.pendingCompTypeIDs, compTypeID)
 	return nil
 }
