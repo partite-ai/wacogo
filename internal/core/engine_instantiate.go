@@ -104,7 +104,6 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 	// the plan. Imports with no typed handle fall through to the existing
 	// runtime machinery.
 	args := make(map[string]any, len(cfg.imports))
-	suppliedResources := make(map[wasmparser.ResourceID]wasmparser.ResourceFrom)
 	for name, v := range cfg.imports {
 		switch ap := v.(type) {
 		case *ComponentInstance:
@@ -128,11 +127,7 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 				return nil, fmt.Errorf("wacogo: instantiate: import %q: no instance supplied", name)
 			}
 			if ap.lender.wpInstance != nil {
-				from := wasmparser.ResourceFrom{Lender: ap.lender.wpInstance, Export: ap.export}
-				args[name] = from
-				if placeholder, ok := component.wpType.ImportedResource(name); ok {
-					suppliedResources[placeholder] = from
-				}
+				args[name] = wasmparser.ResourceFrom{Lender: ap.lender.wpInstance, Export: ap.export}
 			}
 		}
 	}
@@ -151,15 +146,21 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 		}
 	}
 
-	// Each top-level instance gets fresh resources, apart from those it imports.
-	suppliedInstanceImports := make(map[string]*wasmparser.InstanceType)
-	for name, v := range cfg.imports {
-		if ci, ok := v.(*ComponentInstance); ok && ci != nil && ci.wpInstance != nil {
-			suppliedInstanceImports[name] = ci.wpInstance
-		}
-	}
+	return e.instantiateWithParentCfg(ctx, component, nil, component.wpType.NewInstance(suppliedTypes(args)), cfg)
+}
 
-	return e.instantiateWithParentCfg(ctx, component, nil, component.wpType.NewInstance(suppliedInstanceImports, suppliedResources), cfg)
+// suppliedTypes answers what an instantiation was given from the handles its
+// supplied imports were checked with, which are keyed by canonical name.
+type suppliedTypes map[string]any
+
+func (s suppliedTypes) Instance(name string) *wasmparser.InstanceType {
+	inst, _ := s[wasmparser.CanonicalizeImportName(name)].(*wasmparser.InstanceType)
+	return inst
+}
+
+func (s suppliedTypes) Resource(res wasmparser.ImportedResource) (wasmparser.ResourceFrom, bool) {
+	from, ok := s[wasmparser.CanonicalizeImportName(res.Import)].(wasmparser.ResourceFrom)
+	return from, ok
 }
 
 func (e *Engine) instantiateWithParent(ctx context.Context, component *Component, parentState *instantiationState, wpInst *wasmparser.InstanceType, opts ...InstantiateOption) (*ComponentInstance, error) {

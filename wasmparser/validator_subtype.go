@@ -524,7 +524,7 @@ func (sc *SubtypeChecker) isComponentSubtype(a, b ComponentTypeID) error {
 	// each is bound once, where the type introduces it.
 	open := make(map[ResourceID]bool)
 	for _, res := range at.ImportedResources {
-		open[res] = true
+		open[res.ID] = true
 	}
 	for _, name := range at.ImportOrder {
 		bImport, ok := bt.Imports[name]
@@ -969,7 +969,12 @@ func (sc *SubtypeChecker) remapComponentType(id ComponentTypeID) ComponentTypeID
 	remapped := ct
 	remapped.Imports = imports
 	remapped.Exports = exports
-	remapped.ImportedResources = sc.remapResourceList(ct.ImportedResources)
+	remapped.ImportedResources = slices.Clone(ct.ImportedResources)
+	for i, res := range remapped.ImportedResources {
+		if mapped, ok := sc.resourceMapping[res.ID]; ok {
+			remapped.ImportedResources[i].ID = mapped.id
+		}
+	}
 	remapped.DefinedResources = sc.remapResourceList(ct.DefinedResources)
 	return sc.writeArena.pushComponentType(remapped)
 }

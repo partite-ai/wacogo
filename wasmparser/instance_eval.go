@@ -93,27 +93,82 @@ type componentValue struct {
 	frame *instanceFrame
 }
 
-// instanceArgs is what an instantiation supplies to a component's imports.
-type instanceArgs struct {
-	instances  map[string]*InstanceType
-	components map[string]*componentValue
-	resources  map[ResourceID]scopedResID
+// evalBindings is what evaluation asks of an instantiation. It differs from
+// InstanceBindings in what only a nested instantiation can answer: components, and
+// resources that have an identity but no lender, such as a parent's own.
+type evalBindings interface {
+	instance(name string) *InstanceType
+	component(name string) *componentValue
+	resource(res ImportedResource) (scopedResID, bool)
 }
 
-// instance returns the instance supplied for an import, under its literal or
-// canonical name.
-func (a instanceArgs) instance(name string) *InstanceType {
-	if inst, ok := a.instances[name]; ok {
-		return inst
+type noBindings struct{}
+
+func (noBindings) instance(string) *InstanceType                 { return nil }
+func (noBindings) component(string) *componentValue              { return nil }
+func (noBindings) resource(ImportedResource) (scopedResID, bool) { return scopedResID{}, false }
+
+// suppliedBindings evaluates with what Go supplied.
+type suppliedBindings struct{ b InstanceBindings }
+
+func (s suppliedBindings) instance(name string) *InstanceType { return s.b.Instance(name) }
+func (suppliedBindings) component(string) *componentValue     { return nil }
+func (s suppliedBindings) resource(res ImportedResource) (scopedResID, bool) {
+	from, ok := s.b.Resource(res)
+	if !ok {
+		return scopedResID{}, false
 	}
-	return a.instances[CanonicalizeImportName(name)]
+	id, ok := from.Lender.resourceAt([]string{from.Export})
+	if !ok {
+		return scopedResID{}, false
+	}
+	return resolveResource(from.Lender.scope, from.Lender.arena, id, nil), true
+}
+
+// nestedBindings evaluates with the arguments of an instantiation inside a
+// component, which the validator has already matched to its imports by name.
+type nestedBindings struct {
+	f    *instanceFrame
+	step stepInstantiate
+}
+
+func (n nestedBindings) arg(name string, kind ComponentExternalKind) (uint32, bool) {
+	for _, a := range n.step.args {
+		if a.name == name && a.kind == kind {
+			return a.index, true
+		}
+	}
+	return 0, false
+}
+
+func (n nestedBindings) instance(name string) *InstanceType {
+	if i, ok := n.arg(name, ExternalKindInstance); ok {
+		return n.f.instances[i]
+	}
+	return nil
+}
+
+func (n nestedBindings) component(name string) *componentValue {
+	if i, ok := n.arg(name, ExternalKindComponent); ok {
+		return n.f.components[i]
+	}
+	return nil
+}
+
+func (n nestedBindings) resource(res ImportedResource) (scopedResID, bool) {
+	id, ok := n.step.resources[res.Import]
+	if !ok {
+		return scopedResID{}, false
+	}
+	self := n.f.self
+	return resolveResource(self.scope, self.arena, id, nil), true
 }
 
 // instanceFrame holds the index spaces of one instantiation being evaluated.
 type instanceFrame struct {
 	self       *InstanceType
 	outer      *instanceFrame
-	args       instanceArgs
+	bindings   evalBindings
 	instances  []*InstanceType
 	components []*componentValue
 }
@@ -124,13 +179,13 @@ type instanceFrame struct {
 // Evaluation order is what lets resourceRoots be resolved as they are recorded:
 // an instantiation's imports refer to instances evaluated before it, and its
 // parent binds to it only once it, and everything inside it, is complete.
-func evalInstance(arena *TypeArena, id ComponentTypeID, outer *instanceFrame, args instanceArgs) *InstanceType {
+func evalInstance(arena *TypeArena, id ComponentTypeID, outer *instanceFrame, bindings evalBindings) *InstanceType {
 	ct := arena.ComponentTypes[id]
 	self := &InstanceType{arena: arena, exports: ct.Exports, funcs: ct.Funcs}
 	self.scope = self
-	self.bindImports(ct, args)
+	self.bindImports(ct, bindings)
 	if ct.body != nil {
-		f := &instanceFrame{self: self, outer: outer, args: args}
+		f := &instanceFrame{self: self, outer: outer, bindings: bindings}
 		for _, step := range ct.body.steps {
 			f.run(step)
 		}
@@ -140,16 +195,18 @@ func evalInstance(arena *TypeArena, id ComponentTypeID, outer *instanceFrame, ar
 }
 
 // bindImports records the roots of the resources this instance's imports define.
-func (i *InstanceType) bindImports(ct ComponentTypeDesc, args instanceArgs) {
-	for placeholder, root := range args.resources {
-		i.setRoot(i.arena.ResolveResourceAlias(placeholder), root)
+func (i *InstanceType) bindImports(ct ComponentTypeDesc, bindings evalBindings) {
+	for _, res := range ct.ImportedResources {
+		if root, ok := bindings.resource(res); ok {
+			i.setRoot(i.arena.ResolveResourceAlias(res.ID), root)
+		}
 	}
 	for _, name := range ct.ImportOrder {
 		imp := ct.Imports[name]
 		if imp.Kind != EntityInstance {
 			continue
 		}
-		if lender := args.instance(name); lender != nil {
+		if lender := bindings.instance(name); lender != nil {
 			i.bindImportedInstance(imp.InstID, lender, nil)
 		}
 	}
@@ -209,13 +266,13 @@ func (f *instanceFrame) declared(view ComponentInstanceTypeID) *InstanceType {
 func (f *instanceFrame) run(step bodyStep) {
 	switch s := step.(type) {
 	case stepImportInstance:
-		inst := f.args.instance(s.name)
+		inst := f.bindings.instance(s.name)
 		if inst == nil {
 			inst = f.declared(s.view)
 		}
 		f.instances = append(f.instances, inst)
 	case stepImportComponent:
-		f.components = append(f.components, f.args.components[s.name])
+		f.components = append(f.components, f.bindings.component(s.name))
 	case stepAliasInstance:
 		inst := f.instances[s.from].ExportedInstance(s.name)
 		if inst == nil {
@@ -261,27 +318,8 @@ func (f *instanceFrame) instantiate(s stepInstantiate) *InstanceType {
 		// reports that; until then all that's known is the declared type.
 		return f.declared(s.view)
 	}
-	args := instanceArgs{
-		instances:  make(map[string]*InstanceType),
-		components: make(map[string]*componentValue),
-		resources:  make(map[ResourceID]scopedResID, len(s.resources)),
-	}
-	for _, arg := range s.args {
-		switch arg.kind {
-		case ExternalKindInstance:
-			args.instances[arg.name] = f.instances[arg.index]
-		case ExternalKindComponent:
-			args.components[arg.name] = f.components[arg.index]
-		}
-	}
 	self := f.self
-	imports := self.arena.ComponentTypes[comp.id].Imports
-	for name, id := range s.resources {
-		if imp, ok := imports[name]; ok && imp.Kind == EntityType && imp.TypeRef.Kind == AnyTypeResource {
-			args.resources[imp.TypeRef.ResID] = resolveResource(self.scope, self.arena, id, nil)
-		}
-	}
-	child := evalInstance(self.arena, comp.id, comp.frame, args)
+	child := evalInstance(self.arena, comp.id, comp.frame, nestedBindings{f, s})
 	self.bindSubInstance(self.arena.InstanceTypes[s.view].Exports, child, child.exports)
 	return child
 }

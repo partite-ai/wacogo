@@ -76,39 +76,27 @@ type ModuleType struct {
 	id    CoreModuleTypeID
 }
 
+// InstanceBindings answers what an instantiation binds its instance imports and
+// open resources to.
+type InstanceBindings interface {
+	// Instance returns what was supplied for the named instance import, or nil.
+	Instance(name string) *InstanceType
+	// Resource returns what stands for a resource the type leaves open.
+	Resource(res ImportedResource) (ResourceFrom, bool)
+}
+
 // NewInstance returns the type of a fresh instance of this component, including
-// those of the instances inside it. instances gives what is supplied to its
-// instance imports, by import name, literal or canonical. resources binds
-// placeholders to the actual resources they stand for.
+// those of the instances inside it. A nil bindings supplies nothing.
 //
 // Each call opens a new scope: two separate NewInstance calls produce instances
 // with distinct resources; supplying the same handle twice shares identity.
-// Placeholders with nothing bound belong to the new instance's scope.
-func (c *ComponentType) NewInstance(instances map[string]*InstanceType, resources map[ResourceID]ResourceFrom) *InstanceType {
-	args := instanceArgs{instances: instances, resources: make(map[ResourceID]scopedResID, len(resources))}
-	for placeholder, from := range resources {
-		if id, ok := from.Lender.resourceAt([]string{from.Export}); ok {
-			args.resources[placeholder] = resolveResource(from.Lender.scope, from.Lender.arena, id, nil)
-		}
+// Open resources with nothing bound belong to the new instance's scope.
+func (c *ComponentType) NewInstance(bindings InstanceBindings) *InstanceType {
+	var b evalBindings = noBindings{}
+	if bindings != nil {
+		b = suppliedBindings{bindings}
 	}
-	return evalInstance(c.arena, c.id, nil, args)
-}
-
-// ImportedResource returns the placeholder for the resource type import with the
-// given name, literal or canonical, to bind with NewInstance.
-func (c *ComponentType) ImportedResource(name string) (ResourceID, bool) {
-	ct := c.arena.ComponentTypes[c.id]
-	for _, importName := range ct.ImportOrder {
-		if importName != name && CanonicalizeImportName(importName) != name {
-			continue
-		}
-		imp := ct.Imports[importName]
-		if imp.Kind == EntityType && imp.TypeRef.Kind == AnyTypeResource {
-			return imp.TypeRef.ResID, true
-		}
-		return 0, false
-	}
-	return 0, false
+	return evalInstance(c.arena, c.id, nil, b)
 }
 
 // SubInstance returns the type of the instance at index in the instance index

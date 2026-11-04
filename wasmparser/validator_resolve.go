@@ -799,12 +799,12 @@ func (v *Validator) addDefinedInstanceResources(cs *ComponentState, id Component
 
 // importedResources returns the resources cs's type imports leave to its
 // instantiator.
-func importedResources(cs *ComponentState) []ResourceID {
-	var imported []ResourceID
+func importedResources(cs *ComponentState) []ImportedResource {
+	var imported []ImportedResource
 	for _, name := range cs.importOrder {
 		et := cs.imports[name]
 		if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource && cs.locallyDefinedSubResources[et.TypeRef.ResID] {
-			imported = append(imported, et.TypeRef.ResID)
+			imported = append(imported, ImportedResource{ID: et.TypeRef.ResID, Import: name})
 		}
 	}
 	return imported
@@ -916,8 +916,8 @@ func (v *Validator) collectResourceIDsFromComponent(id ComponentTypeID, set map[
 			v.collectResourceIDsFromEntity(et, free)
 		}
 	}
-	for _, rid := range ct.ImportedResources {
-		delete(free, rid)
+	for _, res := range ct.ImportedResources {
+		delete(free, res.ID)
 	}
 	for _, rid := range ct.DefinedResources {
 		delete(free, rid)

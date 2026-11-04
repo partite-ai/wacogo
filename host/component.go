@@ -154,11 +154,11 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	//    per-func wpFuncType handles minted here are the same identities
 	//    advertised in the resulting *InstanceType, so guests' import
 	//    type checks pass.
-	resources, err := buildResourceArgs(c, iopts.resourceFroms)
+	bindings, err := buildResourceArgs(c, iopts.resourceFroms)
 	if err != nil {
 		return nil, err
 	}
-	wpInst := c.wpComponentType.NewInstance(nil, resources)
+	wpInst := c.wpComponentType.NewInstance(bindings)
 
 	// 5. Build the core instance. Its contents refer back to it, so they
 	//    are assembled in the BuildContents callback.
@@ -584,20 +584,36 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, error) {
 	if err != nil {
 		return nil, err
 	}
+	open := make([]wasmparser.ImportedResource, len(c.resourceRefs))
+	for i, rrd := range c.resourceRefs {
+		open[i] = wasmparser.ImportedResource{ID: rrd.placeholderRID}
+	}
 	ctID := htb.PushComponentType(wasmparser.ComponentTypeDesc{
-		Imports:     map[string]wasmparser.ComponentEntityType{},
-		ImportOrder: nil,
-		Exports:     exports,
-		ExportOrder: exportOrder,
-		Funcs:       funcIDs,
+		Imports:           map[string]wasmparser.ComponentEntityType{},
+		ImportOrder:       nil,
+		Exports:           exports,
+		ExportOrder:       exportOrder,
+		Funcs:             funcIDs,
+		ImportedResources: open,
 	})
 	return htb.NewComponentTypeHandle(ctID), nil
+}
+
+// resourceBindings answers what each ResourceTypeRef's placeholder stands for. A
+// host component has no imports, so nothing else is ever asked of it.
+type resourceBindings map[wasmparser.ResourceID]wasmparser.ResourceFrom
+
+func (resourceBindings) Instance(string) *wasmparser.InstanceType { return nil }
+
+func (b resourceBindings) Resource(res wasmparser.ImportedResource) (wasmparser.ResourceFrom, bool) {
+	from, ok := b[res.ID]
+	return from, ok
 }
 
 // buildResourceArgs binds each ResourceTypeRef's placeholder to the lender export
 // that supplies it. Called once per Instantiate, after resolveResourceRefs has
 // checked each ref's lender.
-func buildResourceArgs(c *Component, opts []resourceFromOpt) (map[wasmparser.ResourceID]wasmparser.ResourceFrom, error) {
+func buildResourceArgs(c *Component, opts []resourceFromOpt) (resourceBindings, error) {
 	if len(c.resourceRefs) == 0 {
 		return nil, nil
 	}
@@ -605,7 +621,7 @@ func buildResourceArgs(c *Component, opts []resourceFromOpt) (map[wasmparser.Res
 	for _, o := range opts {
 		optByRef[o.ref] = o
 	}
-	resources := make(map[wasmparser.ResourceID]wasmparser.ResourceFrom, len(c.resourceRefs))
+	resources := make(resourceBindings, len(c.resourceRefs))
 	for _, rrd := range c.resourceRefs {
 		lenderWp := optByRef[rrd.ref].lender.ParserInstanceType()
 		if lenderWp == nil {

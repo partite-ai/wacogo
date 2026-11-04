@@ -1071,6 +1071,66 @@ func TestResourceTypeImport_VersionedName(t *testing.T) {
 	}
 }
 
+// One supplied resource satisfies every import of its canonical name.
+func TestResourceTypeImport_TwoCompatibleVersions(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+	load := func(wat string) *Component {
+		comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat)))
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		return comp
+	}
+	lender, err := load(resourceAndChild).Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer := load(eqResourceConsumer)
+	for _, export := range []string{"x", "y"} {
+		p, err := load(`(component
+  (import "a:b/r@1.0.0" (type $x (sub resource)))
+  (import "a:b/r@1.0.1" (type $y (sub resource)))
+  (export "r" (type $`+export+`)))`).Instantiate(ctx, WithResourceTypeImport("a:b/r@1", lender, "r"))
+		if err != nil {
+			t.Fatalf("%s: instantiate: %v", export, err)
+		}
+		if _, err := consumer.Instantiate(ctx, WithInstanceImport("a", lender), WithInstanceImport("b", p)); err != nil {
+			t.Fatalf("%s: want the lender's resource, got: %v", export, err)
+		}
+	}
+}
+
+// A versioned instance import finds what was supplied under its canonical name, and
+// so takes its resources' identity from it.
+func TestInstanceImport_CompatibleVersion(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+	load := func(wat string) *Component {
+		comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, wat)))
+		if err != nil {
+			t.Fatalf("load: %v", err)
+		}
+		return comp
+	}
+	lender, err := load(resourceAndChild).Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := load(`(component
+  (import "a:b/i@1.0.1" (instance $i (export "r" (type (sub resource)))))
+  (alias export $i "r" (type $r))
+  (export "r" (type $r)))`).Instantiate(ctx, WithInstanceImport("a:b/i@1", lender))
+	if err != nil {
+		t.Fatalf("instantiate: %v", err)
+	}
+	if _, err := load(eqResourceConsumer).Instantiate(ctx, WithInstanceImport("a", lender), WithInstanceImport("b", p)); err != nil {
+		t.Fatalf("want the lender's resource, got: %v", err)
+	}
+}
+
 func TestResourceTypeImport_BadLender(t *testing.T) {
 	ctx := context.Background()
 	engine := NewEngine(ctx)

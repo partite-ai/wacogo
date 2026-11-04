@@ -339,15 +339,23 @@ type DefinedResource struct {
 	Export string
 }
 
+// ImportedResource is a resource a component type leaves to its instantiator.
+// Import names the type import that declares it, and is empty for a host
+// component's, which has no imports.
+type ImportedResource struct {
+	ID     ResourceID
+	Import string
+}
+
 // ComponentTypeDesc holds imports and exports of a component type.
 type ComponentTypeDesc struct {
 	Imports     map[string]ComponentEntityType
 	ImportOrder []string // preserves insertion order for deterministic iteration
 	Exports     map[string]ComponentEntityType
 	ExportOrder []string // preserves insertion order for deterministic iteration
-	// ImportedResources lists the resources its instantiator must supply through
-	// (sub resource) type imports. Those of its instance imports are in their types.
-	ImportedResources []ResourceID
+	// ImportedResources lists the resources its instantiator must supply. Those of
+	// its instance imports are in their types.
+	ImportedResources []ImportedResource
 	// DefinedResources lists the resources each instantiation creates anew and its
 	// exports expose. Anything else its exports name is either what its imports were
 	// given, or from outside it and so stays what it is.
