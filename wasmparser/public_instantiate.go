@@ -21,9 +21,7 @@ type ComponentType struct {
 // scope, since it names the same resources.
 //
 // Obtain one from (*ComponentType).NewInstance, (*InstanceType).SubInstance or
-// (*InstanceType).ExportedInstance. Fresh resource identities are induced by
-// pointer identity during CheckInstantiation and are never materialized into
-// any arena.
+// (*InstanceType).ExportedInstance.
 type InstanceType struct {
 	arena   *TypeArena
 	exports map[string]ComponentEntityType
@@ -204,17 +202,47 @@ func (i *InstanceType) resourceAt(path []string) (ResourceID, bool) {
 func (c *ComponentType) CheckInstantiation(args map[string]any) error {
 	compType := c.arena.ComponentTypes[c.id]
 	sc := &SubtypeChecker{
-		bArena:          c.arena,
-		resourceMapping: make(map[ResourceID]scopedResID),
-		hostBinding:     true,
+		bArena:      c.arena,
+		bBound:      make(map[ResourceID]scopedResID),
+		hostBinding: true,
 	}
-
-	for _, importName := range compType.ImportOrder {
+	supplied := func(importName string) (any, bool) {
 		arg, ok := args[importName]
 		if !ok {
 			arg, ok = args[CanonicalizeImportName(importName)]
 		}
-		if !ok || arg == nil {
+		return arg, ok && arg != nil
+	}
+
+	// What's open is bound first, so it doesn't matter which import names it first.
+	open := make(map[ResourceID]bool, len(compType.ImportedResources))
+	for _, res := range compType.ImportedResources {
+		open[res.ID] = true
+	}
+	for _, importName := range compType.ImportOrder {
+		arg, ok := supplied(importName)
+		if !ok {
+			continue
+		}
+		importType := compType.Imports[importName]
+		switch a := arg.(type) {
+		case *InstanceType:
+			if importType.Kind == EntityInstance {
+				sc.aArena, sc.aScope = a.arena, a.scope
+				sc.bindInstanceResources(a.exports, importType.InstID)
+			}
+		case ResourceFrom:
+			if importType.Kind == EntityType && importType.TypeRef.Kind == AnyTypeResource && open[importType.TypeRef.ResID] {
+				if id, ok := a.Lender.resourceAt([]string{a.Export}); ok {
+					sc.bBound[importType.TypeRef.ResID] = resolveResource(a.Lender.scope, a.Lender.arena, id, nil)
+				}
+			}
+		}
+	}
+
+	for _, importName := range compType.ImportOrder {
+		arg, ok := supplied(importName)
+		if !ok {
 			continue
 		}
 		importType := compType.Imports[importName]
@@ -296,6 +324,12 @@ func (c *ComponentType) CheckInstantiation(args map[string]any) error {
 func (sc *SubtypeChecker) isInstanceSubtypeAgainstExports(aExports map[string]ComponentEntityType, bInstID ComponentInstanceTypeID) error {
 	bt := sc.bArena.InstanceTypes[bInstID]
 
+	for _, res := range bt.DefinedResources {
+		if _, ok := aExports[res.Export]; !ok {
+			return fmt.Errorf("export `%s` was not found", res.Export)
+		}
+	}
+
 	for name, bExport := range bt.Exports {
 		aExport, ok := aExports[name]
 		if !ok {
@@ -315,10 +349,5 @@ func (sc *SubtypeChecker) isInstanceSubtypeAgainstExports(aExports map[string]Co
 		}
 	}
 
-	for _, res := range bt.DefinedResources {
-		if _, ok := aExports[res.Export]; !ok {
-			return fmt.Errorf("export `%s` was not found", res.Export)
-		}
-	}
 	return nil
 }

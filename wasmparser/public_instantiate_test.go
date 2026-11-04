@@ -432,3 +432,39 @@ func TestCheckInstantiation_RootComponentArg(t *testing.T) {
 		t.Fatalf("want root component accepted, got: %v", err)
 	}
 }
+
+// CheckInstantiation binds what's open before comparing anything, so a func import
+// can name a resource from an instance import in any order.
+func TestCheckInstantiation_BindsBeforeComparing(t *testing.T) {
+	load := func(src string) *ComponentType {
+		t.Helper()
+		vp := NewValidatingParser(bytes.NewReader(wat2wasm(t, src)), DefaultFeatures())
+		for {
+			_, err := vp.Next()
+			if err == io.EOF {
+				return vp.TopLevelComponentType()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	lender := load(`(component (type $r (resource (rep i32))) (export "r" (type $r)))`).NewInstance(nil)
+	other := load(`(component (type $r (resource (rep i32))) (export "r" (type $r)))`).NewInstance(nil)
+	consumer := load(`(component
+  (import "a" (type $a (sub resource)))
+  (import "b" (type (eq $a)))
+  (import "i" (instance (export "r" (type (eq $a))))))`)
+	ok := map[string]any{"a": ResourceFrom{Lender: lender, Export: "r"}, "b": ResourceFrom{Lender: lender, Export: "r"}, "i": lender}
+	if err := consumer.CheckInstantiation(ok); err != nil {
+		t.Fatalf("want accepted, got: %v", err)
+	}
+	for name, args := range map[string]map[string]any{
+		"eq import": {"a": ResourceFrom{Lender: lender, Export: "r"}, "b": ResourceFrom{Lender: other, Export: "r"}},
+		"instance":  {"a": ResourceFrom{Lender: lender, Export: "r"}, "i": other},
+	} {
+		if err := consumer.CheckInstantiation(args); err == nil {
+			t.Errorf("%s: want rejected", name)
+		}
+	}
+}

@@ -45,8 +45,8 @@ type SubtypeChecker struct {
 	// component's imports, where the two sides swap.
 	bScope any
 
-	// resourceMapping maps b-side ResourceIDs to the (scope, arena,
-	// ResourceID) they have been matched against.
+	// resourceMapping is what remapping replaces: each b-side ResourceID to the
+	// (scope, arena, ResourceID) that takes its place. Checking doesn't use it.
 	resourceMapping map[ResourceID]scopedResID
 
 	// aBound and bBound hold what the enclosing component types' own resources
@@ -293,10 +293,9 @@ func (sc *SubtypeChecker) isDefinedTypeSubtypeImpl(a, b ComponentDefinedTypeID) 
 }
 
 // checkResourceMatch checks that the a-side resource (ResourceID aRes in
-// aArena) is compatible with the b-side resource (ResourceID bRes in
-// bArena). When resource remapping is enabled, it records matches so
-// repeated references to the same b-side resource require consistent
-// a-side matches — the mechanism behind (eq $r) constraints.
+// aArena) is the same resource as the b-side one (ResourceID bRes in bArena). What
+// a type leaves open is bound up front, in aBound and bBound, so that the result
+// can't depend on which reference is compared first; nothing is bound here.
 //
 // If the a-side scope records that aRes is defined elsewhere (see
 // InstanceType.resourceRoots), the comparison uses that root. This lets
@@ -304,18 +303,6 @@ func (sc *SubtypeChecker) isDefinedTypeSubtypeImpl(a, b ComponentDefinedTypeID) 
 // without weakening per-instance freshness for locally defined resources.
 func (sc *SubtypeChecker) checkResourceMatch(aRes, bRes ResourceID) error {
 	a := resolveResource(sc.aScope, sc.aArena, aRes, sc.aBound)
-
-	if sc.resourceMapping != nil {
-		bRes = sc.bArena.ResolveResourceAlias(bRes)
-		if existing, ok := sc.resourceMapping[bRes]; ok {
-			if existing != a {
-				return sc.resourceMismatchErr()
-			}
-			return nil
-		}
-		sc.resourceMapping[bRes] = a
-		return nil
-	}
 	if a != resolveResource(sc.bScope, sc.bArena, bRes, sc.bBound) {
 		return sc.resourceMismatchErr()
 	}
@@ -509,7 +496,6 @@ func (sc *SubtypeChecker) isComponentSubtype(a, b ComponentTypeID) error {
 	if inner.bBound == nil {
 		inner.bBound = make(map[ResourceID]scopedResID)
 	}
-	maps.Copy(inner.bBound, sc.resourceMapping)
 	swapped := &SubtypeChecker{
 		aArena:      inner.bArena,
 		bArena:      inner.aArena,
@@ -571,17 +557,22 @@ func (sc *SubtypeChecker) bindOpenResources(a, b ComponentEntityType, open map[R
 			sc.bBound[b.TypeRef.ResID] = resolveResource(sc.aScope, sc.aArena, a.TypeRef.ResID, sc.aBound)
 		}
 	case a.Kind == EntityInstance && b.Kind == EntityInstance:
-		aExports := sc.aArena.InstanceTypes[a.InstID].Exports
-		bt := sc.bArena.InstanceTypes[b.InstID]
-		for _, res := range bt.DefinedResources {
-			if aExport, ok := aExports[res.Export]; ok && aExport.Kind == EntityType && aExport.TypeRef.Kind == AnyTypeResource {
-				sc.bBound[res.ID] = resolveResource(sc.aScope, sc.aArena, aExport.TypeRef.ResID, sc.aBound)
-			}
+		sc.bindInstanceResources(sc.aArena.InstanceTypes[a.InstID].Exports, b.InstID)
+	}
+}
+
+// bindInstanceResources binds the resources instance type b defines, at any depth,
+// to those exported at the same place by a supplied instance.
+func (sc *SubtypeChecker) bindInstanceResources(aExports map[string]ComponentEntityType, b ComponentInstanceTypeID) {
+	bt := sc.bArena.InstanceTypes[b]
+	for _, res := range bt.DefinedResources {
+		if aExport, ok := aExports[res.Export]; ok && aExport.Kind == EntityType && aExport.TypeRef.Kind == AnyTypeResource {
+			sc.bBound[res.ID] = resolveResource(sc.aScope, sc.aArena, aExport.TypeRef.ResID, sc.aBound)
 		}
-		for name, bExport := range bt.Exports {
-			if aExport, ok := aExports[name]; ok && aExport.Kind == EntityInstance && bExport.Kind == EntityInstance {
-				sc.bindOpenResources(aExport, bExport, nil)
-			}
+	}
+	for name, bExport := range bt.Exports {
+		if aExport, ok := aExports[name]; ok && aExport.Kind == EntityInstance && bExport.Kind == EntityInstance {
+			sc.bindInstanceResources(sc.aArena.InstanceTypes[aExport.InstID].Exports, bExport.InstID)
 		}
 	}
 }

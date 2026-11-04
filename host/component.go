@@ -153,11 +153,8 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 		return nil, err
 	}
 
-	// 4. Build a per-instance wasmparser ComponentType reflecting each
-	//    ResourceTypeRef's lender-supplied resource identity. The
-	//    per-func wpFuncType handles minted here are the same identities
-	//    advertised in the resulting *InstanceType, so guests' import
-	//    type checks pass.
+	// 4. Compute this instance's type, in which each ResourceTypeRef is the
+	//    lender's resource, so guests' import type checks see that identity.
 	wpInst := c.wpComponentType.NewInstance(bindings)
 
 	// 5. Build the core instance. Its contents refer back to it, so they

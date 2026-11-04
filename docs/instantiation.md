@@ -134,11 +134,11 @@ If not, the missing export is reported by name (the same
 
 A resource type import is supplied as `wacogo.WithResourceTypeImport(name,
 lender, export)`. `Instantiate` passes it to `CheckInstantiation` as a
-`wasmparser.ResourceFrom`, which binds the import to the lender's resource in
-import order, so later imports naming it must agree. It also binds the
-import's placeholder to the lender's resource with `NewInstance`, so a re-export
-of the import is the lender's resource, and then hands the plan the lender's
-runtime `*TypeResource`.
+`wasmparser.ResourceFrom`. The check binds everything the component leaves open
+first, then compares by identity, so any import naming that resource must agree,
+whichever comes first. `NewInstance` binds the import the same way, so a re-export
+of it is the lender's resource, and the plan is handed the lender's runtime
+`*TypeResource`.
 
 Non-resource type imports have nothing to supply: their declaration fully
 determines them, and they may be omitted. Supplying a resource for one is an

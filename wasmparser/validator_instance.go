@@ -72,17 +72,27 @@ func (v *Validator) instantiateComponent(cs *ComponentState, inst Instantiate) e
 	// Check all imports are satisfied, building resource mapping.
 	// Process in insertion order for deterministic error messages and correct resource mapping.
 	sc := v.newSubtypeCheckerWithRemapping()
+	sc.bBound = make(map[ResourceID]scopedResID)
+	open := make(map[ResourceID]bool, len(compType.ImportedResources))
+	for _, res := range compType.ImportedResources {
+		open[res.ID] = true
+	}
+	for _, importName := range compType.ImportOrder {
+		if argType, ok := suppliedArgs[importName]; ok {
+			sc.bindOpenResources(argType, compType.Imports[importName], open)
+		}
+	}
 	for _, importName := range compType.ImportOrder {
 		importType := compType.Imports[importName]
 		argType, ok := suppliedArgs[importName]
 		if !ok {
 			return fmt.Errorf("missing import named `%s`", importName)
 		}
-		// Subtype check with resource remapping
 		if err := sc.isSubtype(argType, importType); err != nil {
 			return fmt.Errorf("type mismatch for import `%s`: %w", importName, err)
 		}
 	}
+	maps.Copy(sc.resourceMapping, sc.bBound)
 
 	// Build instance exports from the component's exports: its imports are now what
 	// was supplied, and what it creates is new with this instance.
