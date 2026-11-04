@@ -113,6 +113,10 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	if err != nil {
 		return nil, err
 	}
+	bindings, err := buildResourceArgs(c, iopts.resourceFroms)
+	if err != nil {
+		return nil, err
+	}
 
 	// 1. Allocate the wrapper shell up front. Per-instance host-module
 	//    closures and per-resource dtor closures capture h directly; no
@@ -154,10 +158,6 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	//    per-func wpFuncType handles minted here are the same identities
 	//    advertised in the resulting *InstanceType, so guests' import
 	//    type checks pass.
-	bindings, err := buildResourceArgs(c, iopts.resourceFroms)
-	if err != nil {
-		return nil, err
-	}
 	wpInst := c.wpComponentType.NewInstance(bindings)
 
 	// 5. Build the core instance. Its contents refer back to it, so they
