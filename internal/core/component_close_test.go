@@ -3,6 +3,8 @@ package core
 import (
 	"bytes"
 	"context"
+	"errors"
+	"runtime"
 	"testing"
 
 	"github.com/tetratelabs/wazero"
@@ -97,18 +99,153 @@ func TestLoadComponent_FailureClosesModules(t *testing.T) {
 	}
 }
 
-// TestLoadComponent_SuccessKeepsModules checks that a loaded component is left
-// with what it compiled.
-func TestLoadComponent_SuccessKeepsModules(t *testing.T) {
+// TestComponentClose_ReleasesModules checks that a loaded component keeps what it
+// compiled, nested components included, until Close releases each of them once,
+// however many index spaces an outer alias put a module in.
+func TestComponentClose_ReleasesModules(t *testing.T) {
 	ctx := context.Background()
 	engine := NewEngine(ctx)
 	defer engine.Close(ctx)
 	counter := countCompiles(engine)
 
-	if _, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, `(component (core module))`))); err != nil {
+	comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, `(component
+  (core module $m)
+  (component
+    (alias outer 1 $m (core module))
+    (core module)))`)))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if counter.compiled != 1 || counter.closed != 0 {
-		t.Fatalf("compiled %d, closed %d", counter.compiled, counter.closed)
+	if counter.compiled != 2 || counter.closed != 0 {
+		t.Fatalf("after load: compiled %d, closed %d", counter.compiled, counter.closed)
+	}
+	for range 2 {
+		if err := comp.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if counter.closed != 2 {
+			t.Fatalf("after Close: closed %d of 2", counter.closed)
+		}
+	}
+	if _, err := comp.Instantiate(ctx); !errors.Is(err, ErrComponentClosed) {
+		t.Fatalf("Instantiate after Close: got %v", err)
+	}
+}
+
+const closeTestAnswer = `(component
+  (core module $m (func (export "f") (result i32) i32.const 7))
+  (core instance $i (instantiate $m))
+  (func (export "f") (result u32) (canon lift (core func $i "f"))))`
+
+func callAnswer(t *testing.T, ctx context.Context, inst *ComponentInstance) {
+	t.Helper()
+	got, err := inst.ExportedFunc("f").Call(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != ValU32(7) {
+		t.Fatalf("got %v", got)
+	}
+}
+
+// TestComponentClose_InstancesKeepRunning checks an instance outlives its
+// Component, including once the collector has had a chance to run.
+func TestComponentClose_InstancesKeepRunning(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+
+	comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, closeTestAnswer)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := comp.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	comp = nil
+	runtime.GC()
+	runtime.GC()
+	callAnswer(t, ctx, inst)
+	if err := inst.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestComponentClose_SharedCodeSurvives checks that closing a component leaves
+// another compiled from the same bytes working, as they share compiled code.
+func TestComponentClose_SharedCodeSurvives(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+	bin := parseLinkWat(t, closeTestAnswer)
+
+	first, err := engine.LoadComponent(ctx, bytes.NewReader(bin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := engine.LoadComponent(ctx, bytes.NewReader(bin))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	inst, err := second.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("instantiating the other component: %v", err)
+	}
+	callAnswer(t, ctx, inst)
+
+	// A failed load of the same module must not take the code away either.
+	if _, err := engine.LoadComponent(ctx, bytes.NewReader(append(bytes.Clone(bin), 7, 2, 1, 0))); err == nil {
+		t.Fatal("expected the load to fail")
+	}
+	inst2, err := second.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("instantiating after a failed load: %v", err)
+	}
+	callAnswer(t, ctx, inst2)
+}
+
+// TestComponentClose_ExportedModule checks that a module taken from an instance
+// fails cleanly once its Component is closed.
+func TestComponentClose_ExportedModule(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+
+	provider, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, `(component
+  (core module $m)
+  (export "m" (core module $m)))`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inst, err := provider.Instantiate(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod := inst.ExportedModule("m")
+	if mod == nil {
+		t.Fatal("no exported module")
+	}
+	consumer, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, `(component
+  (import "m" (core module $m))
+  (core instance (instantiate $m)))`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := consumer.Instantiate(ctx, WithModuleImport("m", mod)); err != nil {
+		t.Fatalf("before Close: %v", err)
+	}
+	if err := provider.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := consumer.Instantiate(ctx, WithModuleImport("m", mod)); err == nil {
+		t.Fatal("instantiated a module whose Component is closed")
 	}
 }

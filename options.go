@@ -28,6 +28,9 @@ func WithMaxLiftBytes(n uint64) EngineOption {
 // arguments or results exceed the limit set by WithMaxLiftBytes.
 var ErrLiftLimitExceeded = core.ErrLiftLimitExceeded
 
+// ErrComponentClosed is returned by (*Component).Instantiate after Close.
+var ErrComponentClosed = core.ErrComponentClosed
+
 // ParseLimits bounds what LoadComponent accepts. A zero field means the default
 // given for it, and Unlimited means no limit.
 type ParseLimits = core.ParseLimits

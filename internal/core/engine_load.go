@@ -141,6 +141,7 @@ func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (_ *Component, 
 			return nil, fmt.Errorf("wacogo: exporting a component from the root component is not supported")
 		}
 	}
+	comp.owned = &ownedModules{modules: compiled}
 	return comp, nil
 }
 

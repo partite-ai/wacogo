@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 
 	"github.com/partite-ai/wacogo/wasmparser"
 	"github.com/tetratelabs/wazero"
@@ -39,8 +41,12 @@ func WrapCompiledModule(cm wazero.CompiledModule) *CompiledModule {
 	return &CompiledModule{module: cm}
 }
 
-// Component is an immutable, compiled component ready for instantiation.
+// Component is a compiled component ready for instantiation.
 type Component struct {
+	// owned is what a top-level component is responsible for releasing. Nil for a
+	// sub-component, whose compiled code is its top-level component's.
+	owned *ownedModules
+
 	engine          *Engine
 	compiledModules []CompiledModule
 	subComponents   []*Component
@@ -145,5 +151,38 @@ func withResolvedType(name string, t Type) InstantiateOption {
 
 // Instantiate creates a running instance of this component.
 func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) (*ComponentInstance, error) {
+	if c.owned != nil && c.owned.closed.Load() {
+		return nil, ErrComponentClosed
+	}
 	return c.engine.instantiate(ctx, c, opts...)
+}
+
+// ownedModules holds everything compiled to load a top-level component, nested
+// components included.
+type ownedModules struct {
+	modules []wazero.CompiledModule
+	closed  atomic.Bool
+}
+
+// ErrComponentClosed is returned by Instantiate after Close.
+var ErrComponentClosed = errors.New("component is closed")
+
+// Close releases the compiled code held by this Component, which otherwise lasts
+// as long as its Engine. After Close, Instantiate returns ErrComponentClosed, and
+// a module exported by one of its instances can no longer be instantiated.
+// Instances that already exist remain usable until each is itself closed.
+//
+// Close is idempotent. A component nested inside another holds nothing of its own,
+// so closing one does nothing.
+func (c *Component) Close(ctx context.Context) error {
+	if c.owned == nil || !c.owned.closed.CompareAndSwap(false, true) {
+		return nil
+	}
+	var errs []error
+	for _, m := range c.owned.modules {
+		if err := m.Close(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
