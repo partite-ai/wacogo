@@ -8,14 +8,14 @@ import (
 )
 
 // CallAdapter is the factory return: a core func (Module/Name) plus any
-// auxiliary modules that must be torn down at Close. Close is idempotent.
+// batched-realloc helpers that must be torn down at Close. Close is idempotent.
 type CallAdapter struct {
 	Module api.Module
 	Name   string
 
-	// aux holds host module + stub instances plus any other modules this
-	// adapter owns. Teardown order is reverse of append order.
-	aux []api.Module
+	// reallocHelpers holds the batched-realloc helpers this adapter owns.
+	// Teardown order is reverse of append order.
+	reallocHelpers []*batchReallocHelper
 
 	// compiled holds per-adapter compiled code (the host module's) that
 	// must be freed after the module instances referencing it are closed.
@@ -32,8 +32,8 @@ func (a *CallAdapter) Close(ctx context.Context) error {
 	}
 	a.closed = true
 	var firstErr error
-	for i := len(a.aux) - 1; i >= 0; i-- {
-		if err := a.aux[i].Close(ctx); err != nil && firstErr == nil {
+	for i := len(a.reallocHelpers) - 1; i >= 0; i-- {
+		if err := a.reallocHelpers[i].Close(ctx); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

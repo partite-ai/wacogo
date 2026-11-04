@@ -110,7 +110,7 @@ func (h *Host) BuildAdapter(
 	// crossing; the loop calling cabi_realloc happens entirely in wasm.
 	// Construction is deferred to a helper because errors here must be
 	// surfaced as adapter-build failures, not transfer-time panics.
-	var auxModules []api.Module
+	var reallocHelpers []*batchReallocHelper
 	// A Go allocator needs no batching: each allocation is a Go call.
 	if callee.ReallocModName != "" && callee.GoRealloc == nil {
 		helper, err := h.buildBatchReallocHelper(ctx, callee.ReallocModName, callee.ReallocFnExport)
@@ -118,19 +118,19 @@ func (h *Host) BuildAdapter(
 			return nil, fmt.Errorf("wacogo: build callee batch-realloc helper: %w", err)
 		}
 		calleeSide.BatchHelper = helper
-		auxModules = append(auxModules, helper.mod)
+		reallocHelpers = append(reallocHelpers, helper)
 	}
 	if caller.ReallocModName != "" && caller.GoRealloc == nil {
 		helper, err := h.buildBatchReallocHelper(ctx, caller.ReallocModName, caller.ReallocFnExport)
 		if err != nil {
 			// Best-effort teardown of the callee helper before bubbling up.
-			for _, m := range auxModules {
-				_ = m.Close(ctx)
+			for _, built := range reallocHelpers {
+				_ = built.Close(ctx)
 			}
 			return nil, fmt.Errorf("wacogo: build caller batch-realloc helper: %w", err)
 		}
 		callerSide.BatchHelper = helper
-		auxModules = append(auxModules, helper.mod)
+		reallocHelpers = append(reallocHelpers, helper)
 	}
 	af := &adapterFunc{
 		caller:            caller,
@@ -167,14 +167,13 @@ func (h *Host) BuildAdapter(
 		return nil, fmt.Errorf("wacogo: build adapter: instantiate host module: %w", err)
 	}
 
-	// 7. Return the CallAdapter. Auxiliary modules (any batch-realloc
-	// helpers) and the host CompiledModule are closed when the adapter is
-	// closed.
+	// 7. Return the CallAdapter. Any batch-realloc helpers and the host
+	// CompiledModule are closed when the adapter is closed.
 	return &CallAdapter{
-		Module:   hostMod,
-		Name:     "adapt",
-		aux:      auxModules,
-		compiled: []wazero.CompiledModule{hostCompiled},
+		Module:         hostMod,
+		Name:           "adapt",
+		reallocHelpers: reallocHelpers,
+		compiled:       []wazero.CompiledModule{hostCompiled},
 	}, nil
 }
 

@@ -55,11 +55,11 @@ func TestBatchReallocHelper_RoundTrip(t *testing.T) {
 		t.Fatalf("instantiate target: %v", err)
 	}
 
-	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, targetMod.Name(), "realloc")
+	helper, err := NewHost(ctx, rt, 0).buildBatchReallocHelper(ctx, targetMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
-	t.Cleanup(func() { _ = helper.close(ctx) })
+	t.Cleanup(func() { _ = helper.Close(ctx) })
 
 	sizes := []uint32{16, 32, 8, 64}
 	for i, s := range sizes {
@@ -111,11 +111,11 @@ func TestBatchReallocHelper_ZeroN(t *testing.T) {
 		t.Fatalf("instantiate target: %v", err)
 	}
 
-	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, targetMod.Name(), "realloc")
+	helper, err := NewHost(ctx, rt, 0).buildBatchReallocHelper(ctx, targetMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
-	t.Cleanup(func() { _ = helper.close(ctx) })
+	t.Cleanup(func() { _ = helper.Close(ctx) })
 
 	if err := helper.invoke(ctx, 0); err != nil {
 		t.Fatalf("helper.invoke(0): %v", err)
@@ -164,7 +164,7 @@ func TestBatchReallocHelper_SharesCompiledModule(t *testing.T) {
 		return mod
 	}
 
-	host := NewHost(rt, 0)
+	host := NewHost(ctx, rt, 0)
 
 	tgtA := bumpTarget("tgt_share_a", "realloc", 1000)
 	tgtB := bumpTarget("tgt_share_b", "realloc", 2000)
@@ -173,17 +173,12 @@ func TestBatchReallocHelper_SharesCompiledModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build helperA: %v", err)
 	}
-	t.Cleanup(func() { _ = helperA.close(ctx) })
+	t.Cleanup(func() { _ = helperA.Close(ctx) })
 	helperB, err := host.buildBatchReallocHelper(ctx, tgtB.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("build helperB: %v", err)
 	}
-	t.Cleanup(func() { _ = helperB.close(ctx) })
-
-	// Both helpers used the same export name -> exactly one compiled module.
-	if got := len(host.batchHelperCache); got != 1 {
-		t.Fatalf("cache entries after two same-name helpers = %d, want 1", got)
-	}
+	t.Cleanup(func() { _ = helperB.Close(ctx) })
 
 	// Each helper routes to its own target despite sharing the compiled
 	// module: helperA bumps from 1000, helperB from 2000.
@@ -202,15 +197,80 @@ func TestBatchReallocHelper_SharesCompiledModule(t *testing.T) {
 		t.Errorf("helperB ptr = %d, want 2000", got)
 	}
 
-	// A distinct export name compiles a second module.
+	// A target exporting its realloc under another name is reached the same way,
+	// through the same compiled helper.
+	compiled := host.batchHelper
 	tgtC := bumpTarget("tgt_share_c", "cabi_realloc", 3000)
 	helperC, err := host.buildBatchReallocHelper(ctx, tgtC.Name(), "cabi_realloc")
 	if err != nil {
 		t.Fatalf("build helperC: %v", err)
 	}
-	t.Cleanup(func() { _ = helperC.close(ctx) })
-	if got := len(host.batchHelperCache); got != 2 {
-		t.Fatalf("cache entries after distinct export name = %d, want 2", got)
+	t.Cleanup(func() { _ = helperC.Close(ctx) })
+	helperC.writeSizeAlign(0, 16, 1)
+	if err := helperC.invoke(ctx, 1); err != nil {
+		t.Fatalf("helperC.invoke: %v", err)
+	}
+	if got := helperC.readPtr(1, 0); got != 3000 {
+		t.Errorf("helperC ptr = %d, want 3000", got)
+	}
+	if host.batchHelper != compiled {
+		t.Errorf("a new realloc name replaced the compiled helper")
+	}
+}
+
+// TestBatchReallocHelper_CompileFailureReported checks a helper that couldn't be
+// compiled when the Host was created fails when one is needed, not before.
+func TestBatchReallocHelper_CompileFailureReported(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	if err := rt.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	host := NewHost(ctx, rt, 0)
+	if host.batchHelperErr == nil {
+		t.Fatal("expected compiling against a closed runtime to fail")
+	}
+	if _, err := host.buildBatchReallocHelper(ctx, "target", "realloc"); err == nil {
+		t.Fatal("expected the compile failure to be reported")
+	}
+}
+
+// TestBatchReallocHelper_FailureReleasesBridge checks a helper that can't bind to
+// its target's realloc reports it, and that the Host stays usable.
+func TestBatchReallocHelper_FailureReleasesBridge(t *testing.T) {
+	ctx := context.Background()
+	rt := wazero.NewRuntime(ctx)
+	t.Cleanup(func() { _ = rt.Close(ctx) })
+
+	var tb wasm.ModuleBuilder
+	tb.AddExportMemory("memory", tb.AddMemory(1, 0))
+	var rc wasm.CodeBuilder
+	rc.I32Const(0)
+	rc.End()
+	tb.AddExportFunc("realloc", tb.AddFunc(wasm.FuncSig{
+		Params:  []byte{wasm.ValI32, wasm.ValI32, wasm.ValI32, wasm.ValI32},
+		Results: []byte{wasm.ValI32},
+	}, nil, rc.Bytes()))
+	compiled, err := rt.CompileModule(ctx, tb.Encode())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := rt.InstantiateModule(ctx, compiled, wazero.NewModuleConfig().WithName("tgt_missing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	host := NewHost(ctx, rt, 0)
+	if _, err := host.buildBatchReallocHelper(ctx, target.Name(), "not_exported"); err == nil {
+		t.Fatal("expected a missing realloc export to fail")
+	}
+	helper, err := host.buildBatchReallocHelper(ctx, target.Name(), "realloc")
+	if err != nil {
+		t.Fatalf("after a failure: %v", err)
+	}
+	if err := helper.Close(ctx); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -259,11 +319,11 @@ func TestBatchReallocHelper_OverridesCallerMemoryAllocator(t *testing.T) {
 	})
 	cctx := experimental.WithMemoryAllocator(ctx, callerAlloc)
 
-	helper, err := NewHost(rt, 0).buildBatchReallocHelper(cctx, targetMod.Name(), "realloc")
+	helper, err := NewHost(ctx, rt, 0).buildBatchReallocHelper(cctx, targetMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
-	t.Cleanup(func() { _ = helper.close(ctx) })
+	t.Cleanup(func() { _ = helper.Close(ctx) })
 
 	if got := atomic.LoadInt32(&calls); got != 0 {
 		t.Fatalf("caller allocator used for internal helper scratch: %d calls, want 0", got)

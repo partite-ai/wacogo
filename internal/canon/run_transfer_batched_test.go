@@ -94,11 +94,11 @@ func TestRunPhasedTransfer_BatchedListString(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = srcMod.Close(ctx) })
 
-	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+	helper, err := NewHost(ctx, rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
-	t.Cleanup(func() { _ = helper.close(ctx) })
+	t.Cleanup(func() { _ = helper.Close(ctx) })
 
 	// Seed src memory. List buffer at offset 0 holds 3 (ptr, len) pairs;
 	// string bytes live at offsets 100, 200, 300.
@@ -227,11 +227,11 @@ func TestRunPhasedTransfer_GrowsScratchForLargeN(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = srcMod.Close(ctx) })
 
-	helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+	helper, err := NewHost(ctx, rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
 	if err != nil {
 		t.Fatalf("buildBatchReallocHelper: %v", err)
 	}
-	t.Cleanup(func() { _ = helper.close(ctx) })
+	t.Cleanup(func() { _ = helper.Close(ctx) })
 
 	initialScratch := helper.scratch.Size()
 
@@ -314,11 +314,11 @@ func TestRunPhasedTransfer_BatchedTranscodeExactSizes(t *testing.T) {
 				t.Fatalf("instantiate src: %v", err)
 			}
 			t.Cleanup(func() { _ = srcMod.Close(ctx) })
-			helper, err := NewHost(rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
+			helper, err := NewHost(ctx, rt, 0).buildBatchReallocHelper(ctx, calleeMod.Name(), "realloc")
 			if err != nil {
 				t.Fatalf("buildBatchReallocHelper: %v", err)
 			}
-			t.Cleanup(func() { _ = helper.close(ctx) })
+			t.Cleanup(func() { _ = helper.Close(ctx) })
 
 			srcMem := srcMod.Memory()
 			for j, s := range strs {
