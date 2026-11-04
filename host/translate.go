@@ -509,19 +509,12 @@ func joinFlat(a, b byte) byte {
 	return wasm.ValI64
 }
 
-// instTranslator carries per-Instantiate arena state. Each
-// host.Component.Instantiate constructs one of these, populates
-// resResID with freshly-allocated arena ResourceIDs for every declared
-// resource and refResID with each ResourceTypeRef's lender-supplied
-// ResourceID, then translates every func signature into the engine's
-// arena. The resulting func and ComponentType IDs are tied to that
-// specific instance's resource identity — placeholder IDs from Build
-// are never reused.
-//
-// Build-time *TypeRef.hasArena / *ResourceType.resID /
-// *ResourceTypeRef.resID fields are NOT consulted by this translator.
-// The Build-time push path remains intact for the time being but its
-// arena entries are unused at Instantiate.
+// instTranslator translates a host component's func signatures into its
+// arena. buildComponentWpType, called once from Builder.Build, constructs one
+// and populates resResID with an arena ResourceID for every declared resource
+// and refResID with each ResourceTypeRef's placeholder ResourceID. These IDs
+// only name resources within the component's type; each instance's resource
+// identity comes from the instance type created at Instantiate.
 type instTranslator struct {
 	htb          *wasmparser.HostTypeBuilder
 	typeRefArena map[*TypeRef]uint32

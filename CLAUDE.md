@@ -14,11 +14,11 @@ Wacogo is a WebAssembly Component Model (MVP) runtime in Go. It uses wazero as t
 go build ./...                          # build all packages
 go test ./wasmparser/ -count=1          # run all wasmparser tests
 go test ./wasmparser/ -run TestName     # run a single test
-go test ./wasmparser/ -run TestComponentModelWast/empty -v  # run a specific wast suite
-go generate ./wasmparser/...            # regenerate test fixtures (requires wasm-tools >= 1.245.0)
+go test ./internal/core/ -run TestSpecConformance/local/parser/local-resource-in-imports -v  # run a specific wast file
+go generate ./testdata                  # regenerate spec test fixtures (requires wasm-tools >= 1.245.0)
 ```
 
-Test infrastructure uses `wasm-tools json-from-wast` to pre-compile `.wast` test files into JSON + binary fixtures. Source `.wast` files live in `wasmparser/testdata/wast/` (committed). Generated fixtures live in `wasmparser/testdata/generated/` (gitignored — run `go generate` to create them).
+Spec tests pre-compile `.wast` files into JSON + binary fixtures with `wasm-tools json-from-wast`, and `TestSpecConformance` in `internal/core` runs them. Source `.wast` files live in `testdata/spec/` (upstream mirror) and `testdata/local/` (our own), both committed. Generated fixtures live in `testdata/generated/` (gitignored — run `go generate ./testdata` to create them; the test fails if any are missing).
 
 ## Architecture
 
