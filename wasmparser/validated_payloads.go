@@ -257,3 +257,36 @@ func (v ValidatedComponentAlias) IsInstanceRuntimeEmpty() bool {
 	}
 	return isInstanceTypeRuntimeEmpty(v.arena, v.et.InstID)
 }
+
+// ValidatedComponentCanonicalSectionPayload is a canonical function section with
+// what the validator worked out about each function.
+type ValidatedComponentCanonicalSectionPayload struct {
+	raw     *ComponentCanonicalSectionPayload
+	entries []ValidatedCanonicalFunction
+}
+
+func (*ValidatedComponentCanonicalSectionPayload) payload() {}
+
+// Raw returns the underlying raw payload.
+func (p *ValidatedComponentCanonicalSectionPayload) Raw() *ComponentCanonicalSectionPayload {
+	return p.raw
+}
+
+// Items returns the section's functions in order.
+func (p *ValidatedComponentCanonicalSectionPayload) Items() []ValidatedCanonicalFunction {
+	return p.entries
+}
+
+// ValidatedCanonicalFunction is a canonical function paired with the signature of
+// the core function it creates.
+type ValidatedCanonicalFunction struct {
+	Function        CanonicalFunction
+	created         bool
+	params, results []CoreValType
+}
+
+// CoreFunc returns the signature of the core function this creates. A canon lift
+// creates a component function, so it has none.
+func (f ValidatedCanonicalFunction) CoreFunc() (params, results []CoreValType, ok bool) {
+	return f.params, f.results, f.created
+}

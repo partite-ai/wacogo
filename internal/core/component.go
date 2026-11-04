@@ -47,7 +47,10 @@ type Component struct {
 	// sub-component, whose compiled code is its top-level component's.
 	owned *ownedModules
 
-	engine          *Engine
+	engine *Engine
+	// hostFuncs is the signature of each core function this component's canon
+	// section creates in Go, which every instantiation builds a module from.
+	hostFuncs       []hostFuncSig
 	compiledModules []CompiledModule
 	subComponents   []*Component
 	plan            []planStep

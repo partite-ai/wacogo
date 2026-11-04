@@ -54,6 +54,9 @@ type Validator struct {
 	lastImportEntries []ComponentEntityType
 	lastExportEntries []ComponentEntityType
 	lastAliasEntries  []ComponentEntityType
+	// lastCanonicalEntries is populated in order during validateCanonicalSection,
+	// for the same purpose.
+	lastCanonicalEntries []ValidatedCanonicalFunction
 }
 
 // NewValidator creates a new Validator with the given feature set.

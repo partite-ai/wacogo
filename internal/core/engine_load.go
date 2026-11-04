@@ -10,6 +10,7 @@ import (
 	"github.com/partite-ai/wacogo/internal/wasm"
 	"github.com/partite-ai/wacogo/wasmparser"
 	"github.com/tetratelabs/wazero"
+	"github.com/tetratelabs/wazero/api"
 )
 
 // loadInstanceInfo tracks a component instance in the component instance index space.
@@ -64,13 +65,14 @@ func (s *loadScope) walkUp(count uint32) *loadScope {
 
 // componentLoader accumulates mutable state during component loading.
 type componentLoader struct {
-	engine   *Engine
-	compiled *[]wazero.CompiledModule
-	scope    *loadScope
-	parser   *wasmparser.ValidatingParser
-	plan     []planStep
-	exports  []ExportDesc
-	imports  []ImportDesc
+	hostFuncs []hostFuncSig
+	engine    *Engine
+	compiled  *[]wazero.CompiledModule
+	scope     *loadScope
+	parser    *wasmparser.ValidatingParser
+	plan      []planStep
+	exports   []ExportDesc
+	imports   []ImportDesc
 
 	// resourceDtors maps a resource TypeID to the core func index of its
 	// destructor, captured at load time. Consumed by planResourceDrop to
@@ -99,6 +101,10 @@ type componentLoader struct {
 	// re-exports of imported funcs, which wasmtime's component runtime does
 	// not implement.
 	funcIsImport []bool
+
+	// funcNames holds, by component-func index, what this component calls each
+	// func, for stack traces. Empty for a func it hasn't named by then.
+	funcNames []string
 }
 
 // allocType appends a resolver to the type index space and emits the
@@ -197,7 +203,7 @@ func (e *Engine) loadComponentFromParser(ctx context.Context, parser *wasmparser
 			if err := l.processTypeSection(sec); err != nil {
 				return nil, err
 			}
-		case *wasmparser.ComponentCanonicalSectionPayload:
+		case *wasmparser.ValidatedComponentCanonicalSectionPayload:
 			if err := l.processCanonicalSection(sec); err != nil {
 				return nil, err
 			}
@@ -337,12 +343,47 @@ func (l *componentLoader) processTypeSection(sec *wasmparser.ComponentTypeSectio
 	return nil
 }
 
-func (l *componentLoader) processCanonicalSection(sec *wasmparser.ComponentCanonicalSectionPayload) error {
-	for item, err := range sec.Items() {
-		if err != nil {
-			return fmt.Errorf("wacogo: canonical section: %w", err)
+// addHostFunc records the host function a canonical function needs, returning its
+// index among the component's host functions.
+func (l *componentLoader) addHostFunc(item wasmparser.ValidatedCanonicalFunction, name string) int {
+	params, results, ok := item.CoreFunc()
+	if !ok {
+		panic(fmt.Sprintf("wacogo: %T creates no core function", item.Function))
+	}
+	l.hostFuncs = append(l.hostFuncs, hostFuncSig{name: name, params: coreValTypesToAPI(params), results: coreValTypesToAPI(results)})
+	return len(l.hostFuncs) - 1
+}
+
+func coreValTypesToAPI(types []wasmparser.CoreValType) []api.ValueType {
+	out := make([]api.ValueType, len(types))
+	for i, t := range types {
+		switch t {
+		case wasmparser.CoreValTypeI32:
+			out[i] = api.ValueTypeI32
+		case wasmparser.CoreValTypeI64:
+			out[i] = api.ValueTypeI64
+		case wasmparser.CoreValTypeF32:
+			out[i] = api.ValueTypeF32
+		case wasmparser.CoreValTypeF64:
+			out[i] = api.ValueTypeF64
+		default:
+			panic(fmt.Sprintf("wacogo: core value type %d in a canonical signature", t))
 		}
-		switch cf := item.(type) {
+	}
+	return out
+}
+
+// loweredName returns what a stack trace calls the lowering of a component func.
+func (l *componentLoader) loweredName(funcIndex uint32) string {
+	if int(funcIndex) < len(l.funcNames) && l.funcNames[funcIndex] != "" {
+		return l.funcNames[funcIndex]
+	}
+	return "canon.lower"
+}
+
+func (l *componentLoader) processCanonicalSection(sec *wasmparser.ValidatedComponentCanonicalSectionPayload) error {
+	for _, item := range sec.Items() {
+		switch cf := item.Function.(type) {
 		case wasmparser.CanonLift:
 			l.plan = append(l.plan, &planLift{
 				coreFuncIndex: cf.CoreFuncIndex,
@@ -350,21 +391,23 @@ func (l *componentLoader) processCanonicalSection(sec *wasmparser.ComponentCanon
 				options:       mapCanonicalOptions(cf.Options),
 			})
 			l.funcIsImport = append(l.funcIsImport, false)
+			l.funcNames = append(l.funcNames, "")
 		case wasmparser.CanonLower:
 			l.plan = append(l.plan, &planLower{
-				funcRef: funcRef{funcIdx: cf.FuncIndex},
-				options: mapCanonicalOptions(cf.Options),
+				funcRef:       funcRef{funcIdx: cf.FuncIndex},
+				options:       mapCanonicalOptions(cf.Options),
+				hostFuncIndex: l.addHostFunc(item, l.loweredName(cf.FuncIndex)),
 			})
 		case wasmparser.CanonResourceNew:
-			l.plan = append(l.plan, &planResourceNew{typeID: cf.TypeIndex})
+			l.plan = append(l.plan, &planResourceNew{typeID: cf.TypeIndex, hostFuncIndex: l.addHostFunc(item, "resource.new")})
 		case wasmparser.CanonResourceDrop:
 			dtorIdx := -1
 			if dtor, ok := l.resourceDtors[cf.TypeIndex]; ok {
 				dtorIdx = int(dtor)
 			}
-			l.plan = append(l.plan, &planResourceDrop{typeID: cf.TypeIndex, dtorFuncIndex: dtorIdx})
+			l.plan = append(l.plan, &planResourceDrop{typeID: cf.TypeIndex, dtorFuncIndex: dtorIdx, hostFuncIndex: l.addHostFunc(item, "resource.drop")})
 		case wasmparser.CanonResourceRep:
-			l.plan = append(l.plan, &planResourceRep{typeID: cf.TypeIndex})
+			l.plan = append(l.plan, &planResourceRep{typeID: cf.TypeIndex, hostFuncIndex: l.addHostFunc(item, "resource.rep")})
 		default:
 			panic(fmt.Sprintf("wacogo: unknown canonical item %T", item))
 		}
@@ -417,10 +460,22 @@ func (l *componentLoader) processAliasInstanceExport(a wasmparser.AliasInstanceE
 		l.scope.subComponents = append(l.scope.subComponents, nil)
 	case SortFunc:
 		l.funcIsImport = append(l.funcIsImport, false)
+		l.funcNames = append(l.funcNames, l.instanceExportName(a))
 	case SortInstance:
 		l.scope.componentInstances = append(l.scope.componentInstances, loadInstanceInfo{})
 	}
 	l.plan = append(l.plan, alias)
+}
+
+// instanceExportName names an export aliased out of an instance, with the instance's
+// import name if it has one.
+func (l *componentLoader) instanceExportName(a wasmparser.AliasInstanceExport) string {
+	if int(a.Instance) < len(l.scope.componentInstances) {
+		if imported := l.scope.componentInstances[a.Instance].importName; imported != "" {
+			return imported + "#" + a.Name
+		}
+	}
+	return a.Name
 }
 
 // aliasedTypeResolver returns the resolver for a type aliased out of an
@@ -513,6 +568,7 @@ func (l *componentLoader) processExportSection(sec *wasmparser.ValidatedComponen
 				targetIndex: -1,
 			})
 			l.funcIsImport = append(l.funcIsImport, false)
+			l.funcNames = append(l.funcNames, item.Export.Name.Name)
 		case SortInstance:
 			// Carry the loader-time instance slot forward so outer
 			// aliases and later inline instances resolve correctly.
@@ -581,6 +637,7 @@ func (l *componentLoader) processImportSection(sec *wasmparser.ValidatedComponen
 				funcTypeID: tr.Index,
 			})
 			l.funcIsImport = append(l.funcIsImport, true)
+			l.funcNames = append(l.funcNames, item.Import.Name.Name)
 		case SortInstance:
 			l.plan = append(l.plan, &planImportInstance{
 				name:         item.Import.Name.Name,
@@ -655,6 +712,7 @@ func (l *componentLoader) buildComponent(parentScope *loadScope) (*Component, er
 
 	comp := &Component{
 		engine:                 l.engine,
+		hostFuncs:              l.hostFuncs,
 		compiledModules:        l.scope.compiledModules,
 		subComponents:          l.scope.subComponents,
 		plan:                   l.plan,

@@ -3,28 +3,24 @@ package canon
 import (
 	"context"
 
-	"github.com/tetratelabs/wazero"
 	"github.com/tetratelabs/wazero/api"
 )
 
-// CallAdapter is the factory return: a core func (Module/Name) plus any
-// batched-realloc helpers that must be torn down at Close. Close is idempotent.
+// CallAdapter is the factory return: a core function implemented in Go, with its
+// signature, plus any batched-realloc helpers that must be torn down at Close.
+// Close is idempotent.
 type CallAdapter struct {
-	Module api.Module
-	Name   string
+	Func            api.GoModuleFunction
+	Params, Results []api.ValueType
 
 	// reallocHelpers holds the batched-realloc helpers this adapter owns.
 	// Teardown order is reverse of append order.
 	reallocHelpers []*batchReallocHelper
 
-	// compiled holds per-adapter compiled code (the host module's) that
-	// must be freed after the module instances referencing it are closed.
-	compiled []wazero.CompiledModule
-
 	closed bool
 }
 
-// Close releases the adapter's owned modules. Safe to call multiple times;
+// Close releases the adapter's realloc helpers. Safe to call multiple times;
 // subsequent calls are no-ops returning nil.
 func (a *CallAdapter) Close(ctx context.Context) error {
 	if a == nil || a.closed {
@@ -34,18 +30,6 @@ func (a *CallAdapter) Close(ctx context.Context) error {
 	var firstErr error
 	for i := len(a.reallocHelpers) - 1; i >= 0; i-- {
 		if err := a.reallocHelpers[i].Close(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	if a.Module != nil {
-		if err := a.Module.Close(ctx); err != nil && firstErr == nil {
-			firstErr = err
-		}
-	}
-	// Compiled code is freed only after every instance referencing it is
-	// closed above.
-	for _, cm := range a.compiled {
-		if err := cm.Close(ctx); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}

@@ -120,8 +120,9 @@ type planLift struct {
 // that originally created it; this step only copies its Callee into an
 // adapter core func.
 type planLower struct {
-	funcRef funcRef
-	options canonicalOptions
+	funcRef       funcRef
+	options       canonicalOptions
+	hostFuncIndex int
 }
 
 // planResourceNew creates a new resource handle.
@@ -129,7 +130,8 @@ type planLower struct {
 // execute time inst.types[typeID] yields the *TypeResource used as the
 // resourceTable entry's type discriminator.
 type planResourceNew struct {
-	typeID uint32
+	typeID        uint32
+	hostFuncIndex int
 }
 
 // planResourceDrop drops a resource handle.
@@ -140,11 +142,13 @@ type planResourceDrop struct {
 	// dtorFuncIndex, when >= 0, is the core func index of the destructor
 	// to call with the rep value when the handle is dropped.
 	dtorFuncIndex int
+	hostFuncIndex int
 }
 
 // planResourceRep returns the representation of a resource handle.
 type planResourceRep struct {
-	typeID uint32
+	typeID        uint32
+	hostFuncIndex int
 }
 
 // planImportFunc records a component function import.

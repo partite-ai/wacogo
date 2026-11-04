@@ -61,6 +61,10 @@ type instantiationState struct {
 	// Funcs not destined for export have an empty entry.
 	funcExportNames []string
 
+	// hostFuncs holds the core functions implemented in Go, built before the plan
+	// runs and bound by its steps.
+	hostFuncs *hostFuncs
+
 	// parentState provides access to the parent component's instantiation state,
 	// used to resolve outer aliases at runtime. Nil for top-level instantiations.
 	parentState *instantiationState
@@ -250,6 +254,10 @@ func (e *Engine) instantiateWithParentCfg(ctx context.Context, component *Compon
 		subComponents:   subComponents,
 		parentState:     parentState,
 		funcExportNames: buildFuncExportNames(component.exports),
+	}
+	state.hostFuncs, err = newHostFuncs(ctx, e.runtime, inst, component.hostFuncs)
+	if err != nil {
+		return nil, err
 	}
 
 	// Run the plan-step loop with the instance locked against reentrant

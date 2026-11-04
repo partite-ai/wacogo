@@ -15,8 +15,7 @@ import (
 )
 
 // TestInstanceLimits checks that the limits sit exactly at the instances an
-// instantiation defines, and at nothing else the runtime creates, which it counts
-// here as other.
+// instantiation defines.
 func TestInstanceLimits(t *testing.T) {
 	const leaf = `(component $c (core module $m) (core instance (instantiate $m)))`
 
@@ -54,7 +53,7 @@ func TestInstanceLimits(t *testing.T) {
   (core func (canon resource.new $r))
   (core func (canon resource.rep $r))
   (core func (canon resource.drop $r)))`,
-			core: 1, component: 1, other: 3,
+			core: 1, component: 1,
 		},
 		"nested": {
 			wat: `(component ` + leaf + `
