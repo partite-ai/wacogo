@@ -348,6 +348,9 @@ type ComponentTypeDesc struct {
 	// DefinedResources lists the resources a component type declaration introduces
 	// directly, through (sub resource) bounds.
 	DefinedResources []ResourceID
+	// body records how a component definition fills its index spaces. It is nil
+	// for a component type that is only declared.
+	body *componentBody
 }
 
 // ---------- Type Arena ----------

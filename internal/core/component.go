@@ -67,10 +67,11 @@ type Component struct {
 	// subComponents index space.
 	outerComponentClosures map[int]outerRef
 
-	// wpType is the opaque wasmparser type handle for this component,
-	// populated at load time. Nil if the engine wasn't able to produce
-	// one. Used by Instantiate to subtype-check supplied instance args
-	// via CheckInstantiation.
+	// wpType is the opaque wasmparser type handle for this component, populated
+	// at load time for a top-level component. Nil for a sub-component, whose
+	// instances get their types from the top-level instance's. Used by
+	// Instantiate to subtype-check supplied imports via CheckInstantiation and
+	// to create the instance's type.
 	wpType *wasmparser.ComponentType
 }
 

@@ -29,14 +29,14 @@ func TestNewInstanceReturnsDistinctHandles(t *testing.T) {
 		t.Fatal("no top-level ComponentType")
 	}
 
-	inst1 := ct.NewInstance()
-	inst2 := ct.NewInstance()
+	inst1 := ct.NewInstance(nil, nil)
+	inst2 := ct.NewInstance(nil, nil)
 
 	if inst1 == inst2 {
 		t.Fatal("want distinct *InstanceType handles from separate NewInstance calls")
 	}
-	if inst1.source != ct || inst2.source != ct {
-		t.Fatal("each handle should reference the same source ComponentType")
+	if inst1.scope == inst2.scope {
+		t.Fatal("want distinct resource scopes from separate NewInstance calls")
 	}
 }
 
@@ -48,7 +48,7 @@ func TestNewInstanceIsMemoryNeutral(t *testing.T) {
 	ct := loadComponent(t, src)
 	before := arenaShape(ct.arena)
 	for range 1000 {
-		_ = ct.NewInstance()
+		_ = ct.NewInstance(nil, nil)
 	}
 	after := arenaShape(ct.arena)
 	if before != after {
@@ -72,15 +72,15 @@ func TestCheckInstantiationIsMemoryNeutral(t *testing.T) {
 	beforeProv := arenaShape(prov.arena)
 	beforeCons := arenaShape(cons.arena)
 	for range 100 {
-		shared := prov.NewInstance()
+		shared := prov.NewInstance(nil, nil)
 		if err := cons.CheckInstantiation(map[string]any{
 			"I1": shared,
 			"I2": shared,
 		}); err != nil {
 			t.Fatalf("unexpected: %v", err)
 		}
-		i1 := prov.NewInstance()
-		i2 := prov.NewInstance()
+		i1 := prov.NewInstance(nil, nil)
+		i2 := prov.NewInstance(nil, nil)
 		if err := cons.CheckInstantiation(map[string]any{
 			"I1": i1,
 			"I2": i2,
@@ -152,7 +152,7 @@ func TestCheckInstantiationAcceptsSharedResource(t *testing.T) {
 	prov := loadComponent(t,provSrc)
 	cons := loadComponent(t,consSrc)
 
-	shared := prov.NewInstance()
+	shared := prov.NewInstance(nil, nil)
 
 	err := cons.CheckInstantiation(map[string]any{
 		"I1": shared,
@@ -184,12 +184,12 @@ func TestCheckInstantiationConcurrentlySafe(t *testing.T) {
 	for range 16 {
 		wg.Go(func() {
 			for range 50 {
-				shared := prov.NewInstance()
+				shared := prov.NewInstance(nil, nil)
 				_ = cons.CheckInstantiation(map[string]any{
 					"I1": shared, "I2": shared,
 				})
-				i1 := prov.NewInstance()
-				i2 := prov.NewInstance()
+				i1 := prov.NewInstance(nil, nil)
+				i2 := prov.NewInstance(nil, nil)
 				_ = cons.CheckInstantiation(map[string]any{
 					"I1": i1, "I2": i2,
 				})
@@ -212,8 +212,8 @@ func TestCheckInstantiationRejectsMismatchedResources(t *testing.T) {
 	prov := loadComponent(t,provSrc)
 	cons := loadComponent(t,consSrc)
 
-	i1 := prov.NewInstance()
-	i2 := prov.NewInstance()
+	i1 := prov.NewInstance(nil, nil)
+	i2 := prov.NewInstance(nil, nil)
 
 	err := cons.CheckInstantiation(map[string]any{
 		"I1": i1,
@@ -247,7 +247,9 @@ func exportHandle(t *testing.T, ct *ComponentType, name string) any {
 	case EntityComponent:
 		return &ComponentType{arena: arena, id: et.CompID}
 	case EntityInstance:
-		return &InstanceType{source: ct}
+		inst := &InstanceType{arena: arena, exports: arena.InstanceTypes[et.InstID].Exports}
+		inst.scope = inst
+		return inst
 	default:
 		t.Fatalf("unsupported export kind %v", et.Kind)
 		return nil
@@ -309,7 +311,7 @@ func TestCheckInstantiationRejectsWrongKind(t *testing.T) {
 )`
 	prov := loadComponent(t,provSrc)
 	cons := loadComponent(t,consSrc)
-	err := cons.CheckInstantiation(map[string]any{"f": prov.NewInstance()})
+	err := cons.CheckInstantiation(map[string]any{"f": prov.NewInstance(nil, nil)})
 	if err == nil {
 		t.Fatal("expected kind-mismatch, got nil")
 	}
@@ -397,7 +399,7 @@ func TestCheckInstantiationRejectsModuleWrongKind(t *testing.T) {
 	prov := loadComponent(t,provSrc)
 	cons := loadComponent(t,consSrc)
 	// Supply an *InstanceType for a core-module import.
-	err := cons.CheckInstantiation(map[string]any{"m": prov.NewInstance()})
+	err := cons.CheckInstantiation(map[string]any{"m": prov.NewInstance(nil, nil)})
 	if err == nil {
 		t.Fatal("expected kind-mismatch error, got nil")
 	}

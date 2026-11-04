@@ -642,6 +642,12 @@ func (v *Validator) aliasInstanceExport(cs *ComponentState, a AliasInstanceExpor
 	if err := checkAliasKindMatchesEntity(a.Kind, et, a.Instance, a.Name); err != nil {
 		return err
 	}
+	switch et.Kind {
+	case EntityInstance:
+		cs.record(stepAliasInstance{from: a.Instance, name: a.Name, view: et.InstID})
+	case EntityComponent:
+		cs.record(stepAliasComponent{from: a.Instance, name: a.Name})
+	}
 	return cs.addEntity(et)
 }
 
@@ -729,6 +735,7 @@ func (v *Validator) aliasOuter(cs *ComponentState, a AliasOuter) error {
 			return err
 		}
 		cs.components = append(cs.components, comp)
+		cs.record(stepOuterComponent{count: a.Count, index: a.Index})
 	default:
 		return fmt.Errorf("unknown outer alias kind")
 	}

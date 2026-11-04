@@ -17,6 +17,7 @@ const (
 // ComponentState holds the validation state for a single component (or nested component/module).
 type ComponentState struct {
 	kind     ComponentKind
+	body     *componentBody // set only when kind is ComponentKindComponent
 	features FeatureSet
 	arena    *TypeArena
 

@@ -298,13 +298,10 @@ func (sc *SubtypeChecker) isDefinedTypeSubtypeImpl(a, b ComponentDefinedTypeID) 
 // repeated references to the same b-side resource require consistent
 // a-side matches — the mechanism behind (eq $r) constraints.
 //
-// If the supplied a-side scope is an *InstanceType that re-exports
-// aRes from another instance via aliasing (recorded on the
-// InstanceType's resourceOrigin map), the chain is walked to the
-// defining instance before scope comparison. This lets `use`-style
-// resource sharing across distinct supplied instances pass identity
-// checks without weakening per-instance freshness for locally defined
-// resources.
+// If the a-side scope records that aRes is defined elsewhere (see
+// InstanceType.resourceRoots), the comparison uses that root. This lets
+// resources shared across distinct supplied instances pass identity checks
+// without weakening per-instance freshness for locally defined resources.
 func (sc *SubtypeChecker) checkResourceMatch(aRes, bRes ResourceID) error {
 	a := resolveResource(sc.aScope, sc.aArena, aRes, sc.aBound)
 
@@ -326,30 +323,21 @@ func (sc *SubtypeChecker) checkResourceMatch(aRes, bRes ResourceID) error {
 }
 
 // resolveResource returns the identity of a resource: what it was bound to if
-// bound holds it, and otherwise its defining resource, following any re-export
-// recorded on an *InstanceType scope to the instance that defines it.
+// bound holds it, and otherwise its defining resource, or the root recorded for
+// that on an *InstanceType scope if it is defined elsewhere.
 func resolveResource(scope any, arena *TypeArena, res ResourceID, bound map[ResourceID]scopedResID) scopedResID {
-	if b, ok := bound[arena.ResolveResourceAlias(res)]; ok {
+	// A resource may be known by several IDs, each an alias of its defining ID.
+	// Aliases live globally on the arena.
+	res = arena.ResolveResourceAlias(res)
+	if b, ok := bound[res]; ok {
 		return b
 	}
-	for hops := 0; hops < 8; hops++ {
-		it, ok := scope.(*InstanceType)
-		if !ok || it.resourceOrigin == nil {
-			break
+	if it, ok := scope.(*InstanceType); ok {
+		if root, ok := it.resourceRoots[res]; ok {
+			return root
 		}
-		spec, ok := it.resourceOrigin[res]
-		if !ok || spec.Lender == nil || spec.Lender == it {
-			break
-		}
-		scope = spec.Lender
-		res = spec.LenderResID
-		arena = spec.Lender.source.arena
 	}
-	// One-hop alias resolution: if the resource is an export-alias of a defining
-	// resource, fall back to the defining ID. Two imports that both reference
-	// (eq $r) where $r is itself an alias must still compare equal under this
-	// check. Aliases live globally on the arena.
-	return scopedResID{scope: scope, arena: arena, id: arena.ResolveResourceAlias(res)}
+	return scopedResID{scope: scope, arena: arena, id: res}
 }
 
 // resourceMismatchErr selects the spec-aligned wording for a rejected

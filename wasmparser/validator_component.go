@@ -585,6 +585,13 @@ func (v *Validator) addImportCapturing(cs *ComponentState, imp *ComponentImport)
 		return ComponentEntityType{}, err
 	}
 
+	switch et.Kind {
+	case EntityInstance:
+		cs.record(stepImportInstance{name: imp.Name.Name, view: et.InstID})
+	case EntityComponent:
+		cs.record(stepImportComponent{name: imp.Name.Name})
+	}
+
 	// Record in imports map
 	cs.imports[imp.Name.Name] = et
 	cs.importOrder = append(cs.importOrder, imp.Name.Name)
@@ -818,6 +825,13 @@ func (v *Validator) addExportCapturing(cs *ComponentState, exp *ComponentExport)
 	// Add the exported entity to the appropriate index space
 	if err := cs.addEntity(et); err != nil {
 		return ComponentEntityType{}, err
+	}
+
+	switch et.Kind {
+	case EntityInstance:
+		cs.record(stepExportInstance{name: exp.Name.Name, from: exp.Index})
+	case EntityComponent:
+		cs.record(stepExportComponent{name: exp.Name.Name, from: exp.Index})
 	}
 
 	// Record in exports map

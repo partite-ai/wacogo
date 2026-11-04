@@ -28,10 +28,9 @@ type InstanceSpec struct {
 	// Callers control the order; core does not interpret which is which.
 	Modules []api.Module
 
-	// ParserInstanceType is the wasmparser instance-type handle minted
-	// at creation time. Optional; nil means this instance cannot be
-	// supplied as an instance import to another component's
-	// Instantiate call (typical for sub-component instances).
+	// ParserInstanceType is the wasmparser handle to this instance's actual
+	// type. Optional; if nil, this instance's type is not checked when it is
+	// supplied as an instance import to another component's Instantiate call.
 	ParserInstanceType *wasmparser.InstanceType
 
 	// ExternTable, when non-nil, is the read-only lookup table queried

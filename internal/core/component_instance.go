@@ -28,11 +28,10 @@ type ComponentInstance struct {
 	// unreliable state. Non-nil makes Enter fail; nil means usable.
 	poisoned error
 
-	// wpInstance is the opaque wasmparser instance-type handle minted at
-	// creation time (fresh ResourceIDs for any resources this instance
-	// defines). Nil for sub-component instances and for instances whose
-	// originating Component had no type handle. Used when this instance is
-	// supplied as an instance import to another component's Instantiate call.
+	// wpInstance is the opaque wasmparser handle to this instance's actual type,
+	// set at creation time. Nil only for an instance built by NewInstance without
+	// one. Used when this instance is supplied as an instance import to another
+	// component's Instantiate call.
 	wpInstance *wasmparser.InstanceType
 
 	// externTable, when non-nil, supplies LookupExtern. Set from

@@ -77,7 +77,7 @@ func TestHostTypeBuilder_NewComponentTypeHandle(t *testing.T) {
 		t.Fatal("want non-nil *ComponentType")
 	}
 	// Smoke: NewInstance should return a non-nil *InstanceType.
-	inst := h.NewInstance()
+	inst := h.NewInstance(nil, nil)
 	if inst == nil {
 		t.Fatal("want non-nil *InstanceType")
 	}
@@ -110,7 +110,7 @@ func TestHostTypeBuilder_SynthComponentCheckInstantiation(t *testing.T) {
 		ExportOrder: []string{"hi"},
 	})
 	hostComp := b.NewComponentTypeHandle(hostCompID)
-	hostInst := hostComp.NewInstance()
+	hostInst := hostComp.NewInstance(nil, nil)
 
 	// Consumer side: one import "h" of instance type matching host.
 	consFnID := b.PushFuncType(FuncTypeDesc{})

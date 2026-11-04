@@ -43,17 +43,15 @@ func TestResourceAlias_SharesIdentity(t *testing.T) {
 		t.Fatalf("alias identity mismatch: primary=%p alias=%p", tPrimary, tAlias)
 	}
 
-	wp := inst.Core().ParserInstanceType()
-	rPrimary, ok := wp.ExportedResourceID("primary")
-	if !ok {
-		t.Fatalf("primary not in parser instance type")
-	}
-	rAlias, ok := wp.ExportedResourceID("alias")
-	if !ok {
-		t.Fatalf("alias not in parser instance type")
-	}
-	if rPrimary != rAlias {
-		t.Fatalf("alias ResourceID mismatch: primary=%v alias=%v", rPrimary, rAlias)
+	// The checker must see one resource under both names.
+	consumer := loadGuest(t, e, `(component
+  (import "a" (instance $a (export "primary" (type (sub resource)))))
+  (alias export $a "primary" (type $r))
+  (import "b" (instance (export "alias" (type (eq $r))))))`)
+	if _, err := consumer.Instantiate(ctx,
+		wacogo.WithInstanceImport("a", inst.Core()),
+		wacogo.WithInstanceImport("b", inst.Core())); err != nil {
+		t.Fatalf("want alias and target to be one resource, got: %v", err)
 	}
 }
 

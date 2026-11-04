@@ -149,6 +149,7 @@ func (v *Validator) current() *ComponentState {
 
 func (v *Validator) validateVersion(_ *VersionPayload) error {
 	cs := newComponentState(v.features, v.arena, ComponentKindComponent)
+	cs.body = &componentBody{}
 	v.components = append(v.components, cs)
 	v.state = validatorStateComponent
 	return nil
@@ -167,6 +168,7 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 			ImportOrder: child.importOrder,
 			Exports:     child.exports,
 			ExportOrder: child.exportOrder,
+			body:        child.body,
 		})
 		if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
 			return fmt.Errorf("effective type size exceeds the limit")
@@ -183,6 +185,7 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		ct.ImportOrder = child.importOrder
 		ct.Exports = child.exports
 		ct.ExportOrder = child.exportOrder
+		ct.body = child.body
 		ct.DefinedResources = slices.Collect(maps.Keys(child.locallyDefinedSubResources))
 		size := v.arena.computeComponentTypeSize(ct)
 		v.arena.ComponentTypeSizes[compTypeID] = size
@@ -235,6 +238,7 @@ func (v *Validator) validateComponentSection(_ *ComponentSectionPayload) error {
 		Exports: make(map[string]ComponentEntityType),
 	})
 	cs.components = append(cs.components, compTypeID)
+	cs.record(stepDefineComponent{id: compTypeID})
 	v.pendingCompTypeIDs = append(v.pendingCompTypeIDs, compTypeID)
 	return nil
 }

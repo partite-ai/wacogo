@@ -41,9 +41,10 @@ Two layers, with a hard split:
   opaque type handle (`*wasmparser.FuncType`, `*ModuleType`,
   `*ComponentType`, `*InstanceType`). Those handles ride along on
   `ExportDesc.ParserFunctionType`, `CompiledModule.wpModuleType`,
-  `*Component.wpType`, and (after Instantiate)
+  `*Component.wpType`, and (from Instantiate)
   `*ComponentInstance.wpInstance`. No subtype check fires at load
-  time.
+  time, though a root export exposing a component at any depth is
+  rejected, as in wasmtime.
 
 - **Instantiate** (`internal/core/engine_instantiate.go`,
   `(*Engine).instantiate`). Right after option parsing and before the
@@ -155,13 +156,27 @@ This means:
   side an independent identity scope. The `(eq $r)` mapping cannot
   unify them, and the check fails with `mismatched resource types`.
 
-Pointer identity, not arena equality, controls scoping. An
-`*InstanceType` is a Go pointer wrapper around its source `*ComponentType`
-(see `wasmparser/public_instantiate.go`), and `(*ComponentType).NewInstance`
-always returns a fresh allocation. Each top-level `Instantiate` mints
-exactly one new `*InstanceType` for the resulting `*ComponentInstance`
-(stashed on `wpInstance`), which is what gets passed back in when the
-instance is later supplied as an arg.
+Pointer identity, not arena equality, controls scoping. Each top-level
+`Instantiate` calls `(*ComponentType).NewInstance` once, passing the types of
+the supplied instances, and stashes the result on `wpInstance`. That is what
+gets passed back in when the instance is later supplied as an arg.
+
+`NewInstance` builds the type of the whole instance tree in one go, by
+evaluating what the validator recorded about how each component fills its
+instance and component index spaces (`wasmparser/instance_eval.go`). No
+component crosses the root boundary, so nothing about the tree depends on the
+runtime. An instance created while the plan runs takes its type with
+`(*InstanceType).SubInstance`, using its slot in the instance index space, which
+lines up with the validator's. So an instance reached with `ExportedInstance`
+carries its own actual type, and is checked by it, whatever its parent's exports
+declare about it.
+
+Each instantiation of a component opens a fresh scope, and an inline instance
+shares the scope of the instantiation that assembled it. A scope records the
+identity of each resource it knows but does not define: an import is whatever
+was supplied, and a resource created by a sub-instance is that sub-instance's.
+Identities are resolved as they are recorded, which is safe because evaluation
+order means what they refer to is already complete.
 
 ## Error model
 

@@ -120,6 +120,9 @@ func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, er
 		return nil, err
 	}
 	comp.wpType = vp.TopLevelComponentType()
+	if comp.wpType.ExposesComponent() {
+		return nil, fmt.Errorf("wacogo: exporting a component from the root component is not supported")
+	}
 	return comp, nil
 }
 
@@ -646,11 +649,6 @@ func (l *componentLoader) buildComponent(parentScope *loadScope) (*Component, er
 		for _, imp := range l.imports {
 			if imp.Kind == SortComponent {
 				return nil, fmt.Errorf("wacogo: root-level component imports are not supported")
-			}
-		}
-		for _, exp := range l.exports {
-			if exp.Kind == SortComponent {
-				return nil, fmt.Errorf("wacogo: exporting a component from the root component is not supported")
 			}
 		}
 	}

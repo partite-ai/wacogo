@@ -105,80 +105,58 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 		opt(cfg)
 	}
 
-	// Pre-check instance-typed imports against the component's declared
-	// type before running the plan. CheckInstantiation silently skips
-	// imports that have no typed handle (e.g. synthetic host-provided
-	// instances); those fall through to the existing runtime machinery.
-	if component.wpType != nil {
-		args := make(map[string]any, len(cfg.imports))
-		for name, v := range cfg.imports {
-			switch ap := v.(type) {
-			case *ComponentInstance:
-				if ap.wpInstance != nil {
-					args[name] = ap.wpInstance
-				}
-			case *ExportedFunc:
-				if ft := ap.ParserFunctionType(); ft != nil {
-					args[name] = ft
-				}
-			case *CompiledModule:
-				if ap.wpModuleType != nil {
-					args[name] = ap.wpModuleType
-				}
-			case *Component:
-				if ap.wpType != nil {
-					args[name] = ap.wpType
-				}
+	// Pre-check imports against the component's declared type before running
+	// the plan. Imports with no typed handle fall through to the existing
+	// runtime machinery.
+	args := make(map[string]any, len(cfg.imports))
+	for name, v := range cfg.imports {
+		switch ap := v.(type) {
+		case *ComponentInstance:
+			if ap.wpInstance != nil {
+				args[name] = ap.wpInstance
+			}
+		case *ExportedFunc:
+			if ft := ap.ParserFunctionType(); ft != nil {
+				args[name] = ft
+			}
+		case *CompiledModule:
+			if ap.wpModuleType != nil {
+				args[name] = ap.wpModuleType
+			}
+		case *Component:
+			if ap.wpType != nil {
+				args[name] = ap.wpType
 			}
 		}
-		if err := component.wpType.CheckInstantiation(args); err != nil {
-			return nil, fmt.Errorf("wacogo: instantiate: %w", err)
-		}
+	}
+	if err := component.wpType.CheckInstantiation(args); err != nil {
+		return nil, fmt.Errorf("wacogo: instantiate: %w", err)
 	}
 
-	inst, err := e.instantiateWithParentCfg(ctx, component, nil, cfg)
-	if err != nil {
-		return nil, err
-	}
-	// Mint a fresh instance-type handle for this top-level instance. Each
-	// top-level Instantiate call gets its own fresh ResourceIDs for the
-	// component's exported resources. Sub-component instances (created via
-	// instantiateWithParent with a non-nil parent) do NOT mint one — their
-	// type identity is handled by the validator-time check.
-	if component.wpType != nil {
-		wpInst := component.wpType.NewInstance()
-		// Record, for each exported resource that is an alias of a
-		// resource defined by a supplied instance import, the lender
-		// instance and its arena ResID. CheckInstantiation walks this
-		// map so chained re-exports share scope with the originator.
-		suppliedInstanceImports := make(map[string]*wasmparser.InstanceType)
-		for name, v := range cfg.imports {
-			ci, ok := v.(*ComponentInstance)
-			if !ok || ci == nil || ci.wpInstance == nil {
-				continue
-			}
+	// Each top-level instance gets fresh resources, apart from those it imports.
+	suppliedInstanceImports := make(map[string]*wasmparser.InstanceType)
+	for name, v := range cfg.imports {
+		if ci, ok := v.(*ComponentInstance); ok && ci != nil && ci.wpInstance != nil {
 			suppliedInstanceImports[name] = ci.wpInstance
 		}
-		if origins := component.wpType.ComputeResourceOrigins(suppliedInstanceImports); origins != nil {
-			wpInst.SetResourceOrigin(origins)
-		}
-		inst.wpInstance = wpInst
 	}
-	return inst, nil
+
+	return e.instantiateWithParentCfg(ctx, component, nil, component.wpType.NewInstance(suppliedInstanceImports, nil), cfg)
 }
 
-func (e *Engine) instantiateWithParent(ctx context.Context, component *Component, parentState *instantiationState, opts ...InstantiateOption) (*ComponentInstance, error) {
+func (e *Engine) instantiateWithParent(ctx context.Context, component *Component, parentState *instantiationState, wpInst *wasmparser.InstanceType, opts ...InstantiateOption) (*ComponentInstance, error) {
 	cfg := &instantiateConfig{}
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	return e.instantiateWithParentCfg(ctx, component, parentState, cfg)
+	return e.instantiateWithParentCfg(ctx, component, parentState, wpInst, cfg)
 }
 
 // instantiateWithParentCfg is the shared body of instantiateWithParent, taking
 // an already-parsed config so callers that need to inspect imports before
-// running the plan don't have to apply InstantiateOptions twice.
-func (e *Engine) instantiateWithParentCfg(ctx context.Context, component *Component, parentState *instantiationState, cfg *instantiateConfig) (result *ComponentInstance, err error) {
+// running the plan don't have to apply InstantiateOptions twice. wpInst is set
+// before the plan runs because the instances the plan creates share its scope.
+func (e *Engine) instantiateWithParentCfg(ctx context.Context, component *Component, parentState *instantiationState, wpInst *wasmparser.InstanceType, cfg *instantiateConfig) (result *ComponentInstance, err error) {
 	// Copy the component's compiled modules and sub-components into the
 	// instantiation state so that module/component imports can extend them.
 	compiledModules := make([]CompiledModule, len(component.compiledModules))
@@ -231,10 +209,11 @@ func (e *Engine) instantiateWithParentCfg(ctx context.Context, component *Compon
 	}
 
 	inst := &ComponentInstance{
-		engine:    e,
-		component: component,
-		exports:   make(map[string]exportEntry),
-		canLeave:  true,
+		engine:     e,
+		component:  component,
+		exports:    make(map[string]exportEntry),
+		canLeave:   true,
+		wpInstance: wpInst,
 	}
 	inst.resources = NewResourceTable(inst)
 	defer func() {
@@ -503,7 +482,7 @@ func (step *planAlias) execute(_ context.Context, s *instantiationState) error {
 		case SortInstance:
 			sub := inst.ExportedInstance(src.name)
 			if _, exported := inst.exports[src.name]; !exported && step.runtimeEmpty {
-				sub = &ComponentInstance{}
+				sub = s.newEmptyInstance()
 			}
 			if sub == nil {
 				return fmt.Errorf("wacogo: alias export: %q not found as instance in component instance %d", src.name, src.instanceIdx)
@@ -836,11 +815,23 @@ func (s *instantiationState) lookupFuncType(typeID uint32, ctxDesc string) (*Fun
 	return ft, nil
 }
 
+// nextInstanceType returns the type of the instance about to be appended to the
+// instance index space.
+func (s *instantiationState) nextInstanceType() *wasmparser.InstanceType {
+	return s.inst.wpInstance.SubInstance(len(s.componentInstances))
+}
+
+// newEmptyInstance returns a placeholder for an omitted instance that needs
+// nothing at runtime.
+func (s *instantiationState) newEmptyInstance() *ComponentInstance {
+	return &ComponentInstance{wpInstance: s.nextInstanceType()}
+}
+
 func (step *planImportInstance) execute(_ context.Context, s *instantiationState) error {
 	arg, ok := s.imports[wasmparser.CanonicalizeImportName(step.name)]
 	if !ok {
 		if step.runtimeEmpty {
-			s.componentInstances = append(s.componentInstances, &ComponentInstance{})
+			s.componentInstances = append(s.componentInstances, s.newEmptyInstance())
 			return nil
 		}
 		return fmt.Errorf("wacogo: import %q: was not found", step.name)
@@ -939,7 +930,7 @@ func (step *planInstantiateComponent) execute(ctx context.Context, s *instantiat
 		}
 	}
 
-	inst, err := s.inst.engine.instantiateWithParent(ctx, subComp, s, opts...)
+	inst, err := s.inst.engine.instantiateWithParent(ctx, subComp, s, s.nextInstanceType(), opts...)
 	if err != nil {
 		return fmt.Errorf("wacogo: instantiate sub-component %d: %w", step.componentIndex, err)
 	}
@@ -951,9 +942,10 @@ func (step *planInstantiateComponent) execute(ctx context.Context, s *instantiat
 func (step *planComponentInstantiateFromExports) execute(_ context.Context, s *instantiationState) error {
 	// Create a component instance from inline exports by assembling an export map.
 	inst := &ComponentInstance{
-		engine:   s.inst.engine,
-		exports:  make(map[string]exportEntry),
-		canLeave: true,
+		engine:     s.inst.engine,
+		exports:    make(map[string]exportEntry),
+		canLeave:   true,
+		wpInstance: s.nextInstanceType(),
 	}
 	for _, exp := range step.exports {
 		switch exp.kind {

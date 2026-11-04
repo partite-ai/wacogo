@@ -24,9 +24,9 @@ type Component struct {
 	compiledStub wazero.CompiledModule
 
 	// wpComponentType is the frozen wasmparser ComponentType handle
-	// describing this Component's exports, with placeholder ResIDs
-	// for ResourceTypeRefs. Built once by Builder.Build; per-Instantiate
-	// resource identity is layered on via *InstanceType + SetResourceOrigin.
+	// describing this Component's exports, with each ResourceTypeRef as a
+	// resource import. Built once by Builder.Build; each Instantiate supplies
+	// those imports to NewInstance.
 	wpComponentType *wasmparser.ComponentType
 	// wpFuncTypes is parallel to allFuncs; each entry is a *FuncType
 	// handle into c.arena. Read by ExportedFunc.ParserFunctionType.
@@ -158,14 +158,11 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 	//    per-func wpFuncType handles minted here are the same identities
 	//    advertised in the resulting *InstanceType, so guests' import
 	//    type checks pass.
-	origins, err := buildInstanceOrigins(c, iopts.resourceFroms)
+	resources, err := buildResourceArgs(c, iopts.resourceFroms)
 	if err != nil {
 		return nil, err
 	}
-	wpInst := c.wpComponentType.NewInstance()
-	if len(origins) > 0 {
-		wpInst.SetResourceOrigin(origins)
-	}
+	wpInst := c.wpComponentType.NewInstance(nil, resources)
 
 	// 5. Build the core instance. Its contents refer back to it, so they
 	//    are assembled in the BuildContents callback.
@@ -195,7 +192,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 			if err != nil {
 				return nil, err
 			}
-			rootExports, err := c.buildScopeExports(c.root, res, namedTypes, funcExports)
+			rootExports, err := c.buildScopeExports(c.root, wpInst, res, namedTypes, funcExports)
 			if err != nil {
 				return nil, err
 			}
@@ -282,10 +279,12 @@ func (c *Component) buildFuncExports(
 
 // buildScopeExports emits the InstanceExport list for one scope,
 // recursing for nested instances. A nested instance is a bare shell —
-// no modules, no parser type, no extern table — that names the types
-// its enclosing instance defines. It defines nothing itself.
+// no modules, no extern table — that names the types its enclosing
+// instance defines. It defines nothing itself, so its type shares wp's
+// resource identities.
 func (c *Component) buildScopeExports(
 	sr *scopeRuntime,
+	wp *wasmparser.InstanceType,
 	res *instanceResources,
 	namedTypes map[*TypeRef]core.Type,
 	funcExports []*core.ExportedFunc,
@@ -330,11 +329,13 @@ func (c *Component) buildScopeExports(
 		})
 	}
 	for _, child := range sr.nested {
-		childExports, err := c.buildScopeExports(child, res, namedTypes, funcExports)
+		childWp := wp.ExportedInstance(child.exportName)
+		childExports, err := c.buildScopeExports(child, childWp, res, namedTypes, funcExports)
 		if err != nil {
 			return nil, err
 		}
 		childInst, err := core.NewInstance(c.engine, &core.InstanceSpec{
+			ParserInstanceType: childWp,
 			BuildExports: func(*core.ComponentInstance) ([]core.InstanceExport, error) {
 				return childExports, nil
 			},
@@ -594,20 +595,26 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, []*wasmparse
 		exportOrder = append(exportOrder, rrd.name)
 	}
 
+	imports := make(map[string]wasmparser.ComponentEntityType, len(c.resourceRefs))
+	importOrder := make([]string, 0, len(c.resourceRefs))
+	for _, rrd := range c.resourceRefs {
+		imports[rrd.name] = exports[rrd.name]
+		importOrder = append(importOrder, rrd.name)
+	}
+
 	ctID := htb.PushComponentType(wasmparser.ComponentTypeDesc{
-		Imports:     map[string]wasmparser.ComponentEntityType{},
-		ImportOrder: nil,
+		Imports:     imports,
+		ImportOrder: importOrder,
 		Exports:     exports,
 		ExportOrder: exportOrder,
 	})
 	return htb.NewComponentTypeHandle(ctID), wpFuncTypes, nil
 }
 
-// buildInstanceOrigins constructs the resourceOrigin map binding each
-// ResourceTypeRef's placeholderRID to the corresponding lender
-// instance and that lender's exported ResourceID. Called once per
-// Instantiate; performs no arena writes.
-func buildInstanceOrigins(c *Component, opts []resourceFromOpt) (map[wasmparser.ResourceID]wasmparser.ResourceOriginSpec, error) {
+// buildResourceArgs names, for each ResourceTypeRef, the lender export that
+// supplies its resource import. Called once per Instantiate, after
+// resolveResourceRefs has checked each ref's lender.
+func buildResourceArgs(c *Component, opts []resourceFromOpt) (map[string]wasmparser.ResourceFrom, error) {
 	if len(c.resourceRefs) == 0 {
 		return nil, nil
 	}
@@ -615,26 +622,15 @@ func buildInstanceOrigins(c *Component, opts []resourceFromOpt) (map[wasmparser.
 	for _, o := range opts {
 		optByRef[o.ref] = o
 	}
-	origins := make(map[wasmparser.ResourceID]wasmparser.ResourceOriginSpec, len(c.resourceRefs))
+	resources := make(map[string]wasmparser.ResourceFrom, len(c.resourceRefs))
 	for _, rrd := range c.resourceRefs {
-		opt, ok := optByRef[rrd.ref]
-		if !ok {
-			return nil, fmt.Errorf("wacogo/host: ResourceTypeRef %q: no lender supplied", rrd.name)
-		}
-		lenderWp := opt.lender.ParserInstanceType()
+		lenderWp := optByRef[rrd.ref].lender.ParserInstanceType()
 		if lenderWp == nil {
 			return nil, fmt.Errorf("wacogo/host: ResourceTypeRef %q: lender has no wasmparser type info", rrd.name)
 		}
-		lenderRID, ok := lenderWp.ExportedResourceID(opt.lenderExport)
-		if !ok {
-			return nil, fmt.Errorf("wacogo/host: ResourceTypeRef %q: lender does not export resource type %q", rrd.name, opt.lenderExport)
-		}
-		origins[rrd.placeholderRID] = wasmparser.ResourceOriginSpec{
-			Lender:      lenderWp,
-			LenderResID: lenderRID,
-		}
+		resources[rrd.name] = wasmparser.ResourceFrom{Lender: lenderWp, Export: optByRef[rrd.ref].lenderExport}
 	}
-	return origins, nil
+	return resources, nil
 }
 
 func lookupExportedTypeResource(lender *core.ComponentInstance, exportName string) (*core.TypeResource, error) {

@@ -58,6 +58,17 @@ func (v *Validator) instantiateComponent(cs *ComponentState, inst Instantiate) e
 		suppliedArgs[arg.Name] = argType
 	}
 
+	step := stepInstantiate{component: inst.ComponentIndex}
+	for _, arg := range inst.Args {
+		step.args = append(step.args, bodyRef{name: arg.Name, kind: arg.Kind, index: arg.Index})
+		if et := suppliedArgs[arg.Name]; et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
+			if step.resources == nil {
+				step.resources = make(map[string]ResourceID)
+			}
+			step.resources[arg.Name] = et.TypeRef.ResID
+		}
+	}
+
 	// Check all imports are satisfied, building resource mapping.
 	// Process in insertion order for deterministic error messages and correct resource mapping.
 	sc := v.newSubtypeCheckerWithRemapping()
@@ -86,6 +97,8 @@ func (v *Validator) instantiateComponent(cs *ComponentState, inst Instantiate) e
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.instances = append(cs.instances, id)
+	step.view = id
+	cs.record(step)
 	return nil
 }
 
@@ -132,6 +145,11 @@ func (v *Validator) instantiateFromExports(cs *ComponentState, inst InstantiateF
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.instances = append(cs.instances, id)
+	step := stepInlineInstance{view: id}
+	for _, exp := range inst.Exports {
+		step.exports = append(step.exports, bodyRef{name: exp.Name.Name, kind: exp.Kind, index: exp.Index})
+	}
+	cs.record(step)
 	return nil
 }
 
