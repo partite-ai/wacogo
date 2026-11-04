@@ -101,7 +101,7 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 	// the plan. Imports with no typed handle fall through to the existing
 	// runtime machinery.
 	args := make(map[string]any, len(cfg.imports))
-	suppliedResources := make(map[string]wasmparser.ResourceFrom)
+	suppliedResources := make(map[wasmparser.ResourceID]wasmparser.ResourceFrom)
 	for name, v := range cfg.imports {
 		switch ap := v.(type) {
 		case *ComponentInstance:
@@ -127,7 +127,9 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 			if ap.lender.wpInstance != nil {
 				from := wasmparser.ResourceFrom{Lender: ap.lender.wpInstance, Export: ap.export}
 				args[name] = from
-				suppliedResources[name] = from
+				if placeholder, ok := component.wpType.ImportedResource(name); ok {
+					suppliedResources[placeholder] = from
+				}
 			}
 		}
 	}

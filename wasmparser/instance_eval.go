@@ -97,7 +97,7 @@ type componentValue struct {
 type instanceArgs struct {
 	instances  map[string]*InstanceType
 	components map[string]*componentValue
-	resources  map[string]scopedResID
+	resources  map[ResourceID]scopedResID
 }
 
 // instance returns the instance supplied for an import, under its literal or
@@ -141,21 +141,16 @@ func evalInstance(arena *TypeArena, id ComponentTypeID, outer *instanceFrame, ar
 
 // bindImports records the roots of the resources this instance's imports define.
 func (i *InstanceType) bindImports(ct ComponentTypeDesc, args instanceArgs) {
+	for placeholder, root := range args.resources {
+		i.setRoot(i.arena.ResolveResourceAlias(placeholder), root)
+	}
 	for _, name := range ct.ImportOrder {
 		imp := ct.Imports[name]
-		switch {
-		case imp.Kind == EntityInstance:
-			if lender := args.instance(name); lender != nil {
-				i.bindImportedInstance(imp.InstID, lender, nil)
-			}
-		case imp.Kind == EntityType && imp.TypeRef.Kind == AnyTypeResource:
-			root, ok := args.resources[name]
-			if !ok {
-				root, ok = args.resources[CanonicalizeImportName(name)]
-			}
-			if ok {
-				i.setRoot(i.arena.ResolveResourceAlias(imp.TypeRef.ResID), root)
-			}
+		if imp.Kind != EntityInstance {
+			continue
+		}
+		if lender := args.instance(name); lender != nil {
+			i.bindImportedInstance(imp.InstID, lender, nil)
 		}
 	}
 }
@@ -269,7 +264,7 @@ func (f *instanceFrame) instantiate(s stepInstantiate) *InstanceType {
 	args := instanceArgs{
 		instances:  make(map[string]*InstanceType),
 		components: make(map[string]*componentValue),
-		resources:  make(map[string]scopedResID, len(s.resources)),
+		resources:  make(map[ResourceID]scopedResID, len(s.resources)),
 	}
 	for _, arg := range s.args {
 		switch arg.kind {
@@ -280,8 +275,11 @@ func (f *instanceFrame) instantiate(s stepInstantiate) *InstanceType {
 		}
 	}
 	self := f.self
+	imports := self.arena.ComponentTypes[comp.id].Imports
 	for name, id := range s.resources {
-		args.resources[name] = resolveResource(self.scope, self.arena, id, nil)
+		if imp, ok := imports[name]; ok && imp.Kind == EntityType && imp.TypeRef.Kind == AnyTypeResource {
+			args.resources[imp.TypeRef.ResID] = resolveResource(self.scope, self.arena, id, nil)
+		}
 	}
 	child := evalInstance(self.arena, comp.id, comp.frame, args)
 	self.bindSubInstance(self.arena.InstanceTypes[s.view].Exports, child, child.exports)

@@ -341,3 +341,277 @@ func TestHostFunc_ResourceRefIdentity(t *testing.T) {
 		t.Fatal("want another lender's resource to differ")
 	}
 }
+
+// hostLender returns an instance of a host component exporting a resource "r".
+func hostLender(t *testing.T, ctx context.Context, comp *host.Component) *core.ComponentInstance {
+	t.Helper()
+	inst, err := comp.Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate lender: %v", err)
+	}
+	t.Cleanup(func() { inst.Close(ctx) })
+	return inst.Core()
+}
+
+func newHostLenderComponent(t *testing.T, ctx context.Context, e *wacogo.Engine) *host.Component {
+	t.Helper()
+	b := e.NewHostBuilder("lender")
+	b.AddResource("r", nil)
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build lender: %v", err)
+	}
+	t.Cleanup(func() { comp.Close(ctx) })
+	return comp
+}
+
+func noopHostFunc(context.Context, *core.CallContext, *host.ComponentInstance, []uint64) error {
+	return nil
+}
+
+func TestNestedResourceRef(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+	lender := newHostLenderComponent(t, ctx, e)
+	l1, l2 := hostLender(t, ctx, lender), hostLender(t, ctx, lender)
+
+	b := e.NewHostBuilder("nested-ref")
+	n := b.AddNestedInstance("n")
+	ref := n.AddResourceRef("r")
+	n.AddFunction("f", &host.FuncType{Params: []host.Param{{Name: "x", Type: ref.Own()}}}, noopHostFunc)
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	inst, err := comp.Instantiate(ctx, host.WithResourceFrom(ref, l1, "r"))
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+	nested := inst.Core().ExportedInstance("n")
+
+	if got := nested.ExportedType("r"); got == nil || got != l1.ExportedType("r") {
+		t.Fatalf("n.r = %v, want the lender's resource", got)
+	}
+	if got := inst.Core().ExportedType("r"); got != nil {
+		t.Fatalf("the root exports r = %v, want it only in n", got)
+	}
+
+	eq := loadGuest(t, e, `(component
+  (import "a" (instance $a (export "r" (type (sub resource)))))
+  (alias export $a "r" (type $r))
+  (import "b" (instance (export "n" (instance (export "r" (type (eq $r))))))))`)
+	if _, err := eq.Instantiate(ctx, wacogo.WithInstanceImport("a", l1), wacogo.WithInstanceImport("b", inst.Core())); err != nil {
+		t.Fatalf("want n.r to be the lender's resource, got: %v", err)
+	}
+	if _, err := eq.Instantiate(ctx, wacogo.WithInstanceImport("a", l2), wacogo.WithInstanceImport("b", inst.Core())); err == nil {
+		t.Fatal("want n.r to differ from another lender's resource")
+	}
+
+	fn := loadGuest(t, e, `(component
+  (import "a" (instance $a (export "r" (type (sub resource)))))
+  (alias export $a "r" (type $r))
+  (type $o (own $r))
+  (import "f" (func (param "x" $o))))`)
+	f := nested.ExportedFunc("f")
+	if _, err := fn.Instantiate(ctx, wacogo.WithInstanceImport("a", l1), wacogo.WithFuncImport("f", f)); err != nil {
+		t.Fatalf("want n.f to name the lender's resource, got: %v", err)
+	}
+	if _, err := fn.Instantiate(ctx, wacogo.WithInstanceImport("a", l2), wacogo.WithFuncImport("f", f)); err == nil {
+		t.Fatal("want n.f not to name another lender's resource")
+	}
+}
+
+// Refs with one name in different scopes are separate placeholders.
+func TestNestedResourceRef_SameNameInTwoScopes(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+	lender := newHostLenderComponent(t, ctx, e)
+	l1, l2 := hostLender(t, ctx, lender), hostLender(t, ctx, lender)
+
+	b := e.NewHostBuilder("same-name")
+	rootRef := b.AddResourceRef("r")
+	nRef := b.AddNestedInstance("n").AddResourceRef("r")
+	mRef := b.AddNestedInstance("m").AddResourceRef("r")
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	inst, err := comp.Instantiate(ctx,
+		host.WithResourceFrom(rootRef, l2, "r"),
+		host.WithResourceFrom(nRef, l1, "r"),
+		host.WithResourceFrom(mRef, l2, "r"))
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+
+	consumer := loadGuest(t, e, `(component
+  (import "a" (instance $a (export "r" (type (sub resource)))))
+  (alias export $a "r" (type $r))
+  (import "b" (instance (export "r" (type (eq $r))))))`)
+	for _, c := range []struct {
+		name    string
+		lender  *core.ComponentInstance
+		inst    *core.ComponentInstance
+		wantErr bool
+	}{
+		{"root is its lender's", l2, inst.Core(), false},
+		{"root is not another's", l1, inst.Core(), true},
+		{"n is its lender's", l1, inst.Core().ExportedInstance("n"), false},
+		{"n is not another's", l2, inst.Core().ExportedInstance("n"), true},
+		{"m is its lender's", l2, inst.Core().ExportedInstance("m"), false},
+		{"m is not another's", l1, inst.Core().ExportedInstance("m"), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := consumer.Instantiate(ctx, wacogo.WithInstanceImport("a", c.lender), wacogo.WithInstanceImport("b", c.inst))
+			if (err != nil) != c.wantErr {
+				t.Fatalf("wantErr=%v, got: %v", c.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestNestedResourceRef_Deeper(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+	lender := newHostLenderComponent(t, ctx, e)
+	l1 := hostLender(t, ctx, lender)
+
+	b := e.NewHostBuilder("deeper")
+	ref := b.AddNestedInstance("n").AddNestedInstance("m").AddResourceRef("r")
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	inst, err := comp.Instantiate(ctx, host.WithResourceFrom(ref, l1, "r"))
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+	if got := inst.Core().ExportedInstance("n").ExportedInstance("m").ExportedType("r"); got != l1.ExportedType("r") {
+		t.Fatalf("n.m.r = %v, want the lender's resource", got)
+	}
+}
+
+func TestNestedResourceRef_Unbound(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+
+	b := e.NewHostBuilder("unbound")
+	b.AddNestedInstance("n").AddResourceRef("r")
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	if _, err := comp.Instantiate(ctx); err == nil || !strings.Contains(err.Error(), "no WithResourceFrom binding") {
+		t.Fatalf("want a missing binding reported, got: %v", err)
+	}
+}
+
+// A ref can be used from any scope, whichever declares it.
+func TestResourceRef_UsedAcrossScopes(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+	lender := newHostLenderComponent(t, ctx, e)
+	l1, l2 := hostLender(t, ctx, lender), hostLender(t, ctx, lender)
+
+	b := e.NewHostBuilder("across-scopes")
+	n := b.AddNestedInstance("n")
+	nestedRef := n.AddResourceRef("r")
+	rootRef := b.AddResourceRef("s")
+	b.AddFunction("root-uses-nested", &host.FuncType{Params: []host.Param{{Name: "x", Type: nestedRef.Own()}}}, noopHostFunc)
+	n.AddFunction("nested-uses-root", &host.FuncType{Params: []host.Param{{Name: "x", Type: rootRef.Own()}}}, noopHostFunc)
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	inst, err := comp.Instantiate(ctx, host.WithResourceFrom(nestedRef, l1, "r"), host.WithResourceFrom(rootRef, l2, "r"))
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+
+	consumer := loadGuest(t, e, `(component
+  (import "a" (instance $a (export "r" (type (sub resource)))))
+  (alias export $a "r" (type $r))
+  (type $o (own $r))
+  (import "f" (func (param "x" $o))))`)
+	rootUsesNested := inst.Core().ExportedFunc("root-uses-nested")
+	nestedUsesRoot := inst.Core().ExportedInstance("n").ExportedFunc("nested-uses-root")
+	for _, c := range []struct {
+		name    string
+		lender  *core.ComponentInstance
+		f       *core.ExportedFunc
+		wantErr bool
+	}{
+		{"root func names the nested ref's lender", l1, rootUsesNested, false},
+		{"root func names no other", l2, rootUsesNested, true},
+		{"nested func names the root ref's lender", l2, nestedUsesRoot, false},
+		{"nested func names no other", l1, nestedUsesRoot, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := consumer.Instantiate(ctx, wacogo.WithInstanceImport("a", c.lender), wacogo.WithFuncImport("f", c.f))
+			if (err != nil) != c.wantErr {
+				t.Fatalf("wantErr=%v, got: %v", c.wantErr, err)
+			}
+		})
+	}
+}
+
+// Resources and refs share an ID space, whichever scopes declare them.
+func TestNestedResourceRef_DeclaredBeforeResource(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+	lender := newHostLenderComponent(t, ctx, e)
+	l1 := hostLender(t, ctx, lender)
+
+	b := e.NewHostBuilder("ref-before-resource")
+	ref := b.AddNestedInstance("n").AddResourceRef("r")
+	b.AddResource("own", nil)
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	inst, err := comp.Instantiate(ctx, host.WithResourceFrom(ref, l1, "r"))
+	if err != nil {
+		t.Fatalf("Instantiate: %v", err)
+	}
+	defer inst.Close(ctx)
+	if inst.Core().ExportedType("own") == nil {
+		t.Fatal("want the component's own resource exported")
+	}
+}
+
+func TestResourceRef_LenderExportIsNotAResource(t *testing.T) {
+	ctx := context.Background()
+	e := wacogo.NewEngine(ctx)
+	defer e.Close(ctx)
+
+	lender, err := loadGuest(t, e, `(component (type $u u32) (export "u" (type $u)))`).Instantiate(ctx)
+	if err != nil {
+		t.Fatalf("Instantiate lender: %v", err)
+	}
+	b := e.NewHostBuilder("non-resource")
+	ref := b.AddResourceRef("r")
+	comp, err := b.Build(ctx)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer comp.Close(ctx)
+	if _, err := comp.Instantiate(ctx, host.WithResourceFrom(ref, lender, "u")); err == nil || !strings.Contains(err.Error(), "want *TypeResource") {
+		t.Fatalf("want a non-resource export rejected, got: %v", err)
+	}
+}

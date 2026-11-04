@@ -25,8 +25,8 @@ type Component struct {
 
 	// wpComponentType is the frozen wasmparser ComponentType handle
 	// describing this Component's exports, with each ResourceTypeRef as a
-	// resource import. Built once by Builder.Build; each Instantiate supplies
-	// those imports to NewInstance.
+	// placeholder. Built once by Builder.Build; each Instantiate binds those
+	// placeholders with NewInstance.
 	wpComponentType *wasmparser.ComponentType
 	// root is the *scopeRuntime tree mirroring the build-time scope tree.
 	root *scopeRuntime
@@ -37,7 +37,7 @@ type Component struct {
 	allFuncs     []*funcRuntime
 	allResources []*resourceRuntime
 
-	// resourceRefs holds the root-scope ResourceTypeRef declarations.
+	// resourceRefs holds the ResourceTypeRef declarations of every scope.
 	// resolveResourceRefs reads from here.
 	resourceRefs []resourceRefDecl
 
@@ -188,18 +188,7 @@ func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) 
 			if err != nil {
 				return nil, err
 			}
-			rootExports, err := c.buildScopeExports(c.root, wpInst, res, namedTypes, funcExports)
-			if err != nil {
-				return nil, err
-			}
-			// resourceRef exports live on the root only.
-			for _, rrd := range c.resourceRefs {
-				rootExports = append(rootExports, core.InstanceExport{
-					Name: rrd.name, Kind: core.InstanceKindType,
-					Type: refResolved[rrd.ref],
-				})
-			}
-			return rootExports, nil
+			return c.buildScopeExports(c.root, wpInst, res, namedTypes, funcExports)
 		},
 	})
 	if err != nil {
@@ -310,6 +299,12 @@ func (c *Component) buildScopeExports(
 		out = append(out, core.InstanceExport{
 			Name: rr.exportName, Kind: core.InstanceKindType,
 			Type: res.trOf[rr],
+		})
+	}
+	for _, rrd := range sr.resourceRefs {
+		out = append(out, core.InstanceExport{
+			Name: rrd.name, Kind: core.InstanceKindType,
+			Type: res.byComponentResourceTypeID[rrd.ref.componentResourceTypeID],
 		})
 	}
 	for _, ar := range sr.aliases {
@@ -501,7 +496,7 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, error) {
 	var buildScopeExports func(sr *scopeRuntime) (map[string]wasmparser.ComponentEntityType, []string, error)
 	buildScopeExports = func(sr *scopeRuntime) (map[string]wasmparser.ComponentEntityType, []string, error) {
 		exp := make(map[string]wasmparser.ComponentEntityType,
-			len(sr.funcs)+len(sr.types)+len(sr.resources)+len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
+			len(sr.funcs)+len(sr.types)+len(sr.resources)+len(sr.resourceRefs)+len(sr.aliases)+len(sr.coreModules)+len(sr.nested))
 		var order []string
 		for _, fr := range sr.funcs {
 			exp[fr.exportName] = wasmparser.ComponentEntityType{
@@ -532,6 +527,16 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, error) {
 				},
 			}
 			order = append(order, rr.exportName)
+		}
+		for _, rrd := range sr.resourceRefs {
+			exp[rrd.name] = wasmparser.ComponentEntityType{
+				Kind: wasmparser.EntityType,
+				TypeRef: wasmparser.ComponentAnyTypeID{
+					Kind:  wasmparser.AnyTypeResource,
+					ResID: xt.refResID[rrd.ref],
+				},
+			}
+			order = append(order, rrd.name)
 		}
 		for _, ar := range sr.aliases {
 			exp[ar.exportName] = wasmparser.ComponentEntityType{
@@ -579,27 +584,9 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, rrd := range c.resourceRefs {
-		exports[rrd.name] = wasmparser.ComponentEntityType{
-			Kind: wasmparser.EntityType,
-			TypeRef: wasmparser.ComponentAnyTypeID{
-				Kind:  wasmparser.AnyTypeResource,
-				ResID: xt.refResID[rrd.ref],
-			},
-		}
-		exportOrder = append(exportOrder, rrd.name)
-	}
-
-	imports := make(map[string]wasmparser.ComponentEntityType, len(c.resourceRefs))
-	importOrder := make([]string, 0, len(c.resourceRefs))
-	for _, rrd := range c.resourceRefs {
-		imports[rrd.name] = exports[rrd.name]
-		importOrder = append(importOrder, rrd.name)
-	}
-
 	ctID := htb.PushComponentType(wasmparser.ComponentTypeDesc{
-		Imports:     imports,
-		ImportOrder: importOrder,
+		Imports:     map[string]wasmparser.ComponentEntityType{},
+		ImportOrder: nil,
 		Exports:     exports,
 		ExportOrder: exportOrder,
 		Funcs:       funcIDs,
@@ -607,10 +594,10 @@ func buildComponentWpType(c *Component) (*wasmparser.ComponentType, error) {
 	return htb.NewComponentTypeHandle(ctID), nil
 }
 
-// buildResourceArgs names, for each ResourceTypeRef, the lender export that
-// supplies its resource import. Called once per Instantiate, after
-// resolveResourceRefs has checked each ref's lender.
-func buildResourceArgs(c *Component, opts []resourceFromOpt) (map[string]wasmparser.ResourceFrom, error) {
+// buildResourceArgs binds each ResourceTypeRef's placeholder to the lender export
+// that supplies it. Called once per Instantiate, after resolveResourceRefs has
+// checked each ref's lender.
+func buildResourceArgs(c *Component, opts []resourceFromOpt) (map[wasmparser.ResourceID]wasmparser.ResourceFrom, error) {
 	if len(c.resourceRefs) == 0 {
 		return nil, nil
 	}
@@ -618,13 +605,13 @@ func buildResourceArgs(c *Component, opts []resourceFromOpt) (map[string]wasmpar
 	for _, o := range opts {
 		optByRef[o.ref] = o
 	}
-	resources := make(map[string]wasmparser.ResourceFrom, len(c.resourceRefs))
+	resources := make(map[wasmparser.ResourceID]wasmparser.ResourceFrom, len(c.resourceRefs))
 	for _, rrd := range c.resourceRefs {
 		lenderWp := optByRef[rrd.ref].lender.ParserInstanceType()
 		if lenderWp == nil {
 			return nil, fmt.Errorf("wacogo/host: ResourceTypeRef %q: lender has no wasmparser type info", rrd.name)
 		}
-		resources[rrd.name] = wasmparser.ResourceFrom{Lender: lenderWp, Export: optByRef[rrd.ref].lenderExport}
+		resources[rrd.placeholderRID] = wasmparser.ResourceFrom{Lender: lenderWp, Export: optByRef[rrd.ref].lenderExport}
 	}
 	return resources, nil
 }

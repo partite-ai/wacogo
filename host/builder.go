@@ -204,8 +204,8 @@ func (b *Builder) Build(ctx context.Context) (*Component, error) {
 }
 
 // stampPlaceholderRIDs allocates one placeholder ResourceID per
-// resourceRefDecl in the root and walks the scopeRuntime tree
-// updating every copy of that decl by ref-pointer match. Called
+// resourceRefDecl and walks the scopeRuntime tree updating every copy
+// of that decl by ref-pointer match. Called
 // from Builder.Build after buildScopeTree has populated the tree.
 func stampPlaceholderRIDs(comp *Component, htb *wasmparser.HostTypeBuilder) {
 	byRef := make(map[*ResourceTypeRef]wasmparser.ResourceID, len(comp.resourceRefs))
@@ -288,6 +288,7 @@ func buildScopeTree(b *Builder, comp *Component, root *scope) error {
 				return nil, err
 			}
 			sr.resourceRefs = append(sr.resourceRefs, *rrd)
+			comp.resourceRefs = append(comp.resourceRefs, *rrd)
 		}
 		for i := range s.aliases {
 			ad := &s.aliases[i]
@@ -347,11 +348,6 @@ func buildScopeTree(b *Builder, comp *Component, root *scope) error {
 		return err
 	}
 	comp.root = rootRT
-	// Populate comp.resourceRefs from the root scope to preserve the
-	// pre-refactor field used by Component.Instantiate's resource-ref
-	// resolver. Only root-scope ResourceTypeRefs are supported in this
-	// pass; nested scopes have no refs yet.
-	comp.resourceRefs = root.resourceRefs
 	return nil
 }
 
