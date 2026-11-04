@@ -94,7 +94,8 @@ func (c *ComponentType) NewInstance(bindings InstanceBindings) *InstanceType {
 	if bindings != nil {
 		b = suppliedBindings{bindings}
 	}
-	return evalInstance(c.arena, c.id, nil, b, &instanceBudget{maxCore: Unlimited, maxComponent: Unlimited})
+	budget := unlimitedBudget
+	return evalInstance(c.arena, c.id, nil, b, &budget)
 }
 
 // SubInstance returns the type of the instance at index in the instance index

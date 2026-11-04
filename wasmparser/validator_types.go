@@ -493,8 +493,8 @@ func (a *TypeArena) allocResourceID() ResourceID {
 // ---------- Effective type size ----------
 
 // satAddU32 returns a+b, saturating at math.MaxUint32 to avoid overflow on
-// pathological inputs. Sizes that saturate will exceed the effective type size limit and
-// be rejected by the validator.
+// pathological inputs. Sizes that saturate will exceed any effective type size limit
+// other than Unlimited and be rejected by the validator.
 func satAddU32(a, b uint32) uint32 {
 	s := a + b
 	if s < a {

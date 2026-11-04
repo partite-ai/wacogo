@@ -5,21 +5,25 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/partite-ai/wacogo/wasmparser"
 )
 
-// TestInstanceLimits checks that the limits sit exactly at what an instantiation
-// creates, and that the count of core instances is what the runtime creates.
+// TestInstanceLimits checks that the limits sit exactly at the instances an
+// instantiation defines, and at nothing else the runtime creates, which it counts
+// here as other.
 func TestInstanceLimits(t *testing.T) {
 	const leaf = `(component $c (core module $m) (core instance (instantiate $m)))`
 
 	for name, c := range map[string]struct {
 		wat             string
 		core, component uint32
+		other           uint64
 	}{
 		"flat": {
 			wat: `(component
@@ -35,6 +39,22 @@ func TestInstanceLimits(t *testing.T) {
   (alias core export $i "f" (core func $f))
   (core instance (export "g" (func $f))))`,
 			core: 2, component: 1,
+		},
+		"inline instance": {
+			wat: `(component
+  (instance)
+  (instance))`,
+			component: 3,
+		},
+		"canon functions": {
+			wat: `(component
+  (type $r (resource (rep i32)))
+  (core module $m)
+  (core instance (instantiate $m))
+  (core func (canon resource.new $r))
+  (core func (canon resource.rep $r))
+  (core func (canon resource.drop $r)))`,
+			core: 1, component: 1, other: 3,
 		},
 		"nested": {
 			wat: `(component ` + leaf + `
@@ -73,7 +93,7 @@ func TestInstanceLimits(t *testing.T) {
   (instance $i (export "c" (component $c)))
   (alias export $i "c" (component $d))
   (instance (instantiate $d)))`,
-			core: 1, component: 2,
+			core: 1, component: 3,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -110,8 +130,8 @@ func TestInstanceLimits(t *testing.T) {
 			if _, err := comp.Instantiate(ctx); err != nil {
 				t.Fatal(err)
 			}
-			if created := instanceCounter.Load() - before; created != uint64(c.core) {
-				t.Fatalf("runtime created %d core instances, counted %d", created, c.core)
+			if created := instanceCounter.Load() - before; created != uint64(c.core)+c.other {
+				t.Fatalf("runtime created %d modules, want %d instantiated and %d other", created, c.core, c.other)
 			}
 		})
 	}
@@ -259,6 +279,56 @@ func TestParseLimits_Raised(t *testing.T) {
 	}
 }
 
+// TestInstanceLimits_EvaluationBounded checks what stops a small binary making
+// the check itself expensive, where the instance limits don't: an instantiation
+// is charged to the effective type size for everything it expands to.
+func TestInstanceLimits_EvaluationBounded(t *testing.T) {
+	deep := `(component $c)`
+	for range 40 {
+		deep = `(component $c ` + deep + ` (instance (instantiate $c)) (instance (instantiate $c)))`
+	}
+	// Aliases are not instances, so only the effective type size stops this.
+	large := `(component (component $c) (component $big` + strings.Repeat(` (alias outer 1 0 (component))`, 10_000) + `)` + strings.Repeat(` (instance (instantiate $big))`, 998) + `)`
+	// Func imports aren't entries in the index spaces evaluation fills in, so only
+	// the args are charged here.
+	var imports, with string
+	for i := range 2000 {
+		imports += fmt.Sprintf(` (import "a%d" (func))`, i)
+		with += fmt.Sprintf(` (with "a%d" (func $f))`, i)
+	}
+	args := `(component (component $c` + imports + `)
+  (component $u (import "f" (func $f)) (alias outer 1 0 (component $c)) (instance (instantiate $c` + with + `)))
+  (import "f" (func $f))` +
+		strings.Repeat(` (instance (instantiate $u (with "f" (func $f))))`, 999) + `)`
+
+	for name, c := range map[string]struct {
+		wat    string
+		limits ParseLimits
+	}{
+		"body multiplied by instantiations": {large, ParseLimits{}},
+		"args multiplied by instantiations": {args, ParseLimits{}},
+		"deep with only core limited":       {deep, ParseLimits{ComponentInstances: Unlimited}},
+		"deep with no instance limits":      {deep, ParseLimits{CoreInstances: Unlimited, ComponentInstances: Unlimited}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			engine := NewEngine(ctx, WithParseLimits(c.limits))
+			defer engine.Close(ctx)
+			bin := parseLinkWat(t, c.wat)
+			var before, after runtime.MemStats
+			runtime.ReadMemStats(&before)
+			_, err := engine.LoadComponent(ctx, bytes.NewReader(bin))
+			runtime.ReadMemStats(&after)
+			if err == nil || !strings.Contains(err.Error(), "effective type size") {
+				t.Fatalf("got %v", err)
+			}
+			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 500<<20 {
+				t.Fatalf("a %d byte binary allocated %d MB", len(bin), allocated>>20)
+			}
+		})
+	}
+}
+
 // TestParseLimits_Unlimited checks that Unlimited lifts a limit, for one that is
 // compared with a count, the nesting depth, and the instance limits, whose check
 // is skipped: this would not finish if it visited each of 2^41 instances.
@@ -273,7 +343,7 @@ func TestParseLimits_Unlimited(t *testing.T) {
 	}{
 		"count":     {`(component (type (func (param "a" u32) (param "b" u32))))`, ParseLimits{FunctionParams: Unlimited}},
 		"nesting":   {`(component (component (component)))`, ParseLimits{NestingDepth: Unlimited}},
-		"instances": {deep, ParseLimits{CoreInstances: Unlimited, ComponentInstances: Unlimited}},
+		"instances": {deep, ParseLimits{CoreInstances: Unlimited, ComponentInstances: Unlimited, EffectiveTypeSize: Unlimited}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()

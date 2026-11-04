@@ -11,9 +11,9 @@ import (
 // to its imports.
 type componentBody struct {
 	steps []bodyStep
-	// coreInstances is the size of the component's core instance index space,
-	// which holds nothing that isn't created by the component itself.
-	coreInstances uint64
+	// coreInstances and inlineInstances are the core instances and inline
+	// component instances the component creates itself.
+	coreInstances, inlineInstances uint64
 }
 
 // bodyStep appends one entry to an instance or component index space.
@@ -89,6 +89,9 @@ func (stepInlineInstance) isBodyStep()  {}
 func (cs *ComponentState) record(step bodyStep) {
 	if cs.kind == ComponentKindComponent {
 		cs.body.steps = append(cs.body.steps, step)
+		if _, ok := step.(stepInlineInstance); ok {
+			cs.body.inlineInstances++
+		}
 	}
 }
 
@@ -172,35 +175,53 @@ func (n nestedBindings) resource(res ImportedResource) (scopedResID, bool) {
 
 // instanceBudget counts the instances an evaluation creates, against limits.
 type instanceBudget struct {
-	maxCore, maxComponent uint32
-	core, component       uint64
+	maxCore, maxComponent, maxSize uint32
+	core, component, size          uint64
 }
+
+// unlimitedBudget evaluates without stopping.
+var unlimitedBudget = instanceBudget{maxCore: Unlimited, maxComponent: Unlimited, maxSize: Unlimited}
 
 func (b *instanceBudget) charge(body *componentBody) {
 	b.component++
+	b.size++
 	if body != nil {
 		b.core += body.coreInstances
+		b.component += body.inlineInstances
+		b.size += uint64(len(body.steps))
 	}
 }
 
+func over(count uint64, max uint32) bool {
+	return max != Unlimited && count > uint64(max)
+}
+
+func (b *instanceBudget) exceeded() bool {
+	return over(b.core, b.maxCore) || over(b.component, b.maxComponent) || over(b.size, b.maxSize)
+}
+
 func (b *instanceBudget) err() error {
-	if b.maxCore != Unlimited && b.core > uint64(b.maxCore) {
+	if over(b.core, b.maxCore) {
 		return fmt.Errorf("%w: more than %d core instances", ErrInstanceLimitExceeded, b.maxCore)
 	}
-	if b.maxComponent != Unlimited && b.component > uint64(b.maxComponent) {
+	if over(b.component, b.maxComponent) {
 		return fmt.Errorf("%w: more than %d component instances", ErrInstanceLimitExceeded, b.maxComponent)
+	}
+	if over(b.size, b.maxSize) {
+		return fmt.Errorf("effective type size of an instantiation exceeds the limit")
 	}
 	return nil
 }
 
-// checkInstanceLimits evaluates an instantiation of component id, which stops
-// descending once the limits are passed, so that this takes time proportional to
-// the limits however many instances the component would create.
+// checkInstanceLimits evaluates an instantiation of component id. Evaluation is
+// what expands the type, so it is charged to the effective type size and stops
+// descending once any limit is passed. That bounds this work by the limits rather
+// than by how many instances the component would create.
 func checkInstanceLimits(arena *TypeArena, id ComponentTypeID, limits *ParseLimits) error {
-	if limits.CoreInstances == Unlimited && limits.ComponentInstances == Unlimited {
+	budget := &instanceBudget{maxCore: limits.CoreInstances, maxComponent: limits.ComponentInstances, maxSize: limits.EffectiveTypeSize}
+	if *budget == unlimitedBudget {
 		return nil
 	}
-	budget := &instanceBudget{maxCore: limits.CoreInstances, maxComponent: limits.ComponentInstances}
 	evalInstance(arena, id, nil, noBindings{}, budget)
 	return budget.err()
 }
@@ -361,7 +382,8 @@ func (f *instanceFrame) instantiate(s stepInstantiate) *InstanceType {
 		// reports that; until then all that's known is the declared type.
 		return f.declared(s.view)
 	}
-	if f.budget.err() != nil {
+	f.budget.size += uint64(len(s.args))
+	if f.budget.exceeded() {
 		// The verdict is in, so stop descending and let the evaluation unwind.
 		return f.declared(s.view)
 	}

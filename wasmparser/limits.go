@@ -20,10 +20,9 @@ const maxFlagNames = 32
 // ParseLimits bounds what parsing and validation accept. A zero field means the
 // default given for it, and Unlimited means no limit.
 //
-// Raising a limit raises what a binary can make the parser allocate from a small
-// input, as many of these bound counts that are allocated for before their
-// contents are read. Only input that is trusted should be parsed with limits
-// raised far beyond their defaults.
+// These protect against binaries crafted to use excessive memory or time, or to
+// crash the process. Only raise them far beyond their defaults, or set them to
+// Unlimited, for binaries that are trusted.
 type ParseLimits struct {
 	// Core module limits.
 
@@ -56,7 +55,11 @@ type ParseLimits struct {
 	CanonicalOptions          uint32 // options on a canonical function; default 10
 	StartArgs                 uint32 // arguments to a start function; default 1,000
 	ComponentExternNames      uint32 // exports of an inline component instance; default 100,000
-	EffectiveTypeSize         uint32 // size of a type with its references expanded; default 1,000,000
+
+	// EffectiveTypeSize is the size of a type with its references expanded,
+	// including the type one instantiation of a component expands to with everything
+	// nested inside it; default 1,000,000.
+	EffectiveTypeSize uint32
 
 	// StringSize is the size in bytes of a string; default 100,000.
 	StringSize uint32
@@ -68,16 +71,18 @@ type ParseLimits struct {
 	// declarations; default 100.
 	NestingDepth uint32
 
-	// CoreInstances and ComponentInstances bound the instances one instantiation
-	// of a component creates, counting the component itself and everything nested
-	// inside it; default 1,000 each. Instances inside a component it imports are
-	// not counted, as they depend on what is supplied.
-	//
-	// The time taken to check is proportional to the instances counted, and
-	// instantiating creates them all, so with both Unlimited a small binary can make
-	// instantiation take practically forever.
-	CoreInstances      uint32
+	// CoreInstances bounds the core instances one instantiation of a component
+	// defines, inline ones included, counting everything nested inside it; default
+	// 1,000.
+	CoreInstances uint32
+
+	// ComponentInstances bounds the component instances one instantiation of a
+	// component defines, inline ones included, counting itself and everything nested
+	// inside it; default 1,000.
 	ComponentInstances uint32
+
+	// Neither counts instances inside a component that is itself imported, as they
+	// depend on what is supplied.
 }
 
 // resolved returns l with each zero field set to its default.

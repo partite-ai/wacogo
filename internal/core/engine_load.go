@@ -125,8 +125,7 @@ func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, er
 	}
 	// wasmtime also rejects a component exported from an instance at any depth.
 	// That component is left alone here: with no component imports, no other
-	// instantiation can receive it, and spotting one hidden by an ascription
-	// would mean evaluating every instantiation in the binary.
+	// instantiation can receive it.
 	for _, exp := range comp.exports {
 		if exp.Kind == SortComponent {
 			return nil, fmt.Errorf("wacogo: exporting a component from the root component is not supported")
