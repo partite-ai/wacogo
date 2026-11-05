@@ -308,6 +308,9 @@ func toGoFlatListItem(ctx context.Context, cc *host.CallContext, h *host.Compone
 	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListItem: list out of bounds")
 	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(Item))+max(unsafe.Sizeof(ItemNum{}), unsafe.Sizeof(ItemText{})))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]Item, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := toGoMemItem(ctx, cc, h, lstT_.Elem, ptr_+i_*12); err_ != nil {
@@ -337,6 +340,9 @@ func toGoMemListItem(ctx context.Context, cc *host.CallContext, h *host.Componen
 	lb_ := uint64(ln_) * 12
 	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListItem: list out of bounds")
+	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(Item))+max(unsafe.Sizeof(ItemNum{}), unsafe.Sizeof(ItemText{})))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]Item, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -490,6 +496,9 @@ func toGoFlatListOptionItem(ctx context.Context, cc *host.CallContext, h *host.C
 	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListOptionItem: list out of bounds")
 	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(OptionItem))+max(unsafe.Sizeof(ItemNum{}), unsafe.Sizeof(ItemText{})))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]OptionItem, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := toGoMemOptionItem(ctx, cc, h, lstT_.Elem, ptr_+i_*16); err_ != nil {
@@ -519,6 +528,9 @@ func toGoMemListOptionItem(ctx context.Context, cc *host.CallContext, h *host.Co
 	lb_ := uint64(ln_) * 16
 	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListOptionItem: list out of bounds")
+	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(OptionItem))+max(unsafe.Sizeof(ItemNum{}), unsafe.Sizeof(ItemText{})))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]OptionItem, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -672,6 +684,9 @@ func toGoFlatListResultU64String(ctx context.Context, cc *host.CallContext, h *h
 	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListResultU64String: list out of bounds")
 	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(ResultU64String))+max(unsafe.Sizeof(ResultU64StringOk{}), unsafe.Sizeof(ResultU64StringErr{})))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]ResultU64String, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := toGoMemResultU64String(ctx, cc, h, lstT_.Elem, ptr_+i_*16); err_ != nil {
@@ -701,6 +716,9 @@ func toGoMemListResultU64String(ctx context.Context, cc *host.CallContext, h *ho
 	lb_ := uint64(ln_) * 16
 	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListResultU64String: list out of bounds")
+	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(ResultU64String))+max(unsafe.Sizeof(ResultU64StringOk{}), unsafe.Sizeof(ResultU64StringErr{})))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]ResultU64String, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -854,6 +872,9 @@ func toGoFlatListTagged(ctx context.Context, cc *host.CallContext, h *host.Compo
 	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListTagged: list out of bounds")
 	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(Tagged))+max(unsafe.Sizeof(ResultStringU32Ok{}), unsafe.Sizeof(ResultStringU32Err{})))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]Tagged, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := toGoMemTagged(ctx, cc, h, lstT_.Elem, ptr_+i_*16); err_ != nil {
@@ -883,6 +904,9 @@ func toGoMemListTagged(ctx context.Context, cc *host.CallContext, h *host.Compon
 	lb_ := uint64(ln_) * 16
 	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListTagged: list out of bounds")
+	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(Tagged))+max(unsafe.Sizeof(ResultStringU32Ok{}), unsafe.Sizeof(ResultStringU32Err{})))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]Tagged, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -1517,6 +1541,9 @@ func toGoFlatString(ctx context.Context, cc *host.CallContext, h *host.Component
 	_ = ty
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	if err_ := cc.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
+	}
 	bs_, ok_ := cc.Memory().Read(ptr_, ln_)
 	if !ok_ {
 		return "", fmt.Errorf("wacogo/witgen: toGoFlatString: bad memory read")
@@ -1537,6 +1564,9 @@ func toGoMemString(ctx context.Context, cc *host.CallContext, h *host.ComponentI
 		return "", fmt.Errorf("wacogo/witgen: toGoMemString: string len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	if err_ := cc.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
 	}
 	bs_, ok_ := cc.Memory().Read(sptr_, ln_)
 	if !ok_ {

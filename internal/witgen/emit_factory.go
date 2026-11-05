@@ -358,7 +358,7 @@ return string(bs_), nil
 		fmt.Fprintf(w, "_ = lstT_\n")
 		fmt.Fprintf(w, "ptr_ := uint32(stack[0])\n")
 		fmt.Fprintf(w, "ln_ := uint32(stack[1])\n")
-		emitListLiftPrecheck(w, "callee", "ptr_", v.Elem, helperName, sink, true)
+		emitListLiftPrecheck(w, "callee", "ptr_", v.Elem, helperName, sink)
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
 		if p, ok := v.Elem.(Prim); ok {
 			emitBulkPrimListRead(w, p, "out_", "ptr_", "callee.Memory()", helperName, "elem", sink)
@@ -436,7 +436,7 @@ return string(bs_), nil
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "lptr_", "ptr", "callee.Memory()", helperName, "list ptr", sink))
 		fmt.Fprintf(w, "var ln_ uint32\n")
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "ln_", "ptr + 4", "callee.Memory()", helperName, "list len", sink))
-		emitListLiftPrecheck(w, "callee", "lptr_", v.Elem, helperName, sink, true)
+		emitListLiftPrecheck(w, "callee", "lptr_", v.Elem, helperName, sink)
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
 		if p, ok := v.Elem.(Prim); ok {
 			emitBulkPrimListRead(w, p, "out_", "lptr_", "callee.Memory()", helperName, "list elem", sink)
@@ -1261,12 +1261,15 @@ func emitToGoFlat(w *strings.Builder, t Type) {
 		fmt.Fprintf(w, "_ = ty\n")
 		fmt.Fprintf(w, `ptr_ := uint32(stack[0])
 ln_ := uint32(stack[1])
+if err_ := cc.ChargeLift(uint64(ln_)); err_ != nil {
+%s
+}
 bs_, ok_ := cc.Memory().Read(ptr_, ln_)
 if !ok_ {
 %s
 }
 return string(bs_), nil
-`, sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: bad memory read")`, helperName)))
+`, sink.Emit("err_"), sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: bad memory read")`, helperName)))
 	case *TypeList:
 		elemTy := GoTypeOf(v.Elem)
 		elemSize := Size(v.Elem)
@@ -1274,7 +1277,7 @@ return string(bs_), nil
 		fmt.Fprintf(w, "_ = lstT_\n")
 		fmt.Fprintf(w, "ptr_ := uint32(stack[0])\n")
 		fmt.Fprintf(w, "ln_ := uint32(stack[1])\n")
-		emitListLiftPrecheck(w, "cc", "ptr_", v.Elem, helperName, sink, false)
+		emitListLiftPrecheck(w, "cc", "ptr_", v.Elem, helperName, sink)
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
 		if p, ok := v.Elem.(Prim); ok {
 			emitBulkPrimListRead(w, p, "out_", "ptr_", "cc.Memory()", helperName, "elem", sink)
@@ -1336,12 +1339,15 @@ func emitToGoMem(w *strings.Builder, t Type) {
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "sptr_", "ptr", "cc.Memory()", helperName, "string ptr", sink))
 		fmt.Fprintf(w, "var ln_ uint32\n")
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "ln_", "ptr + 4", "cc.Memory()", helperName, "string len", sink))
-		fmt.Fprintf(w, `bs_, ok_ := cc.Memory().Read(sptr_, ln_)
+		fmt.Fprintf(w, `if err_ := cc.ChargeLift(uint64(ln_)); err_ != nil {
+%s
+}
+bs_, ok_ := cc.Memory().Read(sptr_, ln_)
 if !ok_ {
 %s
 }
 return string(bs_), nil
-`, sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: bad memory read")`, helperName)))
+`, sink.Emit("err_"), sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: bad memory read")`, helperName)))
 	case *TypeList:
 		elemTy := GoTypeOf(v.Elem)
 		elemSize := Size(v.Elem)
@@ -1351,7 +1357,7 @@ return string(bs_), nil
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "lptr_", "ptr", "cc.Memory()", helperName, "list ptr", sink))
 		fmt.Fprintf(w, "var ln_ uint32\n")
 		fmt.Fprintf(w, "%s\n", primMemReadStmt(PrimU32, "ln_", "ptr + 4", "cc.Memory()", helperName, "list len", sink))
-		emitListLiftPrecheck(w, "cc", "lptr_", v.Elem, helperName, sink, false)
+		emitListLiftPrecheck(w, "cc", "lptr_", v.Elem, helperName, sink)
 		fmt.Fprintf(w, "out_ := make([]%s, ln_)\n", elemTy)
 		if p, ok := v.Elem.(Prim); ok {
 			emitBulkPrimListRead(w, p, "out_", "lptr_", "cc.Memory()", helperName, "list elem", sink)
@@ -2857,18 +2863,16 @@ func emitBulkPrimView(w *strings.Builder, size int, baseVar, memExpr, helperName
 
 // emitListLiftPrecheck emits the checks that must precede allocating the
 // Go slice for a lifted list of ln_ elements of type elem at ptrVar: the
-// list's bytes must lie within ccExpr's memory, and (when charge is set)
+// list's bytes must lie within ccExpr's memory, and
 // the Go bytes the lift allocates for the elements are charged against
 // the call's lift budget. Without them a hostile length would size the
 // allocation directly.
-func emitListLiftPrecheck(w *strings.Builder, ccExpr, ptrVar string, elem Type, helperName string, sink errSink, charge bool) {
+func emitListLiftPrecheck(w *strings.Builder, ccExpr, ptrVar string, elem Type, helperName string, sink errSink) {
 	fmt.Fprintf(w, "lb_ := uint64(ln_) * %d\n", Size(elem))
 	fmt.Fprintf(w, "if uint64(%s)+lb_ > uint64(%s.Memory().Size()) {\n%s\n}\n", ptrVar, ccExpr,
 		sink.Emit(fmt.Sprintf(`fmt.Errorf("wacogo/witgen: %s: list out of bounds")`, helperName)))
-	if charge {
-		fmt.Fprintf(w, "if err_ := %s.ChargeLift(uint64(ln_) * uint64(%s)); err_ != nil {\n%s\n}\n",
-			ccExpr, goFootprintExpr(elem), sink.Emit("err_"))
-	}
+	fmt.Fprintf(w, "if err_ := %s.ChargeLift(uint64(ln_) * uint64(%s)); err_ != nil {\n%s\n}\n",
+		ccExpr, goFootprintExpr(elem), sink.Emit("err_"))
 }
 
 // handleStateAllowance approximates, in bytes, what lifting a resource

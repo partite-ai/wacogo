@@ -75,6 +75,9 @@ func toGoFlatListString(ctx context.Context, cc *host.CallContext, h *host.Compo
 	if uint64(ptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoFlatListString: list out of bounds")
 	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(string)))); err_ != nil {
+		return nil, err_
+	}
 	out_ := make([]string, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
 		if tmp_, err_ := toGoMemString(ctx, cc, h, lstT_.Elem, ptr_+i_*8); err_ != nil {
@@ -104,6 +107,9 @@ func toGoMemListString(ctx context.Context, cc *host.CallContext, h *host.Compon
 	lb_ := uint64(ln_) * 8
 	if uint64(lptr_)+lb_ > uint64(cc.Memory().Size()) {
 		return nil, fmt.Errorf("wacogo/witgen: toGoMemListString: list out of bounds")
+	}
+	if err_ := cc.ChargeLift(uint64(ln_) * uint64(unsafe.Sizeof(*new(string)))); err_ != nil {
+		return nil, err_
 	}
 	out_ := make([]string, ln_)
 	for i_ := uint32(0); i_ < ln_; i_++ {
@@ -252,6 +258,9 @@ func toGoFlatString(ctx context.Context, cc *host.CallContext, h *host.Component
 	_ = ty
 	ptr_ := uint32(stack[0])
 	ln_ := uint32(stack[1])
+	if err_ := cc.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
+	}
 	bs_, ok_ := cc.Memory().Read(ptr_, ln_)
 	if !ok_ {
 		return "", fmt.Errorf("wacogo/witgen: toGoFlatString: bad memory read")
@@ -272,6 +281,9 @@ func toGoMemString(ctx context.Context, cc *host.CallContext, h *host.ComponentI
 		return "", fmt.Errorf("wacogo/witgen: toGoMemString: string len: bad memory read")
 	} else {
 		ln_ = tmp_
+	}
+	if err_ := cc.ChargeLift(uint64(ln_)); err_ != nil {
+		return "", err_
 	}
 	bs_, ok_ := cc.Memory().Read(sptr_, ln_)
 	if !ok_ {

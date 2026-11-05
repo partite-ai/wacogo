@@ -239,6 +239,7 @@ func (c *Component) buildFuncExports(
 			Direct: func(ctx context.Context, stack []uint64) {
 				alloc.reset()
 				instrumentCall(ctx, h, CallKindFunction, fr.exportName, stack, true, func() error {
+					h.hostCallCC.ResetLiftBudget()
 					return fr.userFn(ctx, h.hostCallCC, h, stack)
 				})
 			},
