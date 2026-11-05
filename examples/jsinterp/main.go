@@ -62,6 +62,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load wrapper.wasm: %v", err)
 	}
+	defer comp.Close(ctx)
 
 	opts := w.Imports()
 

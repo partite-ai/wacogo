@@ -95,6 +95,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("load component: %v", err)
 	}
+	defer comp.Close(ctx)
 
 	opts := []wacogo.InstantiateOption{
 		wacogo.WithInstanceImport("example:people/people", peopleInst.Core()),

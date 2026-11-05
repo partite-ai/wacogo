@@ -117,7 +117,8 @@ func (l *componentLoader) allocType(r typeResolver) uint32 {
 }
 
 // LoadComponent parses and compiles a component binary into a Component
-// ready for instantiation.
+// ready for instantiation. Call its Close when no more instances will be
+// created, or its compiled code stays in memory until the Engine closes.
 func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (_ *Component, err error) {
 	if e.closed.Load() {
 		return nil, ErrEngineClosed

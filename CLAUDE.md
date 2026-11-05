@@ -32,7 +32,7 @@ Streaming parser and validator for WebAssembly Component Model binaries. Two sep
 **Type system conventions:**
 
 - Unions → interface with private marker method + concrete types (use type switch)
-- Optional fields → `Optional[T]` generic (never pointers)
+- Optional fields → `Optional[T]` generic (don't use a pointer solely to make something optional)
 - All struct fields exported
 - Types decode themselves via `BinaryUnmarshaler` interface
 
@@ -78,7 +78,11 @@ Witgen-emitted `*<R>Handle` types use a small state machine (`handleState` inter
 
 ### Cross-Component Adapters
 
-`canon.Host.BuildAdapter` (`internal/canon/build_adapter.go`) constructs a wasm stub module whose export bridges a cross-component call. Internally it compiles a `transferPlan`, builds an `adapterFunc` Go host function, and wraps it in a tiny wasm stub (import + re-export) because wazero's `ImportResolver` only works with real wasm module instances. The core's `execLowerWithGoAdapter` is a thin wrapper that resolves caller/callee `CallSide`+`Callee` descriptors from instantiation state and calls the factory; the returned `*canon.CallAdapter` is tracked in `ComponentInstance.auxiliaryAdapters` for teardown on `Close`.
+`canon.Host.BuildAdapter` (`internal/canon/build_adapter.go`) builds the Go function that bridges a cross-component call. It compiles a `transferPlan` and returns a `*canon.CallAdapter` holding an `adapterFunc` and its core signature, plus a batched-realloc helper instance for each side with a wasm realloc. The `BuildResource*` functions return the same shape for resource builtins. Nothing in `canon` compiles a host module for these.
+
+All of these functions live in one host module per instantiation (`internal/core/host_funcs.go`), because compiling a module per function dominated instantiation. The loader records each one's core signature from the validator, along with what the component calls it for stack traces, so the module can be built before the plan runs. Each `planLower` and resource step then fills in its `hostFuncSlot`, and `bindHostFunc` checks that the adapter's signature matches the validated one. The core's `execLowerWithGoAdapter` resolves caller/callee `CallSide`+`Callee` descriptors from instantiation state and calls the factory; the returned adapter is tracked in `ComponentInstance.owned` for teardown on `Close`.
+
+Inline core instances are implemented by bridge modules: generated wasm with no code of their own, whose imports are re-exported under the requested names. wazero can rebind an import's module but not its name, so each realloc helper gets one too, letting every adapter share the single helper compiled when the engine is created.
 
 ### Import Resolution
 
