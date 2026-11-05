@@ -10,7 +10,7 @@ import (
 // ---- Core Primitives ----
 
 func TestNewBinaryReaderFromBytes(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x01, 0x02, 0x03}), 10)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x01, 0x02, 0x03}), 10, &defaultParseLimits)
 	if r.Offset() != 10 {
 		t.Fatalf("expected offset 10, got %d", r.Offset())
 	}
@@ -32,7 +32,7 @@ func TestNewBinaryReader(t *testing.T) {
 
 func TestNewBinaryReaderAt(t *testing.T) {
 	buf := bytes.NewReader([]byte{0xAA, 0xBB})
-	r := newBinaryReaderAt(buf, 5)
+	r := newBinaryReaderAt(buf, 5, &defaultParseLimits)
 	b, err := r.ReadByte()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -46,7 +46,7 @@ func TestNewBinaryReaderAt(t *testing.T) {
 }
 
 func TestReadByte(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x42}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x42}), 0, &defaultParseLimits)
 	b, err := r.ReadByte()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -63,7 +63,7 @@ func TestReadByte(t *testing.T) {
 }
 
 func TestReadByteEOF(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{}), 0, &defaultParseLimits)
 	_, err := r.ReadByte()
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
@@ -71,7 +71,7 @@ func TestReadByteEOF(t *testing.T) {
 }
 
 func TestPeek(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x7F}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x7F}), 0, &defaultParseLimits)
 	b, err := r.Peek()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -86,7 +86,7 @@ func TestPeek(t *testing.T) {
 }
 
 func TestPeekEOF(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{}), 0, &defaultParseLimits)
 	_, err := r.Peek()
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
@@ -94,7 +94,7 @@ func TestPeekEOF(t *testing.T) {
 }
 
 func TestReadBytes(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x01, 0x02, 0x03, 0x04}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x01, 0x02, 0x03, 0x04}), 0, &defaultParseLimits)
 	bs, err := r.ReadBytes(3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -111,7 +111,7 @@ func TestReadBytes(t *testing.T) {
 }
 
 func TestReadBytesPartialEOF(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x01, 0x02}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x01, 0x02}), 0, &defaultParseLimits)
 	_, err := r.ReadBytes(5)
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
@@ -119,7 +119,7 @@ func TestReadBytesPartialEOF(t *testing.T) {
 }
 
 func TestReadBytesZero(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x01}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x01}), 0, &defaultParseLimits)
 	bs, err := r.ReadBytes(0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -131,7 +131,7 @@ func TestReadBytesZero(t *testing.T) {
 
 func TestOffsetTracking(t *testing.T) {
 	// base offset 100, read 2 bytes -> Offset() should be 102
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0xAA, 0xBB, 0xCC}), 100)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0xAA, 0xBB, 0xCC}), 100, &defaultParseLimits)
 	r.ReadByte()
 	r.ReadByte()
 	if r.Offset() != 102 {
@@ -155,7 +155,7 @@ func TestReadU32(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0)
+			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0, &defaultParseLimits)
 			v, err := r.ReadU32()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -171,7 +171,7 @@ func TestReadU32Invalid(t *testing.T) {
 	t.Run("too_long", func(t *testing.T) {
 		// 6 bytes — continuation bit on byte 5 (index 4) is set past threshold
 		data := []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x00}
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		_, err := r.ReadU32()
 		if err == nil {
 			t.Fatal("expected error for too-long LEB128")
@@ -180,7 +180,7 @@ func TestReadU32Invalid(t *testing.T) {
 	t.Run("overflow", func(t *testing.T) {
 		// 5 bytes but value > 2^32-1
 		data := []byte{0xff, 0xff, 0xff, 0xff, 0x1f}
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		_, err := r.ReadU32()
 		if err == nil {
 			t.Fatal("expected error for overflow LEB128")
@@ -188,7 +188,7 @@ func TestReadU32Invalid(t *testing.T) {
 	})
 	t.Run("truncated", func(t *testing.T) {
 		data := []byte{0x80} // continuation bit set, no more bytes
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		_, err := r.ReadU32()
 		if err != io.ErrUnexpectedEOF {
 			t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
@@ -209,7 +209,7 @@ func TestReadU64(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0)
+			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0, &defaultParseLimits)
 			v, err := r.ReadU64()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -224,7 +224,7 @@ func TestReadU64(t *testing.T) {
 func TestReadU64Invalid(t *testing.T) {
 	t.Run("too_long", func(t *testing.T) {
 		data := []byte{0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00}
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		_, err := r.ReadU64()
 		if err == nil {
 			t.Fatal("expected error for too-long LEB128")
@@ -232,7 +232,7 @@ func TestReadU64Invalid(t *testing.T) {
 	})
 	t.Run("truncated", func(t *testing.T) {
 		data := []byte{0x80}
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		_, err := r.ReadU64()
 		if err != io.ErrUnexpectedEOF {
 			t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
@@ -255,7 +255,7 @@ func TestReadS32(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0)
+			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0, &defaultParseLimits)
 			v, err := r.ReadS32()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -284,7 +284,7 @@ func TestReadS33(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0)
+			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0, &defaultParseLimits)
 			v, err := r.ReadS33()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -310,7 +310,7 @@ func TestReadS64(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0)
+			r := newBinaryReaderAt(bytes.NewReader(tc.data), 0, &defaultParseLimits)
 			v, err := r.ReadS64()
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -327,7 +327,7 @@ func TestReadS64(t *testing.T) {
 func TestReadString(t *testing.T) {
 	t.Run("hello", func(t *testing.T) {
 		data := []byte{0x05, 'h', 'e', 'l', 'l', 'o'}
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		s, err := r.ReadString()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -338,7 +338,7 @@ func TestReadString(t *testing.T) {
 	})
 	t.Run("empty", func(t *testing.T) {
 		data := []byte{0x00}
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		s, err := r.ReadString()
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -349,7 +349,7 @@ func TestReadString(t *testing.T) {
 	})
 	t.Run("invalid_utf8", func(t *testing.T) {
 		data := []byte{0x02, 0xFF, 0xFE}
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		_, err := r.ReadString()
 		if err == nil {
 			t.Fatal("expected error for invalid UTF-8")
@@ -359,7 +359,7 @@ func TestReadString(t *testing.T) {
 		// encode length 100001 as u32 LEB128: 100001 = 0x000186A1
 		// LEB128: 0xA1, 0x8D, 0x06
 		data := []byte{0xa1, 0x8d, 0x06}
-		r := newBinaryReaderAt(bytes.NewReader(data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 		_, err := r.ReadString()
 		if err == nil {
 			t.Fatal("expected error for string too long")
@@ -370,7 +370,7 @@ func TestReadString(t *testing.T) {
 func TestReadF32(t *testing.T) {
 	// 1.0 as f32 little-endian = 0x3F800000 -> bytes [0x00, 0x00, 0x80, 0x3F]
 	data := []byte{0x00, 0x00, 0x80, 0x3F}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	v, err := r.ReadF32()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -381,7 +381,7 @@ func TestReadF32(t *testing.T) {
 }
 
 func TestReadF32EOF(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x00, 0x00}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x00, 0x00}), 0, &defaultParseLimits)
 	_, err := r.ReadF32()
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)
@@ -391,7 +391,7 @@ func TestReadF32EOF(t *testing.T) {
 func TestReadF64(t *testing.T) {
 	// 1.0 as f64 little-endian = 0x3FF0000000000000 -> bytes [0x00,0x00,0x00,0x00,0x00,0x00,0xF0,0x3F]
 	data := []byte{0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xF0, 0x3F}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	v, err := r.ReadF64()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -402,7 +402,7 @@ func TestReadF64(t *testing.T) {
 }
 
 func TestReadF64EOF(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x00, 0x00, 0x00, 0x00}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x00, 0x00, 0x00, 0x00}), 0, &defaultParseLimits)
 	_, err := r.ReadF64()
 	if err != io.ErrUnexpectedEOF {
 		t.Fatalf("expected io.ErrUnexpectedEOF, got %v", err)

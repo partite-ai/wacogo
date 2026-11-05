@@ -1,56 +1,151 @@
 package wasmparser
 
-const (
-	// Core limits
-	MaxTypes           = 1_000_000
-	MaxFunctions       = 1_000_000
-	MaxImports         = 1_000_000
-	MaxExports         = 1_000_000
-	MaxGlobals         = 1_000_000
-	MaxTables          = 100
-	MaxMemories        = 100
-	MaxTags            = 1_000_000
-	MaxStringSize      = 100_000
-	MaxFunctionParams  = 1_000
-	MaxFunctionResults = 1_000
-
-	// Component model limits
-	MaxModuleSize                = 1 << 30 // 1 GiB
-	MaxModuleTypeDeclarations    = 100_000
-	MaxComponentTypeDeclarations = 1_000_000
-	MaxInstanceTypeDeclarations  = 1_000_000
-	MaxRecordFields              = 10_000
-	MaxVariantCases              = 10_000
-	MaxTupleTypes                = 10_000
-	MaxFlagNames                 = 32
-	MaxEnumCases                 = 10_000
-	MaxInstantiationArgs         = 100_000
-	MaxCanonicalOptions          = 10
-	MaxStartArgs                 = 1_000
-	MaxModules                   = 1_000
-	MaxComponents                = 1_000
-	MaxInstances                 = 1_000
-	MaxValues                    = 1_000
-	MaxComponentExternNames      = 100_000
-	MaxEffectiveTypeSize         = 1_000_000
-
-	// MaxNestingDepth bounds recursive parsing of component/instance type
-	// declarations and nested component sections to prevent stack overflow
-	// from adversarial input.
-	MaxNestingDepth = 100
-
-	// MaxFunctionBodySize bounds a single core function body so adversarial
-	// size fields cannot drive multi-GB allocations.
-	MaxFunctionBodySize = 16 * 1024 * 1024 // 16 MiB
+import (
+	"cmp"
+	"errors"
+	"math"
 )
 
-// checkSectionLength returns length as int after verifying it fits within
-// MaxModuleSize. This is the canonical guard for adversarial u32 lengths
-// before they reach `make([]byte, n)`. It is also 32-bit-Go safe: any value
-// large enough to wrap int's signed range trips the cap first.
-func checkSectionLength(offset uint64, length uint32, what string) (int, error) {
-	if uint64(length) > MaxModuleSize {
-		return 0, errfAt(offset, "%s length %d exceeds maximum %d", what, length, MaxModuleSize)
+// ErrInstanceLimitExceeded is wrapped by the error reported when one
+// instantiation of a component would create more instances than ParseLimits
+// allows.
+var ErrInstanceLimitExceeded = errors.New("instance limit exceeded")
+
+// Unlimited is the ParseLimits value for a limit that is not enforced.
+const Unlimited uint32 = math.MaxUint32
+
+// maxFlagNames is the spec's limit on the names in a flags type.
+const maxFlagNames = 32
+
+// ParseLimits bounds what parsing and validation accept. A zero field means the
+// default given for it, and Unlimited means no limit.
+//
+// These protect against binaries crafted to use excessive memory or time, or to
+// crash the process. Only raise them far beyond their defaults, or set them to
+// Unlimited, for binaries that are trusted.
+type ParseLimits struct {
+	// Core module limits.
+
+	Types           uint32 // types in a module; default 1,000,000
+	Functions       uint32 // functions in a module, and locals in a function; default 1,000,000
+	Imports         uint32 // imports in a module; default 1,000,000
+	Exports         uint32 // exports in a module or core instance; default 1,000,000
+	Globals         uint32 // globals in a module; default 1,000,000
+	Tables          uint32 // tables in a module; default 100
+	Memories        uint32 // memories in a module; default 100
+	FunctionResults uint32 // results of a core function; default 1,000
+
+	// FunctionBodySize is the size in bytes of a function body; default 16 MiB.
+	FunctionBodySize uint32
+
+	// FunctionParams is the parameters of a core or component function; default
+	// 1,000.
+	FunctionParams uint32
+
+	// Component limits.
+
+	ModuleTypeDeclarations    uint32 // declarations in a module type; default 100,000
+	ComponentTypeDeclarations uint32 // declarations in a component type; default 1,000,000
+	InstanceTypeDeclarations  uint32 // declarations in an instance type; default 1,000,000
+	RecordFields              uint32 // fields in a record; default 10,000
+	VariantCases              uint32 // cases in a variant; default 10,000
+	TupleTypes                uint32 // types in a tuple; default 10,000
+	EnumCases                 uint32 // cases in an enum; default 10,000
+	InstantiationArgs         uint32 // arguments to an instantiation; default 100,000
+	CanonicalOptions          uint32 // options on a canonical function; default 10
+	StartArgs                 uint32 // arguments to a start function; default 1,000
+	ComponentExternNames      uint32 // exports of an inline component instance; default 100,000
+
+	// EffectiveTypeSize is the size of a type with its references expanded,
+	// including the type one instantiation of a component expands to with everything
+	// nested inside it; default 1,000,000.
+	EffectiveTypeSize uint32
+
+	// StringSize is the size in bytes of a string; default 100,000.
+	StringSize uint32
+
+	// ModuleSize is the size in bytes of a section; default 1 GiB.
+	ModuleSize uint32
+
+	// NestingDepth is the depth of nested components, modules and type
+	// declarations; default 100.
+	NestingDepth uint32
+
+	// CoreInstances bounds the core instances one instantiation of a component
+	// defines, inline ones included, counting everything nested inside it; default
+	// 1,000.
+	CoreInstances uint32
+
+	// ComponentInstances bounds the component instances one instantiation of a
+	// component defines, inline ones included, counting itself and everything nested
+	// inside it; default 1,000.
+	ComponentInstances uint32
+
+	// Neither counts instances inside a component that is itself imported, as they
+	// depend on what is supplied.
+}
+
+// resolved returns l with each zero field set to its default.
+func (l ParseLimits) resolved() ParseLimits {
+	return ParseLimits{
+		Types:            cmp.Or(l.Types, 1_000_000),
+		Functions:        cmp.Or(l.Functions, 1_000_000),
+		Imports:          cmp.Or(l.Imports, 1_000_000),
+		Exports:          cmp.Or(l.Exports, 1_000_000),
+		Globals:          cmp.Or(l.Globals, 1_000_000),
+		Tables:           cmp.Or(l.Tables, 100),
+		Memories:         cmp.Or(l.Memories, 100),
+		FunctionResults:  cmp.Or(l.FunctionResults, 1_000),
+		FunctionBodySize: cmp.Or(l.FunctionBodySize, 16*1024*1024),
+		FunctionParams:   cmp.Or(l.FunctionParams, 1_000),
+
+		ModuleTypeDeclarations:    cmp.Or(l.ModuleTypeDeclarations, 100_000),
+		ComponentTypeDeclarations: cmp.Or(l.ComponentTypeDeclarations, 1_000_000),
+		InstanceTypeDeclarations:  cmp.Or(l.InstanceTypeDeclarations, 1_000_000),
+		RecordFields:              cmp.Or(l.RecordFields, 10_000),
+		VariantCases:              cmp.Or(l.VariantCases, 10_000),
+		TupleTypes:                cmp.Or(l.TupleTypes, 10_000),
+		EnumCases:                 cmp.Or(l.EnumCases, 10_000),
+		InstantiationArgs:         cmp.Or(l.InstantiationArgs, 100_000),
+		CanonicalOptions:          cmp.Or(l.CanonicalOptions, 10),
+		StartArgs:                 cmp.Or(l.StartArgs, 1_000),
+		ComponentExternNames:      cmp.Or(l.ComponentExternNames, 100_000),
+		EffectiveTypeSize:         cmp.Or(l.EffectiveTypeSize, 1_000_000),
+		StringSize:                cmp.Or(l.StringSize, 100_000),
+		ModuleSize:                cmp.Or(l.ModuleSize, 1<<30),
+		NestingDepth:              cmp.Or(l.NestingDepth, 100),
+		CoreInstances:             cmp.Or(l.CoreInstances, 1_000),
+		ComponentInstances:        cmp.Or(l.ComponentInstances, 1_000),
+	}
+}
+
+var defaultParseLimits = ParseLimits{}.resolved()
+
+// ParseOption configures a Parser, Validator or ValidatingParser. A Parser enforces
+// what limits the binary's encoding, and a Validator what limits its meaning, so
+// when using them separately, give both the same options.
+type ParseOption func(*ParseLimits)
+
+// WithParseLimits sets the limits to parse or validate with.
+func WithParseLimits(limits ParseLimits) ParseOption {
+	return func(l *ParseLimits) { *l = limits }
+}
+
+func newParseLimits(opts []ParseOption) *ParseLimits {
+	var l ParseLimits
+	for _, opt := range opts {
+		opt(&l)
+	}
+	l = l.resolved()
+	return &l
+}
+
+// checkSectionLength returns length as int after verifying it fits within max.
+// This is the canonical guard for adversarial u32 lengths before they reach
+// `make([]byte, n)`.
+func checkSectionLength(offset uint64, length, max uint32, what string) (int, error) {
+	if length > max {
+		return 0, errfAt(offset, "%s length %d exceeds maximum %d", what, length, max)
 	}
 	return int(length), nil
 }

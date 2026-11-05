@@ -7,9 +7,9 @@ import (
 
 // ParseAll reads a WebAssembly binary from r and yields all Payload values,
 // including payloads from nested components and modules.
-func ParseAll(r io.Reader) iter.Seq2[Payload, error] {
+func ParseAll(r io.Reader, opts ...ParseOption) iter.Seq2[Payload, error] {
 	return func(yield func(Payload, error) bool) {
-		stack := []*Parser{NewParser(r)}
+		stack := []*Parser{NewParser(r, opts...)}
 		for len(stack) > 0 {
 			top := stack[len(stack)-1]
 			payload, err := top.Next()

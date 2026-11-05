@@ -149,10 +149,8 @@ func TestTopLevelComponentTypeIsExposed(t *testing.T) {
 
 // TestValidatorResourceAlternateNameOrderIndependent verifies that
 // bracket-prefixed func names (`[constructor]`, `[method]`, `[static]`)
-// match any exported name of a resource, regardless of which export
-// came first. Previously the validator latched onto whichever name was
-// registered last, rejecting bracket names that referenced an earlier
-// alias.
+// match the name of the reference they use, whatever is exported after it.
+// Previously the validator latched onto whichever name was registered last.
 func TestValidatorResourceAlternateNameOrderIndependent(t *testing.T) {
 	cases := []struct {
 		name string
@@ -169,18 +167,6 @@ func TestValidatorResourceAlternateNameOrderIndependent(t *testing.T) {
   (func $simple (param "self" (borrow $r-out)) (param "x" u32)
     (canon lift (core func $mi "f")))
   (export "[method]r.simple" (func $simple)))`,
-		},
-		{
-			name: "method-using-alternate-name",
-			wat: `(component
-  (type $r (resource (rep i32)))
-  (export $r-out "r" (type $r))
-  (export "r-alt" (type $r-out))
-  (core module $m (func (export "f") (param i32 i32)))
-  (core instance $mi (instantiate $m))
-  (func $simple (param "self" (borrow $r-out)) (param "x" u32)
-    (canon lift (core func $mi "f")))
-  (export "[method]r-alt.simple" (func $simple)))`,
 		},
 		{
 			name: "constructor-after-alternate-export",

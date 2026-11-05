@@ -51,58 +51,21 @@ func (s *instantiationState) execLowerWithGoAdapter(ctx context.Context, step pl
 
 	callee := fn.binding.Callee()
 
-	var baseName string
-	if fn.Name != "" {
-		baseName = fmt.Sprintf("wacogo_lower_%s", sanitizeName(fn.Name))
-	} else {
-		baseName = fmt.Sprintf("wacogo_lower_%d", instanceCounter.Add(1))
-	}
-	adapter, err := s.inst.engine.canonHost.BuildAdapter(ctx, baseName,
+	adapter, err := s.inst.engine.canonHost.BuildAdapter(ctx,
 		caller, callee,
 		FuncTypeParamsAsCanon(fn.funcType),
 		FuncTypeResultsAsCanon(fn.funcType))
 	if err != nil {
 		return fmt.Errorf("wacogo: lower adapter: %w", err)
 	}
-
-	s.inst.owned = append(s.inst.owned, adapter)
-	s.coreFuncs = append(s.coreFuncs, coreFunc{
-		instance: adapter.Module,
-		name:     adapter.Name,
-	})
-	return nil
-}
-
-// sanitizeName replaces characters unsuitable for wasm module names with '_'.
-func sanitizeName(s string) string {
-	out := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
-			out = append(out, c)
-			continue
-		}
-		out = append(out, '_')
-	}
-	return string(out)
+	return s.bindHostFunc(step.hostFuncIndex, adapter)
 }
 
 // execResourceNew creates a core function for canon resource.new.
 // Signature: (rep: i32) -> (handle: i32)
-func (step *planResourceNew) execute(ctx context.Context, s *instantiationState) error {
+func (step *planResourceNew) execute(_ context.Context, s *instantiationState) error {
 	rtype := lookupResourceType(s, step.typeID)
-	baseName := fmt.Sprintf("wacogo_resnew_%d", instanceCounter.Add(1))
-	adapter, err := s.inst.engine.canonHost.BuildResourceNew(ctx, baseName,
-		canonInstanceView{i: s.inst}, resourceType{rt: rtype})
-	if err != nil {
-		return fmt.Errorf("wacogo: resource.new: %w", err)
-	}
-	s.inst.owned = append(s.inst.owned, adapter)
-	s.coreFuncs = append(s.coreFuncs, coreFunc{
-		instance: adapter.Module,
-		name:     adapter.Name,
-	})
-	return nil
+	return s.bindHostFunc(step.hostFuncIndex, s.inst.engine.canonHost.BuildResourceNew(canonInstanceView{i: s.inst}, resourceType{rt: rtype}))
 }
 
 // execResourceDrop creates a core function for canon resource.drop.
@@ -115,37 +78,14 @@ func (step *planResourceNew) execute(ctx context.Context, s *instantiationState)
 // dtor api.Function is registered as a regular core function for
 // alias resolution etc.), but canon no longer consumes it directly
 // from this code path.
-func (step *planResourceDrop) execute(ctx context.Context, s *instantiationState) error {
+func (step *planResourceDrop) execute(_ context.Context, s *instantiationState) error {
 	rtype := lookupResourceType(s, step.typeID)
-
-	baseName := fmt.Sprintf("wacogo_resdrop_%d", instanceCounter.Add(1))
-	adapter, err := s.inst.engine.canonHost.BuildResourceDrop(ctx, baseName,
-		canonInstanceView{i: s.inst}, resourceType{rt: rtype})
-	if err != nil {
-		return fmt.Errorf("wacogo: resource.drop: %w", err)
-	}
-	s.inst.owned = append(s.inst.owned, adapter)
-	s.coreFuncs = append(s.coreFuncs, coreFunc{
-		instance: adapter.Module,
-		name:     adapter.Name,
-	})
-	return nil
+	return s.bindHostFunc(step.hostFuncIndex, s.inst.engine.canonHost.BuildResourceDrop(canonInstanceView{i: s.inst}, resourceType{rt: rtype}))
 }
 
 // execResourceRep creates a core function for canon resource.rep.
 // Signature: (handle: i32) -> (rep: i32)
-func (step *planResourceRep) execute(ctx context.Context, s *instantiationState) error {
+func (step *planResourceRep) execute(_ context.Context, s *instantiationState) error {
 	rtype := lookupResourceType(s, step.typeID)
-	baseName := fmt.Sprintf("wacogo_resrep_%d", instanceCounter.Add(1))
-	adapter, err := s.inst.engine.canonHost.BuildResourceRep(ctx, baseName,
-		canonInstanceView{i: s.inst}, resourceType{rt: rtype})
-	if err != nil {
-		return fmt.Errorf("wacogo: resource.rep: %w", err)
-	}
-	s.inst.owned = append(s.inst.owned, adapter)
-	s.coreFuncs = append(s.coreFuncs, coreFunc{
-		instance: adapter.Module,
-		name:     adapter.Name,
-	})
-	return nil
+	return s.bindHostFunc(step.hostFuncIndex, s.inst.engine.canonHost.BuildResourceRep(canonInstanceView{i: s.inst}, resourceType{rt: rtype}))
 }

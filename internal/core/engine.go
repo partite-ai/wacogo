@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 
 	"github.com/partite-ai/wacogo/internal/canon"
@@ -22,6 +21,7 @@ type EngineOption func(*engineConfig)
 type engineConfig struct {
 	runtimeConfig wazero.RuntimeConfig
 	maxLiftBytes  uint64
+	parseLimits   wasmparser.ParseLimits
 }
 
 // WithRuntimeConfig overrides the wazero RuntimeConfig used to build the
@@ -47,18 +47,32 @@ func WithMaxLiftBytes(n uint64) EngineOption {
 // arguments or results exceed the limit set by WithMaxLiftBytes.
 var ErrLiftLimitExceeded = canon.ErrLiftLimitExceeded
 
+// ParseLimits bounds what LoadComponent accepts. A zero field means the default
+// given for it, and Unlimited means no limit.
+type ParseLimits = wasmparser.ParseLimits
+
+// Unlimited is the ParseLimits value for a limit that is not enforced.
+const Unlimited = wasmparser.Unlimited
+
+// WithParseLimits sets the limits components are loaded with. Fields left at
+// zero keep their defaults.
+func WithParseLimits(limits ParseLimits) EngineOption {
+	return func(c *engineConfig) { c.parseLimits = limits }
+}
+
+// ErrInstanceLimitExceeded is wrapped by the error LoadComponent reports when
+// one instantiation of a component would create more instances than ParseLimits
+// allows.
+var ErrInstanceLimitExceeded = wasmparser.ErrInstanceLimitExceeded
+
 // Engine owns the wazero runtime and is the entry point for loading components.
 type Engine struct {
 	runtime      wazero.Runtime
 	canonHost    *canon.Host
 	features     wasmparser.FeatureSet
 	maxLiftBytes uint64
+	parseLimits  ParseLimits
 	closed       atomic.Bool
-
-	// bridges caches compiled instantiate-from-exports bridge modules by
-	// their bytes, which depend only on the component, not the instance.
-	bridgeMu sync.Mutex
-	bridges  map[string]wazero.CompiledModule
 }
 
 // NewEngine creates a new Engine with the given options.
@@ -74,27 +88,11 @@ func NewEngine(ctx context.Context, opts ...EngineOption) *Engine {
 	rt := wazero.NewRuntimeWithConfig(ctx, cnf)
 	return &Engine{
 		runtime:      rt,
-		canonHost:    canon.NewHost(rt, cfg.maxLiftBytes),
+		canonHost:    canon.NewHost(ctx, rt, cfg.maxLiftBytes),
 		features:     wasmparser.DefaultFeatures(),
 		maxLiftBytes: cfg.maxLiftBytes,
-		bridges:      map[string]wazero.CompiledModule{},
+		parseLimits:  cfg.parseLimits,
 	}
-}
-
-// compiledBridge returns the compiled bridge module for bridgeWasm,
-// compiling it on first use.
-func (e *Engine) compiledBridge(ctx context.Context, bridgeWasm []byte) (wazero.CompiledModule, error) {
-	e.bridgeMu.Lock()
-	defer e.bridgeMu.Unlock()
-	if cm, ok := e.bridges[string(bridgeWasm)]; ok {
-		return cm, nil
-	}
-	cm, err := e.runtime.CompileModule(ctx, bridgeWasm)
-	if err != nil {
-		return nil, err
-	}
-	e.bridges[string(bridgeWasm)] = cm
-	return cm, nil
 }
 
 // Close releases all resources held by the engine. Idempotent: subsequent

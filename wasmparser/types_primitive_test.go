@@ -29,7 +29,7 @@ func TestPrimitiveValType_AllOpcodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := newBinaryReaderAt(bytes.NewReader([]byte{tt.opcode}), 0)
+			r := newBinaryReaderAt(bytes.NewReader([]byte{tt.opcode}), 0, &defaultParseLimits)
 			var pv PrimitiveValType
 			if err := pv.unmarshalBinary(r); err != nil {
 				t.Fatalf("unexpected error: %v", err)
@@ -42,7 +42,7 @@ func TestPrimitiveValType_AllOpcodes(t *testing.T) {
 }
 
 func TestPrimitiveValType_InvalidOpcode(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x00}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x00}), 0, &defaultParseLimits)
 	var pv PrimitiveValType
 	if err := pv.unmarshalBinary(r); err == nil {
 		t.Fatal("expected error for unknown opcode, got nil")
@@ -51,7 +51,7 @@ func TestPrimitiveValType_InvalidOpcode(t *testing.T) {
 
 func TestReadComponentValType_Primitive(t *testing.T) {
 	// 0x73 = PrimString
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x73}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x73}), 0, &defaultParseLimits)
 	vt, err := readComponentValType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -67,7 +67,7 @@ func TestReadComponentValType_Primitive(t *testing.T) {
 
 func TestReadComponentValType_TypeIndex(t *testing.T) {
 	// 0x05 = type index 5 (positive s33, not a primitive opcode)
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x05}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x05}), 0, &defaultParseLimits)
 	vt, err := readComponentValType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -83,7 +83,7 @@ func TestReadComponentValType_TypeIndex(t *testing.T) {
 
 func TestReadComponentValType_Bool(t *testing.T) {
 	// 0x7f = PrimBool
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x7f}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x7f}), 0, &defaultParseLimits)
 	vt, err := readComponentValType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -99,7 +99,7 @@ func TestReadComponentValType_Bool(t *testing.T) {
 
 func TestReadComponentValType_U8(t *testing.T) {
 	// 0x7d = PrimU8
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x7d}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x7d}), 0, &defaultParseLimits)
 	vt, err := readComponentValType(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

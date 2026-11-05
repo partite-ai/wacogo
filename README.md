@@ -71,6 +71,7 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
+    defer comp.Close(ctx)
 
     inst, err := comp.Instantiate(ctx, w.Imports()...)
     if err != nil {
@@ -87,11 +88,13 @@ func main() {
 ```
 
 A component with no imports can be instantiated as `comp.Instantiate(ctx)`.
+
+Close a `Component` when no more instances will be created, or its compiled code stays in memory until the `Engine` closes. This matters for a long-lived engine that loads many components. Instances that already exist keep working until they are closed.
 For exports nested inside an interface, use
 `inst.ExportedInstance("ns:pkg/iface").ExportedFunc("name")`. To wire
 individual imports manually, use `wacogo.WithInstanceImport`,
 `wacogo.WithFuncImport`, `wacogo.WithModuleImport`,
-`wacogo.WithComponentImport`, or `wacogo.WithTypeImport`.
+`wacogo.WithComponentImport`, or `wacogo.WithResourceTypeImport`.
 
 Runnable demo: [`examples/wasi-greet/`](examples/wasi-greet/).
 

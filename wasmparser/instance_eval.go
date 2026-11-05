@@ -1,0 +1,394 @@
+package wasmparser
+
+import (
+	"fmt"
+	"slices"
+)
+
+// componentBody records how a component fills its instance and component index
+// spaces, in order. It is what makes an instance's type, and those of the
+// instances inside it, a function of the component's type and what is supplied
+// to its imports.
+type componentBody struct {
+	steps []bodyStep
+	// coreInstances and inlineInstances are the core instances and inline
+	// component instances the component creates itself.
+	coreInstances, inlineInstances uint64
+}
+
+// bodyStep appends one entry to an instance or component index space.
+type bodyStep interface{ isBodyStep() }
+
+type stepImportInstance struct {
+	name string
+	view ComponentInstanceTypeID
+}
+
+type stepImportComponent struct{ name string }
+
+type stepAliasInstance struct {
+	from uint32
+	name string
+	view ComponentInstanceTypeID
+}
+
+type stepAliasComponent struct {
+	from uint32
+	name string
+}
+
+type stepOuterComponent struct{ count, index uint32 }
+
+type stepDefineComponent struct{ id ComponentTypeID }
+
+type stepExportInstance struct {
+	name string
+	from uint32
+}
+
+type stepExportComponent struct {
+	name string
+	from uint32
+}
+
+// bodyRef names an index-space entry supplied to an instantiation or an inline
+// instance.
+type bodyRef struct {
+	name  string
+	kind  ComponentExternalKind
+	index uint32
+}
+
+type stepInstantiate struct {
+	component uint32
+	args      []bodyRef
+	// resources holds the resource types among args, which are IDs rather than
+	// index-space entries once resolved.
+	resources map[string]ResourceID
+	view      ComponentInstanceTypeID
+}
+
+type stepInlineInstance struct {
+	exports []bodyRef
+	view    ComponentInstanceTypeID
+}
+
+func (stepImportInstance) isBodyStep()  {}
+func (stepImportComponent) isBodyStep() {}
+func (stepAliasInstance) isBodyStep()   {}
+func (stepAliasComponent) isBodyStep()  {}
+func (stepOuterComponent) isBodyStep()  {}
+func (stepDefineComponent) isBodyStep() {}
+func (stepExportInstance) isBodyStep()  {}
+func (stepExportComponent) isBodyStep() {}
+func (stepInstantiate) isBodyStep()     {}
+func (stepInlineInstance) isBodyStep()  {}
+
+// record appends step to the body of the component being validated. Type
+// declarations have no body.
+func (cs *ComponentState) record(step bodyStep) {
+	if cs.kind == ComponentKindComponent {
+		cs.body.steps = append(cs.body.steps, step)
+		if _, ok := step.(stepInlineInstance); ok {
+			cs.body.inlineInstances++
+		}
+	}
+}
+
+// componentValue is a component held in an index space: its type, and the frame
+// it was defined in, which its outer aliases refer to.
+type componentValue struct {
+	id    ComponentTypeID
+	frame *instanceFrame
+}
+
+// evalBindings is what evaluation asks of an instantiation. It differs from
+// InstanceBindings in what only a nested instantiation can answer: components, and
+// resources that have an identity but no lender, such as a parent's own.
+type evalBindings interface {
+	instance(name string) *InstanceType
+	component(name string) *componentValue
+	resource(res ImportedResource) (scopedResID, bool)
+}
+
+type noBindings struct{}
+
+func (noBindings) instance(string) *InstanceType                 { return nil }
+func (noBindings) component(string) *componentValue              { return nil }
+func (noBindings) resource(ImportedResource) (scopedResID, bool) { return scopedResID{}, false }
+
+// suppliedBindings evaluates with what Go supplied.
+type suppliedBindings struct{ b InstanceBindings }
+
+func (s suppliedBindings) instance(name string) *InstanceType { return s.b.Instance(name) }
+func (suppliedBindings) component(string) *componentValue     { return nil }
+func (s suppliedBindings) resource(res ImportedResource) (scopedResID, bool) {
+	from, ok := s.b.Resource(res)
+	if !ok {
+		return scopedResID{}, false
+	}
+	id, ok := from.Lender.resourceAt([]string{from.Export})
+	if !ok {
+		return scopedResID{}, false
+	}
+	return resolveResource(from.Lender.scope, from.Lender.arena, id, nil), true
+}
+
+// nestedBindings evaluates with the arguments of an instantiation inside a
+// component, which the validator has already matched to its imports by name.
+type nestedBindings struct {
+	f    *instanceFrame
+	step stepInstantiate
+}
+
+func (n nestedBindings) arg(name string, kind ComponentExternalKind) (uint32, bool) {
+	for _, a := range n.step.args {
+		if a.name == name && a.kind == kind {
+			return a.index, true
+		}
+	}
+	return 0, false
+}
+
+func (n nestedBindings) instance(name string) *InstanceType {
+	if i, ok := n.arg(name, ExternalKindInstance); ok {
+		return n.f.instances[i]
+	}
+	return nil
+}
+
+func (n nestedBindings) component(name string) *componentValue {
+	if i, ok := n.arg(name, ExternalKindComponent); ok {
+		return n.f.components[i]
+	}
+	return nil
+}
+
+func (n nestedBindings) resource(res ImportedResource) (scopedResID, bool) {
+	id, ok := n.step.resources[res.Import]
+	if !ok {
+		return scopedResID{}, false
+	}
+	self := n.f.self
+	return resolveResource(self.scope, self.arena, id, nil), true
+}
+
+// instanceBudget counts the instances an evaluation creates, against limits.
+type instanceBudget struct {
+	maxCore, maxComponent, maxSize uint32
+	core, component, size          uint64
+}
+
+// unlimitedBudget evaluates without stopping.
+var unlimitedBudget = instanceBudget{maxCore: Unlimited, maxComponent: Unlimited, maxSize: Unlimited}
+
+func (b *instanceBudget) charge(body *componentBody) {
+	b.component++
+	b.size++
+	if body != nil {
+		b.core += body.coreInstances
+		b.component += body.inlineInstances
+		b.size += uint64(len(body.steps))
+	}
+}
+
+func over(count uint64, max uint32) bool {
+	return max != Unlimited && count > uint64(max)
+}
+
+func (b *instanceBudget) exceeded() bool {
+	return over(b.core, b.maxCore) || over(b.component, b.maxComponent) || over(b.size, b.maxSize)
+}
+
+func (b *instanceBudget) err() error {
+	if over(b.core, b.maxCore) {
+		return fmt.Errorf("%w: more than %d core instances", ErrInstanceLimitExceeded, b.maxCore)
+	}
+	if over(b.component, b.maxComponent) {
+		return fmt.Errorf("%w: more than %d component instances", ErrInstanceLimitExceeded, b.maxComponent)
+	}
+	if over(b.size, b.maxSize) {
+		return fmt.Errorf("effective type size of an instantiation exceeds the limit")
+	}
+	return nil
+}
+
+// checkInstanceLimits evaluates an instantiation of component id. Evaluation is
+// what expands the type, so it is charged to the effective type size and stops
+// descending once any limit is passed. That bounds this work by the limits rather
+// than by how many instances the component would create.
+func checkInstanceLimits(arena *TypeArena, id ComponentTypeID, limits *ParseLimits) error {
+	budget := &instanceBudget{maxCore: limits.CoreInstances, maxComponent: limits.ComponentInstances, maxSize: limits.EffectiveTypeSize}
+	if *budget == unlimitedBudget {
+		return nil
+	}
+	evalInstance(arena, id, nil, noBindings{}, budget)
+	return budget.err()
+}
+
+// instanceFrame holds the index spaces of one instantiation being evaluated.
+type instanceFrame struct {
+	self       *InstanceType
+	outer      *instanceFrame
+	bindings   evalBindings
+	budget     *instanceBudget
+	instances  []*InstanceType
+	components []*componentValue
+}
+
+// evalInstance returns the type of an instantiation of component id. outer is
+// the frame the component was defined in.
+//
+// Evaluation order is what lets resourceRoots be resolved as they are recorded:
+// an instantiation's imports refer to instances evaluated before it, and its
+// parent binds to it only once it, and everything inside it, is complete.
+func evalInstance(arena *TypeArena, id ComponentTypeID, outer *instanceFrame, bindings evalBindings, budget *instanceBudget) *InstanceType {
+	ct := arena.ComponentTypes[id]
+	budget.charge(ct.body)
+	self := &InstanceType{arena: arena, exports: ct.Exports, funcs: ct.Funcs}
+	self.scope = self
+	self.bindImports(ct, bindings)
+	if ct.body != nil {
+		f := &instanceFrame{self: self, outer: outer, bindings: bindings, budget: budget}
+		for _, step := range ct.body.steps {
+			f.run(step)
+		}
+		self.instances = f.instances
+	}
+	return self
+}
+
+// bindImports records the roots of the resources this instance's imports define.
+func (i *InstanceType) bindImports(ct ComponentTypeDesc, bindings evalBindings) {
+	for _, res := range ct.ImportedResources {
+		if root, ok := bindings.resource(res); ok {
+			i.setRoot(i.arena.ResolveResourceAlias(res.ID), root)
+		}
+	}
+	for _, name := range ct.ImportOrder {
+		imp := ct.Imports[name]
+		if imp.Kind != EntityInstance {
+			continue
+		}
+		if lender := bindings.instance(name); lender != nil {
+			i.bindImportedInstance(imp.InstID, lender, nil)
+		}
+	}
+}
+
+func (i *InstanceType) bindImportedInstance(id ComponentInstanceTypeID, lender *InstanceType, path []string) {
+	it := i.arena.InstanceTypes[id]
+	for _, res := range it.DefinedResources {
+		if lenderResID, ok := lender.resourceAt(slices.Concat(path, []string{res.Export})); ok {
+			i.setRoot(i.arena.ResolveResourceAlias(res.ID), resolveResource(lender.scope, lender.arena, lenderResID, nil))
+		}
+	}
+	for name, et := range it.Exports {
+		if et.Kind == EntityInstance {
+			i.bindImportedInstance(et.InstID, lender, slices.Concat(path, []string{name}))
+		}
+	}
+}
+
+func (i *InstanceType) setRoot(id ResourceID, root scopedResID) {
+	if i.scope.resourceRoots == nil {
+		i.scope.resourceRoots = make(map[ResourceID]scopedResID)
+	}
+	i.scope.resourceRoots[id] = root
+}
+
+// bindSubInstance records that the resources in this instantiation's view of a
+// sub-instance are those of the sub-instance's actual exports. The two have to be
+// matched by path: the view comes from the type the component was declared with,
+// which for an imported component is not the type of the component supplied.
+func (i *InstanceType) bindSubInstance(view map[string]ComponentEntityType, child *InstanceType, actual map[string]ComponentEntityType) {
+	for name, v := range view {
+		a, ok := actual[name]
+		if !ok || a.Kind != v.Kind {
+			continue
+		}
+		switch {
+		case v.Kind == EntityInstance:
+			i.bindSubInstance(i.arena.InstanceTypes[v.InstID].Exports, child, child.arena.InstanceTypes[a.InstID].Exports)
+		case v.Kind == EntityType && v.TypeRef.Kind == AnyTypeResource && a.TypeRef.Kind == AnyTypeResource:
+			id := i.arena.ResolveResourceAlias(v.TypeRef.ResID)
+			if _, bound := i.scope.resourceRoots[id]; !bound {
+				i.setRoot(id, resolveResource(child.scope, child.arena, a.TypeRef.ResID, nil))
+			}
+		}
+	}
+}
+
+// declared returns an instance of the given declared type, sharing this frame's
+// resource identities. It stands for an instance assembled here, or for one that
+// was omitted because it needs nothing at runtime.
+func (f *instanceFrame) declared(view ComponentInstanceTypeID) *InstanceType {
+	arena := f.self.arena
+	return &InstanceType{arena: arena, exports: arena.InstanceTypes[view].Exports, scope: f.self.scope}
+}
+
+func (f *instanceFrame) run(step bodyStep) {
+	switch s := step.(type) {
+	case stepImportInstance:
+		inst := f.bindings.instance(s.name)
+		if inst == nil {
+			inst = f.declared(s.view)
+		}
+		f.instances = append(f.instances, inst)
+	case stepImportComponent:
+		f.components = append(f.components, f.bindings.component(s.name))
+	case stepAliasInstance:
+		inst := f.instances[s.from].ExportedInstance(s.name)
+		if inst == nil {
+			inst = f.declared(s.view)
+		}
+		f.instances = append(f.instances, inst)
+	case stepAliasComponent:
+		f.components = append(f.components, f.instances[s.from].components[s.name])
+	case stepOuterComponent:
+		target := f
+		for range s.count {
+			target = target.outer
+		}
+		f.components = append(f.components, target.components[s.index])
+	case stepDefineComponent:
+		f.components = append(f.components, &componentValue{id: s.id, frame: f})
+	case stepExportInstance:
+		f.self.setChild(s.name, f.instances[s.from])
+		f.instances = append(f.instances, f.instances[s.from])
+	case stepExportComponent:
+		f.self.setComponent(s.name, f.components[s.from])
+		f.components = append(f.components, f.components[s.from])
+	case stepInstantiate:
+		f.instances = append(f.instances, f.instantiate(s))
+	case stepInlineInstance:
+		inst := f.declared(s.view)
+		for _, exp := range s.exports {
+			switch exp.kind {
+			case ExternalKindInstance:
+				inst.setChild(exp.name, f.instances[exp.index])
+			case ExternalKindComponent:
+				inst.setComponent(exp.name, f.components[exp.index])
+			}
+		}
+		f.instances = append(f.instances, inst)
+	}
+}
+
+func (f *instanceFrame) instantiate(s stepInstantiate) *InstanceType {
+	comp := f.components[s.component]
+	if comp == nil {
+		// Its source was supplied by Go without a type, or not at all. Linking
+		// reports that; until then all that's known is the declared type.
+		return f.declared(s.view)
+	}
+	f.budget.size += uint64(len(s.args))
+	if f.budget.exceeded() {
+		// The verdict is in, so stop descending and let the evaluation unwind.
+		return f.declared(s.view)
+	}
+	self := f.self
+	child := evalInstance(self.arena, comp.id, comp.frame, nestedBindings{f, s}, f.budget)
+	self.bindSubInstance(self.arena.InstanceTypes[s.view].Exports, child, child.exports)
+	return child
+}

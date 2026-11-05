@@ -190,12 +190,11 @@ func (b *Builder) Build(ctx context.Context) (*Component, error) {
 		return nil, err
 	}
 	stampPlaceholderRIDs(comp, b.arena.HostTypeBuilder())
-	ct, wpFuncTypes, err := buildComponentWpType(comp)
+	ct, err := buildComponentWpType(comp)
 	if err != nil {
 		return nil, err
 	}
 	comp.wpComponentType = ct
-	comp.wpFuncTypes = wpFuncTypes
 	cm, err := compileStubModule(ctx, core.WazeroRuntime(b.engine), comp)
 	if err != nil {
 		return nil, err
@@ -205,8 +204,8 @@ func (b *Builder) Build(ctx context.Context) (*Component, error) {
 }
 
 // stampPlaceholderRIDs allocates one placeholder ResourceID per
-// resourceRefDecl in the root and walks the scopeRuntime tree
-// updating every copy of that decl by ref-pointer match. Called
+// resourceRefDecl and walks the scopeRuntime tree updating every copy
+// of that decl by ref-pointer match. Called
 // from Builder.Build after buildScopeTree has populated the tree.
 func stampPlaceholderRIDs(comp *Component, htb *wasmparser.HostTypeBuilder) {
 	byRef := make(map[*ResourceTypeRef]wasmparser.ResourceID, len(comp.resourceRefs))
@@ -231,6 +230,9 @@ func stampPlaceholderRIDs(comp *Component, htb *wasmparser.HostTypeBuilder) {
 // whole tree, populating comp.allFuncs, comp.allResources, and the
 // parallel comp.root *scopeRuntime tree.
 func buildScopeTree(b *Builder, comp *Component, root *scope) error {
+	// Aliases are resolved once the whole tree has registered its resources,
+	// since one may target a resource in a scope visited after its own.
+	var resolveAliases []func() error
 	var visit func(s *scope, scopePath string) (*scopeRuntime, error)
 	visit = func(s *scope, scopePath string) (*scopeRuntime, error) {
 		seen := map[string]bool{}
@@ -289,17 +291,23 @@ func buildScopeTree(b *Builder, comp *Component, root *scope) error {
 				return nil, err
 			}
 			sr.resourceRefs = append(sr.resourceRefs, *rrd)
+			comp.resourceRefs = append(comp.resourceRefs, *rrd)
 		}
 		for i := range s.aliases {
 			ad := &s.aliases[i]
 			if err := check(ad.name); err != nil {
 				return nil, err
 			}
-			rr := findResourceRuntime(comp, ad.rt)
-			if rr == nil {
-				return nil, fmt.Errorf("wacogo/host: AddResourceAlias %q: target *ResourceType is not registered with this Builder", ad.name)
-			}
-			sr.aliases = append(sr.aliases, aliasRuntime{exportName: ad.name, target: rr})
+			at := len(sr.aliases)
+			sr.aliases = append(sr.aliases, aliasRuntime{exportName: ad.name})
+			resolveAliases = append(resolveAliases, func() error {
+				rr := findResourceRuntime(comp, ad.rt)
+				if rr == nil {
+					return fmt.Errorf("wacogo/host: AddResourceAlias %q: target *ResourceType is not registered with this Builder", ad.name)
+				}
+				sr.aliases[at].target = rr
+				return nil
+			})
 		}
 		for i := range s.coreModules {
 			cmd := &s.coreModules[i]
@@ -347,12 +355,12 @@ func buildScopeTree(b *Builder, comp *Component, root *scope) error {
 	if err != nil {
 		return err
 	}
+	for _, resolve := range resolveAliases {
+		if err := resolve(); err != nil {
+			return err
+		}
+	}
 	comp.root = rootRT
-	// Populate comp.resourceRefs from the root scope to preserve the
-	// pre-refactor field used by Component.Instantiate's resource-ref
-	// resolver. Only root-scope ResourceTypeRefs are supported in this
-	// pass; nested scopes have no refs yet.
-	comp.resourceRefs = root.resourceRefs
 	return nil
 }
 

@@ -6,8 +6,10 @@ import "github.com/partite-ai/wacogo/internal/core"
 // to NewEngine.
 type EngineOption = core.EngineOption
 
-// Component is an immutable, compiled component-model component ready
-// for instantiation. Obtain one from (*Engine).LoadComponent.
+// Component is a compiled component-model component ready for
+// instantiation. Obtain one from (*Engine).LoadComponent, and Close it
+// when no more instances will be created. Instances that already exist
+// keep working.
 type Component = core.Component
 
 // ComponentInstance is a live instance of a Component. Single-threaded:

@@ -80,8 +80,8 @@ func readCanonicalOptions(r *BinaryReader) ([]CanonicalOption, error) {
 	if err != nil {
 		return nil, err
 	}
-	if count > MaxCanonicalOptions {
-		return nil, errfAt(r.Offset(), "canonical option count %d exceeds maximum %d", count, MaxCanonicalOptions)
+	if count > r.limits.CanonicalOptions {
+		return nil, errfAt(r.Offset(), "canonical option count %d exceeds maximum %d", count, r.limits.CanonicalOptions)
 	}
 	opts := make([]CanonicalOption, 0, count)
 	for range count {

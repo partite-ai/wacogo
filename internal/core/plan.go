@@ -100,6 +100,10 @@ type planAlias struct {
 	// stored. This is used when a placeholder was reserved at load time.
 	// When < 0, the result is appended to the end of the target index space.
 	targetIndex int
+	// runtimeEmpty is true when the alias names an instance that carries no
+	// runtime data, in which case an empty placeholder is substituted if the
+	// source instance omits it.
+	runtimeEmpty bool
 }
 
 // planLift lifts a core function into a component function.
@@ -116,8 +120,9 @@ type planLift struct {
 // that originally created it; this step only copies its Callee into an
 // adapter core func.
 type planLower struct {
-	funcRef funcRef
-	options canonicalOptions
+	funcRef       funcRef
+	options       canonicalOptions
+	hostFuncIndex int
 }
 
 // planResourceNew creates a new resource handle.
@@ -125,7 +130,8 @@ type planLower struct {
 // execute time inst.types[typeID] yields the *TypeResource used as the
 // resourceTable entry's type discriminator.
 type planResourceNew struct {
-	typeID uint32
+	typeID        uint32
+	hostFuncIndex int
 }
 
 // planResourceDrop drops a resource handle.
@@ -136,11 +142,13 @@ type planResourceDrop struct {
 	// dtorFuncIndex, when >= 0, is the core func index of the destructor
 	// to call with the rep value when the handle is dropped.
 	dtorFuncIndex int
+	hostFuncIndex int
 }
 
 // planResourceRep returns the representation of a resource handle.
 type planResourceRep struct {
-	typeID uint32
+	typeID        uint32
+	hostFuncIndex int
 }
 
 // planImportFunc records a component function import.

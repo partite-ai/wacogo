@@ -4,6 +4,7 @@
 
 ```sh
 go build ./...
+go generate ./testdata   # first time, and after changing a .wast file
 go test ./...
 ```
 
@@ -11,7 +12,7 @@ To run a single test or a specific subtest:
 
 ```sh
 go test ./wasmparser/ -run TestName -count=1
-go test ./wasmparser/ -run TestComponentModelWast/empty -v
+go test ./internal/core/ -run TestSpecConformance/local/parser/local-resource-in-imports -v
 ```
 
 Integration tests under `host/` and the runtime tests under
@@ -20,16 +21,17 @@ boundary. They use the [`wasmtools/`](wasmtools/) package, which runs
 the wasip1 build of `wasm-tools` inside wazero — no external
 `wasm-tools` binary is required.
 
-### Regenerating wasmparser fixtures
+### Regenerating spec test fixtures
 
-`wasmparser/` test fixtures are pre-compiled from `.wast` source via
-`wasm-tools json-from-wast` (driven by the embedded wasmtools package
-through wazero). Source `.wast` files in `wasmparser/testdata/wast/`
-are committed; generated JSON + binary fixtures in
-`wasmparser/testdata/generated/` are gitignored.
+`TestSpecConformance` in `internal/core` runs fixtures pre-compiled from
+`.wast` source via `wasm-tools json-from-wast`, and fails if any are
+missing. This step does need a `wasm-tools` binary (>= 1.245.0) on your
+`PATH`. Source `.wast` files in `testdata/spec/` (upstream mirror) and
+`testdata/local/` (our own) are committed; generated JSON + binary
+fixtures in `testdata/generated/` are gitignored.
 
 ```sh
-go generate ./wasmparser/...
+go generate ./testdata
 ```
 
 ### Bumping the embedded wasm-tools version

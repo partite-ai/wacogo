@@ -347,28 +347,28 @@ type resettablePayload interface {
 }
 
 func (p *ComponentTypeSectionPayload) resetReader() {
-	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset)
+	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset, p.reader.limits)
 }
 func (p *ComponentImportSectionPayload) resetReader() {
-	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset)
+	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset, p.reader.limits)
 }
 func (p *ComponentExportSectionPayload) resetReader() {
-	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset)
+	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset, p.reader.limits)
 }
 func (p *ComponentInstanceSectionPayload) resetReader() {
-	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset)
+	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset, p.reader.limits)
 }
 func (p *ComponentAliasSectionPayload) resetReader() {
-	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset)
+	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset, p.reader.limits)
 }
 func (p *ComponentCanonicalSectionPayload) resetReader() {
-	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset)
+	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset, p.reader.limits)
 }
 func (p *CoreTypeSectionPayload) resetReader() {
-	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset)
+	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset, p.reader.limits)
 }
 func (p *CoreInstanceSectionPayload) resetReader() {
-	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset)
+	p.reader = newBinaryReaderAt(bytes.NewReader(p.data), p.dataOffset, p.reader.limits)
 }
 
 // ---- Helper for section items ----
@@ -432,17 +432,19 @@ type Parser struct {
 }
 
 // NewParser creates a new Parser that reads incrementally from r.
-func NewParser(r io.Reader) *Parser {
+func NewParser(r io.Reader, opts ...ParseOption) *Parser {
+	reader := NewBinaryReader(r)
+	reader.limits = newParseLimits(opts)
 	return &Parser{
-		reader: NewBinaryReader(r),
+		reader: reader,
 		state:  stateHeader,
 	}
 }
 
 // newParserFromBytes creates a parser from a byte slice at a given offset.
-func newParserFromBytes(data []byte, offset uint64) *Parser {
+func newParserFromBytes(data []byte, offset uint64, limits *ParseLimits) *Parser {
 	return &Parser{
-		reader: newBinaryReaderAt(bytes.NewReader(data), offset),
+		reader: newBinaryReaderAt(bytes.NewReader(data), offset, limits),
 		state:  stateHeader,
 	}
 }
@@ -527,7 +529,7 @@ func (p *Parser) readSection() (Payload, error) {
 	}
 
 	dataStart := p.reader.Offset()
-	safeLen, err := checkSectionLength(start, length, "section")
+	safeLen, err := checkSectionLength(start, length, p.reader.limits.ModuleSize, "section")
 	if err != nil {
 		return nil, err
 	}
@@ -570,10 +572,10 @@ func (p *Parser) dispatchComponentSection(id byte, length int, dataOffset uint64
 		if err != nil {
 			return nil, errfAt(dataOffset, "section data truncated: %v", err)
 		}
-		sub := newParserFromBytes(sectionData, dataOffset)
+		sub := newParserFromBytes(sectionData, dataOffset, p.reader.limits)
 		sub.reader.nesting = p.reader.nesting + 1
-		if sub.reader.nesting > MaxNestingDepth {
-			return nil, errfAt(dataOffset, "nested component/module depth %d exceeds maximum %d", sub.reader.nesting, MaxNestingDepth)
+		if uint32(sub.reader.nesting) > p.reader.limits.NestingDepth {
+			return nil, errfAt(dataOffset, "nested component/module depth %d exceeds maximum %d", sub.reader.nesting, p.reader.limits.NestingDepth)
 		}
 
 		if id == sectionCoreModule {
@@ -604,7 +606,7 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 	switch id {
 	case sectionCustom:
 		// Custom section: read name then remaining is data
-		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset)
+		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits)
 		name, err := sr.ReadString()
 		if err != nil {
 			return nil, err
@@ -620,7 +622,7 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 
 	case sectionCoreInstance:
 		return &CoreInstanceSectionPayload{
-			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			data:       data,
 			dataOffset: dataOffset,
 			Range:      rng,
@@ -628,7 +630,7 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 
 	case sectionCoreType:
 		return &CoreTypeSectionPayload{
-			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			data:       data,
 			dataOffset: dataOffset,
 			Range:      rng,
@@ -636,7 +638,7 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 
 	case sectionInstance:
 		return &ComponentInstanceSectionPayload{
-			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			data:       data,
 			dataOffset: dataOffset,
 			Range:      rng,
@@ -644,7 +646,7 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 
 	case sectionAlias:
 		return &ComponentAliasSectionPayload{
-			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			data:       data,
 			dataOffset: dataOffset,
 			Range:      rng,
@@ -652,7 +654,7 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 
 	case sectionType:
 		return &ComponentTypeSectionPayload{
-			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			data:       data,
 			dataOffset: dataOffset,
 			Range:      rng,
@@ -660,14 +662,14 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 
 	case sectionCanonical:
 		return &ComponentCanonicalSectionPayload{
-			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			data:       data,
 			dataOffset: dataOffset,
 			Range:      rng,
 		}, nil
 
 	case sectionStart:
-		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset)
+		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits)
 		var start ComponentStartFunction
 		if err := start.unmarshalBinary(sr); err != nil {
 			return nil, err
@@ -679,7 +681,7 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 
 	case sectionImport:
 		return &ComponentImportSectionPayload{
-			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			data:       data,
 			dataOffset: dataOffset,
 			Range:      rng,
@@ -687,7 +689,7 @@ func (p *Parser) dispatchComponentSectionFromData(id byte, data []byte, dataOffs
 
 	case sectionExport:
 		return &ComponentExportSectionPayload{
-			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader:     newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			data:       data,
 			dataOffset: dataOffset,
 			Range:      rng,
@@ -755,7 +757,7 @@ func coreSectionRank(id byte) int {
 func (p *Parser) dispatchModuleSection(id byte, data []byte, dataOffset uint64, rng Range) (Payload, error) {
 	switch id {
 	case moduleSectionCustom:
-		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset)
+		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits)
 		name, err := sr.ReadString()
 		if err != nil {
 			return nil, err
@@ -770,31 +772,31 @@ func (p *Parser) dispatchModuleSection(id byte, data []byte, dataOffset uint64, 
 
 	case moduleSectionType:
 		return &ModuleTypeSectionPayload{
-			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			Range:  rng,
 		}, nil
 
 	case moduleSectionImport:
 		return &ModuleImportSectionPayload{
-			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			Range:  rng,
 		}, nil
 
 	case moduleSectionFunction:
 		return &ModuleFunctionSectionPayload{
-			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			Range:  rng,
 		}, nil
 
 	case moduleSectionTable:
 		return &ModuleTableSectionPayload{
-			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			Range:  rng,
 		}, nil
 
 	case moduleSectionMemory:
 		return &ModuleMemorySectionPayload{
-			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			Range:  rng,
 		}, nil
 
@@ -806,12 +808,12 @@ func (p *Parser) dispatchModuleSection(id byte, data []byte, dataOffset uint64, 
 
 	case moduleSectionExport:
 		return &ModuleExportSectionPayload{
-			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			Range:  rng,
 		}, nil
 
 	case moduleSectionStart:
-		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset)
+		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits)
 		funcIdx, err := sr.ReadU32()
 		if err != nil {
 			return nil, err
@@ -840,7 +842,7 @@ func (p *Parser) dispatchModuleSection(id byte, data []byte, dataOffset uint64, 
 		}, nil
 
 	case moduleSectionDataCount:
-		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset)
+		sr := newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits)
 		count, err := sr.ReadU32()
 		if err != nil {
 			return nil, err
@@ -852,7 +854,7 @@ func (p *Parser) dispatchModuleSection(id byte, data []byte, dataOffset uint64, 
 
 	case moduleSectionTag:
 		return &ModuleTagSectionPayload{
-			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset),
+			reader: newBinaryReaderAt(bytes.NewReader(data), dataOffset, p.reader.limits),
 			Range:  rng,
 		}, nil
 

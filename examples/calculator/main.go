@@ -54,6 +54,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer comp.Close(ctx)
 	inst, err := comp.Instantiate(ctx, wacogo.WithInstanceImport("h", hostInst.Core()))
 	if err != nil {
 		log.Fatal(err)

@@ -39,6 +39,7 @@ func TestCalculator_Add(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadComponent: %v", err)
 	}
+	defer comp.Close(ctx)
 	inst, err := comp.Instantiate(ctx, wacogo.WithInstanceImport("h", hostInst.Core()))
 	if err != nil {
 		t.Fatalf("Instantiate: %v", err)

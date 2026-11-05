@@ -13,7 +13,7 @@ func TestComponentImport_PlainFuncRef(t *testing.T) {
 		0x01,                          // func type ref
 		0x03,                          // type index 3
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	var imp ComponentImport
 	if err := imp.unmarshalBinary(r); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -42,7 +42,7 @@ func TestComponentImport_TypeBoundsEq(t *testing.T) {
 		0x00,                    // eq bounds
 		0x07,                    // index 7
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	var imp ComponentImport
 	if err := imp.unmarshalBinary(r); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -68,7 +68,7 @@ func TestComponentImport_TypeBoundsSubResource(t *testing.T) {
 		0x03,                    // type ref
 		0x01,                    // sub resource bounds
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	var imp ComponentImport
 	if err := imp.unmarshalBinary(r); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -92,7 +92,7 @@ func TestComponentExport_FuncNoAscription(t *testing.T) {
 		0x02,                              // index 2
 		0x00,                              // no ascribed type
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	var exp ComponentExport
 	if err := exp.unmarshalBinary(r); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -125,7 +125,7 @@ func TestComponentExport_WithAscribedType(t *testing.T) {
 		0x01,                    // type ref kind: func
 		0x05,                    // type index 5
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	var exp ComponentExport
 	if err := exp.unmarshalBinary(r); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -150,7 +150,7 @@ func TestAliasInstanceExport(t *testing.T) {
 		0x03,                              // instance index 3
 		0x05, 'h', 'e', 'l', 'l', 'o',   // name "hello"
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	alias, err := readComponentAlias(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -179,7 +179,7 @@ func TestAliasCoreInstanceExport(t *testing.T) {
 		0x01,                          // instance index 1
 		0x06, 'm', 'e', 'm', 'o', 'r', 'y', // name "memory"
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	alias, err := readComponentAlias(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -207,7 +207,7 @@ func TestAliasOuter(t *testing.T) {
 		0x01, // count 1
 		0x04, // index 4
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	alias, err := readComponentAlias(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -239,7 +239,7 @@ func TestCanonLift_WithOptions(t *testing.T) {
 		0x00, // memory index 0
 		0x07, // type index 7
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	cf, err := readCanonicalFunction(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -277,7 +277,7 @@ func TestCanonLower_Basic(t *testing.T) {
 		0x03, // func index 3
 		0x00, // 0 options
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	cf, err := readCanonicalFunction(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -297,7 +297,7 @@ func TestCanonLower_Basic(t *testing.T) {
 // TestCanonResourceNew tests resource.new.
 func TestCanonResourceNew(t *testing.T) {
 	data := []byte{0x02, 0x01} // resource.new type index 1
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	cf, err := readCanonicalFunction(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -314,7 +314,7 @@ func TestCanonResourceNew(t *testing.T) {
 // TestCanonResourceDrop tests resource.drop.
 func TestCanonResourceDrop(t *testing.T) {
 	data := []byte{0x03, 0x02} // resource.drop type index 2
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	cf, err := readCanonicalFunction(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -338,7 +338,7 @@ func TestComponentInstance_Instantiate(t *testing.T) {
 		0x01,                              // func kind
 		0x03,                              // index 3
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	ci, err := readComponentInstance(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -374,7 +374,7 @@ func TestCoreInstance_Instantiate(t *testing.T) {
 		0x12,                              // instance sort
 		0x01,                              // index 1
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	ci, err := readInstance(r)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -408,7 +408,7 @@ func TestComponentStartFunction(t *testing.T) {
 		0x00, 0x01, // arg 0, arg 1
 		0x01,       // 1 result
 	}
-	r := newBinaryReaderAt(bytes.NewReader(data), 0)
+	r := newBinaryReaderAt(bytes.NewReader(data), 0, &defaultParseLimits)
 	var sf ComponentStartFunction
 	if err := sf.unmarshalBinary(r); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -441,7 +441,7 @@ func TestReadComponentExternalKind(t *testing.T) {
 		{[]byte{0x05}, ExternalKindInstance},
 	}
 	for _, tt := range tests {
-		r := newBinaryReaderAt(bytes.NewReader(tt.data), 0)
+		r := newBinaryReaderAt(bytes.NewReader(tt.data), 0, &defaultParseLimits)
 		kind, err := readComponentExternalKind(r)
 		if err != nil {
 			t.Fatalf("data=%x: unexpected error: %v", tt.data, err)
@@ -467,7 +467,7 @@ func TestReadCoreSort(t *testing.T) {
 		{0x12, CoreSortInstance},
 	}
 	for _, tt := range tests {
-		r := newBinaryReaderAt(bytes.NewReader([]byte{tt.data}), 0)
+		r := newBinaryReaderAt(bytes.NewReader([]byte{tt.data}), 0, &defaultParseLimits)
 		sort, err := readCoreSort(r)
 		if err != nil {
 			t.Fatalf("byte=0x%02x: unexpected error: %v", tt.data, err)

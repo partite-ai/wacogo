@@ -70,9 +70,3 @@ func (b *HostTypeBuilder) PushInstanceType(t InstanceTypeDesc) ComponentInstance
 func (b *HostTypeBuilder) NewComponentTypeHandle(id ComponentTypeID) *ComponentType {
 	return &ComponentType{arena: b.arena, id: id}
 }
-
-// NewFuncTypeHandle wraps an already-pushed ComponentFuncTypeID in the
-// public *FuncType handle used by CheckInstantiation for func imports.
-func (b *HostTypeBuilder) NewFuncTypeHandle(id ComponentFuncTypeID) *FuncType {
-	return &FuncType{arena: b.arena, id: id}
-}

@@ -171,6 +171,9 @@ type ValTypeDesc struct {
 func internalValTypeFromParsed(cvt ComponentValType, cs *ComponentState) (ValTypeDesc, error) {
 	switch v := cvt.(type) {
 	case PrimitiveValType:
+		if err := cs.checkPrimitiveEnabled(v); err != nil {
+			return ValTypeDesc{}, err
+		}
 		return ValTypeDesc{IsPrimitive: true, Primitive: v}, nil
 	case TypeIndexValType:
 		idx := uint32(v)
@@ -329,7 +332,25 @@ type FuncParamDesc struct {
 // InstanceTypeDesc holds the exports of a component instance.
 type InstanceTypeDesc struct {
 	Exports          map[string]ComponentEntityType
-	DefinedResources []ResourceID // resources defined (not just referenced) by this instance type
+	// ExportOrder is the declaration order of Exports, which decides what each
+	// export can name.
+	ExportOrder      []string
+	DefinedResources []DefinedResource // resources defined (not just referenced) by this instance type
+}
+
+// DefinedResource is a resource an instance type introduces, with the export
+// that defines it. Any other export of the same resource is an alias of it.
+type DefinedResource struct {
+	ID     ResourceID
+	Export string
+}
+
+// ImportedResource is a resource a component type leaves to its instantiator.
+// Import names the type import that declares it, and is empty for a host
+// component's, which has no imports.
+type ImportedResource struct {
+	ID     ResourceID
+	Import string
 }
 
 // ComponentTypeDesc holds imports and exports of a component type.
@@ -338,6 +359,18 @@ type ComponentTypeDesc struct {
 	ImportOrder []string // preserves insertion order for deterministic iteration
 	Exports     map[string]ComponentEntityType
 	ExportOrder []string // preserves insertion order for deterministic iteration
+	// ImportedResources lists the resources its instantiator must supply. Those of
+	// its instance imports are in their types.
+	ImportedResources []ImportedResource
+	// DefinedResources lists the resources each instantiation creates anew and its
+	// exports expose. Anything else its exports name is either what its imports were
+	// given, or from outside it and so stays what it is.
+	DefinedResources []ResourceID
+	// Funcs is the func index space of a component definition.
+	Funcs []ComponentFuncTypeID
+	// body records how a component definition fills its index spaces. It is nil
+	// for a component type that is only declared.
+	body *componentBody
 }
 
 // ---------- Type Arena ----------
@@ -355,7 +388,7 @@ type TypeArena struct {
 	InstanceTypes []InstanceTypeDesc
 	ComponentTypes []ComponentTypeDesc
 
-	// Per-type effective sizes used to enforce MaxEffectiveTypeSize. Each slice
+	// Per-type effective sizes used to enforce ParseLimits.EffectiveTypeSize. Each slice
 	// is parallel to the matching descriptor slice above. Sizes are computed
 	// when the descriptor is pushed; for component types built via placeholder
 	// (validateComponentSection / validateEnd) the entry is overwritten once
@@ -370,7 +403,7 @@ type TypeArena struct {
 	// resourceAliases maps a freshly minted "export-alias" ResourceID to the
 	// underlying defining ResourceID it aliases. Two-level only — fresh →
 	// defining, no chains. Populated by freshenTypeEntityCreated and queried
-	// by SubtypeChecker.checkResourceMatch / mintMapped to resolve cross-
+	// by SubtypeChecker.checkResourceMatch / remapResource to resolve cross-
 	// component re-exports back to the resource they ultimately reference.
 	// Keyed globally because ResourceIDs are unique across the arena and the
 	// alias relationship is stable for the lifetime of the arena.
@@ -392,13 +425,13 @@ func NewArena(features FeatureSet) *TypeArena {
 	return newTypeArena(features)
 }
 
-// resolveResourceAlias returns the defining ResourceID for rid if rid is the
-// fresh-export-alias half of a recorded pair, else returns rid unchanged.
-// Single hop only — defining IDs never alias further.
-func (a *TypeArena) resolveResourceAlias(rid ResourceID) ResourceID {
+// ResolveResourceAlias returns the resource that rid is an alias of, or rid if
+// it isn't an alias.
+func (a *TypeArena) ResolveResourceAlias(rid ResourceID) ResourceID {
 	if a == nil {
 		return rid
 	}
+	// Single hop: a defining ID never aliases further.
 	if defining, ok := a.resourceAliases[rid]; ok {
 		return defining
 	}
@@ -460,8 +493,8 @@ func (a *TypeArena) allocResourceID() ResourceID {
 // ---------- Effective type size ----------
 
 // satAddU32 returns a+b, saturating at math.MaxUint32 to avoid overflow on
-// pathological inputs. Sizes that saturate will exceed MaxEffectiveTypeSize and
-// be rejected by the validator.
+// pathological inputs. Sizes that saturate will exceed any effective type size limit
+// other than Unlimited and be rejected by the validator.
 func satAddU32(a, b uint32) uint32 {
 	s := a + b
 	if s < a {

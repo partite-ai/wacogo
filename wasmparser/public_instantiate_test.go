@@ -29,14 +29,14 @@ func TestNewInstanceReturnsDistinctHandles(t *testing.T) {
 		t.Fatal("no top-level ComponentType")
 	}
 
-	inst1 := ct.NewInstance()
-	inst2 := ct.NewInstance()
+	inst1 := ct.NewInstance(nil)
+	inst2 := ct.NewInstance(nil)
 
 	if inst1 == inst2 {
 		t.Fatal("want distinct *InstanceType handles from separate NewInstance calls")
 	}
-	if inst1.source != ct || inst2.source != ct {
-		t.Fatal("each handle should reference the same source ComponentType")
+	if inst1.scope == inst2.scope {
+		t.Fatal("want distinct resource scopes from separate NewInstance calls")
 	}
 }
 
@@ -48,7 +48,7 @@ func TestNewInstanceIsMemoryNeutral(t *testing.T) {
 	ct := loadComponent(t, src)
 	before := arenaShape(ct.arena)
 	for range 1000 {
-		_ = ct.NewInstance()
+		_ = ct.NewInstance(nil)
 	}
 	after := arenaShape(ct.arena)
 	if before != after {
@@ -72,15 +72,15 @@ func TestCheckInstantiationIsMemoryNeutral(t *testing.T) {
 	beforeProv := arenaShape(prov.arena)
 	beforeCons := arenaShape(cons.arena)
 	for range 100 {
-		shared := prov.NewInstance()
+		shared := prov.NewInstance(nil)
 		if err := cons.CheckInstantiation(map[string]any{
 			"I1": shared,
 			"I2": shared,
 		}); err != nil {
 			t.Fatalf("unexpected: %v", err)
 		}
-		i1 := prov.NewInstance()
-		i2 := prov.NewInstance()
+		i1 := prov.NewInstance(nil)
+		i2 := prov.NewInstance(nil)
 		if err := cons.CheckInstantiation(map[string]any{
 			"I1": i1,
 			"I2": i2,
@@ -152,7 +152,7 @@ func TestCheckInstantiationAcceptsSharedResource(t *testing.T) {
 	prov := loadComponent(t,provSrc)
 	cons := loadComponent(t,consSrc)
 
-	shared := prov.NewInstance()
+	shared := prov.NewInstance(nil)
 
 	err := cons.CheckInstantiation(map[string]any{
 		"I1": shared,
@@ -184,12 +184,12 @@ func TestCheckInstantiationConcurrentlySafe(t *testing.T) {
 	for range 16 {
 		wg.Go(func() {
 			for range 50 {
-				shared := prov.NewInstance()
+				shared := prov.NewInstance(nil)
 				_ = cons.CheckInstantiation(map[string]any{
 					"I1": shared, "I2": shared,
 				})
-				i1 := prov.NewInstance()
-				i2 := prov.NewInstance()
+				i1 := prov.NewInstance(nil)
+				i2 := prov.NewInstance(nil)
 				_ = cons.CheckInstantiation(map[string]any{
 					"I1": i1, "I2": i2,
 				})
@@ -212,8 +212,8 @@ func TestCheckInstantiationRejectsMismatchedResources(t *testing.T) {
 	prov := loadComponent(t,provSrc)
 	cons := loadComponent(t,consSrc)
 
-	i1 := prov.NewInstance()
-	i2 := prov.NewInstance()
+	i1 := prov.NewInstance(nil)
+	i2 := prov.NewInstance(nil)
 
 	err := cons.CheckInstantiation(map[string]any{
 		"I1": i1,
@@ -241,13 +241,15 @@ func exportHandle(t *testing.T, ct *ComponentType, name string) any {
 	}
 	switch et.Kind {
 	case EntityFunc:
-		return &FuncType{arena: arena, id: et.FuncID}
+		return &FuncType{arena: arena, id: et.FuncID, scope: ct.NewInstance(nil)}
 	case EntityModule:
 		return &ModuleType{arena: arena, id: et.ModuleID}
 	case EntityComponent:
 		return &ComponentType{arena: arena, id: et.CompID}
 	case EntityInstance:
-		return &InstanceType{source: ct}
+		inst := &InstanceType{arena: arena, exports: arena.InstanceTypes[et.InstID].Exports}
+		inst.scope = inst
+		return inst
 	default:
 		t.Fatalf("unsupported export kind %v", et.Kind)
 		return nil
@@ -309,7 +311,7 @@ func TestCheckInstantiationRejectsWrongKind(t *testing.T) {
 )`
 	prov := loadComponent(t,provSrc)
 	cons := loadComponent(t,consSrc)
-	err := cons.CheckInstantiation(map[string]any{"f": prov.NewInstance()})
+	err := cons.CheckInstantiation(map[string]any{"f": prov.NewInstance(nil)})
 	if err == nil {
 		t.Fatal("expected kind-mismatch, got nil")
 	}
@@ -397,8 +399,72 @@ func TestCheckInstantiationRejectsModuleWrongKind(t *testing.T) {
 	prov := loadComponent(t,provSrc)
 	cons := loadComponent(t,consSrc)
 	// Supply an *InstanceType for a core-module import.
-	err := cons.CheckInstantiation(map[string]any{"m": prov.NewInstance()})
+	err := cons.CheckInstantiation(map[string]any{"m": prov.NewInstance(nil)})
 	if err == nil {
 		t.Fatal("expected kind-mismatch error, got nil")
+	}
+}
+
+// A root component's own imports stand for whatever its instantiator supplies, as
+// a nested component's do.
+func TestCheckInstantiation_RootComponentArg(t *testing.T) {
+	load := func(src string) *ComponentType {
+		t.Helper()
+		vp := NewValidatingParser(bytes.NewReader(wat2wasm(t, src)), DefaultFeatures())
+		for {
+			_, err := vp.Next()
+			if err == io.EOF {
+				return vp.TopLevelComponentType()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	provider := load(`(component
+  (import "r" (type $r (sub resource)))
+  (export "x" (type $r)))`)
+	consumer := load(`(component
+  (import "c" (component
+    (import "r" (type $r (sub resource)))
+    (export "x" (type (eq $r))))))`)
+	if err := consumer.CheckInstantiation(map[string]any{"c": provider}); err != nil {
+		t.Fatalf("want root component accepted, got: %v", err)
+	}
+}
+
+// CheckInstantiation binds what's open before comparing anything, so a func import
+// can name a resource from an instance import in any order.
+func TestCheckInstantiation_BindsBeforeComparing(t *testing.T) {
+	load := func(src string) *ComponentType {
+		t.Helper()
+		vp := NewValidatingParser(bytes.NewReader(wat2wasm(t, src)), DefaultFeatures())
+		for {
+			_, err := vp.Next()
+			if err == io.EOF {
+				return vp.TopLevelComponentType()
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	lender := load(`(component (type $r (resource (rep i32))) (export "r" (type $r)))`).NewInstance(nil)
+	other := load(`(component (type $r (resource (rep i32))) (export "r" (type $r)))`).NewInstance(nil)
+	consumer := load(`(component
+  (import "a" (type $a (sub resource)))
+  (import "b" (type (eq $a)))
+  (import "i" (instance (export "r" (type (eq $a))))))`)
+	ok := map[string]any{"a": ResourceFrom{Lender: lender, Export: "r"}, "b": ResourceFrom{Lender: lender, Export: "r"}, "i": lender}
+	if err := consumer.CheckInstantiation(ok); err != nil {
+		t.Fatalf("want accepted, got: %v", err)
+	}
+	for name, args := range map[string]map[string]any{
+		"eq import": {"a": ResourceFrom{Lender: lender, Export: "r"}, "b": ResourceFrom{Lender: other, Export: "r"}},
+		"instance":  {"a": ResourceFrom{Lender: lender, Export: "r"}, "i": other},
+	} {
+		if err := consumer.CheckInstantiation(args); err == nil {
+			t.Errorf("%s: want rejected", name)
+		}
 	}
 }

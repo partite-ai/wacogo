@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"errors"
+	"sync/atomic"
 
 	"github.com/partite-ai/wacogo/wasmparser"
 	"github.com/tetratelabs/wazero"
@@ -12,11 +14,6 @@ type ExportDesc struct {
 	Name  string
 	Kind  Sort
 	Index uint32
-	// ParserFunctionType is the wasmparser function-type handle for
-	// this export. Non-nil for func exports loaded from a validated
-	// component. Use it for extended type information beyond the
-	// runtime API.
-	ParserFunctionType *wasmparser.FuncType
 }
 
 // ImportDesc describes a component import.
@@ -44,9 +41,16 @@ func WrapCompiledModule(cm wazero.CompiledModule) *CompiledModule {
 	return &CompiledModule{module: cm}
 }
 
-// Component is an immutable, compiled component ready for instantiation.
+// Component is a compiled component ready for instantiation.
 type Component struct {
-	engine          *Engine
+	// owned is what a top-level component is responsible for releasing. Nil for a
+	// sub-component, whose compiled code is its top-level component's.
+	owned *ownedModules
+
+	engine *Engine
+	// hostFuncs is the signature of each core function this component's canon
+	// section creates in Go, which every instantiation builds a module from.
+	hostFuncs       []hostFuncSig
 	compiledModules []CompiledModule
 	subComponents   []*Component
 	plan            []planStep
@@ -67,10 +71,11 @@ type Component struct {
 	// subComponents index space.
 	outerComponentClosures map[int]outerRef
 
-	// wpType is the opaque wasmparser type handle for this component,
-	// populated at load time. Nil if the engine wasn't able to produce
-	// one. Used by Instantiate to subtype-check supplied instance args
-	// via CheckInstantiation.
+	// wpType is the opaque wasmparser type handle for this component, populated
+	// at load time for a top-level component. Nil for a sub-component, whose
+	// instances get their types from the top-level instance's. Used by
+	// Instantiate to subtype-check supplied imports via CheckInstantiation and
+	// to create the instance's type.
 	wpType *wasmparser.ComponentType
 }
 
@@ -93,9 +98,10 @@ type InstantiateOption func(*instantiateConfig)
 // instantiateConfig stores the arguments passed to a component instantiation.
 // Each imports entry maps an import name to the supplied value: *Func for
 // func imports, *ComponentInstance for instance imports, *CompiledModule for
-// core module imports, *Component for component imports, Type for type
-// imports, Val for value imports. The runtime validates the Go-level type
-// matches the import's declared Sort before running the plan.
+// core module imports, *Component for component imports, resourceTypeImport
+// or a resolved Type for type imports, Val for value imports. The runtime
+// validates the Go-level type matches the import's declared Sort before
+// running the plan.
 type instantiateConfig struct {
 	imports map[string]any
 }
@@ -127,12 +133,59 @@ func WithComponentImport(name string, c *Component) InstantiateOption {
 	return func(cfg *instantiateConfig) { cfg.put(name, c) }
 }
 
-// WithTypeImport satisfies a named type import with the given Type.
-func WithTypeImport(name string, t Type) InstantiateOption {
+// WithResourceTypeImport satisfies a named resource type import with the
+// resource that lender exports under the given name.
+func WithResourceTypeImport(name string, lender *ComponentInstance, export string) InstantiateOption {
+	return func(cfg *instantiateConfig) { cfg.put(name, resourceTypeImport{lender: lender, export: export}) }
+}
+
+// resourceTypeImport is the supplied value of a resource type import until
+// Instantiate has checked it and replaced it with the lender's Type.
+type resourceTypeImport struct {
+	lender *ComponentInstance
+	export string
+}
+
+// withResolvedType supplies a type argument to a sub-component. The validator
+// has already checked it against the sub-component's import.
+func withResolvedType(name string, t Type) InstantiateOption {
 	return func(cfg *instantiateConfig) { cfg.put(name, t) }
 }
 
 // Instantiate creates a running instance of this component.
 func (c *Component) Instantiate(ctx context.Context, opts ...InstantiateOption) (*ComponentInstance, error) {
+	if c.owned != nil && c.owned.closed.Load() {
+		return nil, ErrComponentClosed
+	}
 	return c.engine.instantiate(ctx, c, opts...)
+}
+
+// ownedModules holds everything compiled to load a top-level component, nested
+// components included.
+type ownedModules struct {
+	modules []wazero.CompiledModule
+	closed  atomic.Bool
+}
+
+// ErrComponentClosed is returned by Instantiate after Close.
+var ErrComponentClosed = errors.New("component is closed")
+
+// Close releases the compiled code held by this Component, which otherwise lasts
+// as long as its Engine. After Close, Instantiate returns ErrComponentClosed, and
+// a module exported by one of its instances can no longer be instantiated.
+// Instances that already exist remain usable until each is itself closed.
+//
+// Close is idempotent. A component nested inside another holds nothing of its own,
+// so closing one does nothing.
+func (c *Component) Close(ctx context.Context) error {
+	if c.owned == nil || !c.owned.closed.CompareAndSwap(false, true) {
+		return nil
+	}
+	var errs []error
+	for _, m := range c.owned.modules {
+		if err := m.Close(ctx); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }

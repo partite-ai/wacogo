@@ -20,7 +20,7 @@ func (t *testItem) unmarshalBinary(r *BinaryReader) error {
 }
 
 func TestRead(t *testing.T) {
-	r := newBinaryReaderAt(bytes.NewReader([]byte{0x2A}), 0)
+	r := newBinaryReaderAt(bytes.NewReader([]byte{0x2A}), 0, &defaultParseLimits)
 	item, err := unmarshalNew[*testItem](r)
 	if err != nil {
 		t.Fatal(err)

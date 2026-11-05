@@ -45,8 +45,8 @@ func TestCompass_EnumRoundTrip(t *testing.T) {
 	importerWAT := `(component
   (import "h" (instance $h
     (type $dir (enum "north" "south" "east" "west"))
-    (export "direction" (type (eq $dir)))
-    (export "reverse" (func (param "d" $dir) (result $dir)))
+    (export "direction" (type $d (eq $dir)))
+    (export "reverse" (func (param "d" $d) (result $d)))
   ))
   (alias export $h "reverse" (func $r))
   (export "reverse" (func $r))

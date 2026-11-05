@@ -14,9 +14,6 @@ func TestValidatedComponentExportHandleAccessors(t *testing.T) {
 		et:     ComponentEntityType{Kind: EntityFunc, FuncID: fid},
 		arena:  arena,
 	}
-	if v.FuncType() == nil {
-		t.Fatal("FuncType() should return a non-nil handle")
-	}
 	if v.ModuleType() != nil {
 		t.Fatal("ModuleType() should be nil for a func export")
 	}
@@ -35,18 +32,6 @@ func TestValidatedModuleSectionPayloadModuleType(t *testing.T) {
 	}
 	if p.ModuleType() == nil {
 		t.Fatal("ModuleType() should return a non-nil handle")
-	}
-}
-
-func TestValidatedComponentExportInstanceTypeReturnsNil(t *testing.T) {
-	arena := newTypeArena(DefaultFeatures())
-	v := ValidatedComponentExport{
-		Export: &ComponentExport{},
-		et:     ComponentEntityType{Kind: EntityInstance},
-		arena:  arena,
-	}
-	if v.InstanceType() != nil {
-		t.Fatal("InstanceType() should return nil (see method comment)")
 	}
 }
 
@@ -107,13 +92,26 @@ func TestValidatingParserYieldsValidatedExportSection(t *testing.T) {
 			t.Fatal(err)
 		}
 		if exp.Export.Name.Name == "f" {
-			if exp.FuncType() == nil {
-				t.Fatal("expected FuncType handle for func export")
+			if exp.et.Kind != EntityFunc {
+				t.Fatalf("expected func export, got %v", exp.et.Kind)
 			}
 			saw = true
 		}
 	}
 	if !saw {
 		t.Fatal("did not see export f")
+	}
+}
+
+func TestValidatedComponentAliasEntityType(t *testing.T) {
+	arena := newTypeArena(DefaultFeatures())
+	et := ComponentEntityType{Kind: EntityFunc}
+	if got, gotArena, ok := (ValidatedComponentAlias{Alias: AliasInstanceExport{}, et: et, arena: arena}).EntityType(); !ok || got != et || gotArena != arena {
+		t.Errorf("instance export: got (%+v, %p, %v)", got, gotArena, ok)
+	}
+	for _, alias := range []ComponentAlias{AliasCoreInstanceExport{}, AliasOuter{}} {
+		if _, _, ok := (ValidatedComponentAlias{Alias: alias, arena: arena}).EntityType(); ok {
+			t.Errorf("%T: ok = true, want false", alias)
+		}
 	}
 }

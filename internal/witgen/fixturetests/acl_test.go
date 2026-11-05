@@ -35,8 +35,8 @@ func TestAcl_FlagsRoundTrip(t *testing.T) {
 	importerWAT := `(component
   (import "h" (instance $h
     (type $perms (flags "read" "write" "exec"))
-    (export "perms" (type (eq $perms)))
-    (export "grant" (func (param "p" $perms) (result $perms)))
+    (export "perms" (type $p (eq $perms)))
+    (export "grant" (func (param "p" $p) (result $p)))
   ))
   (alias export $h "grant" (func $g))
   (export "grant" (func $g))

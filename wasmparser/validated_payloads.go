@@ -101,22 +101,12 @@ func (p *ValidatedComponentImportSectionPayload) Items() iter.Seq2[ValidatedComp
 }
 
 // ValidatedComponentExport is an export paired with the handle the
-// validator resolved for it. FuncType(), ModuleType(), and
-// ComponentType() each return a non-nil handle iff the export's Kind
-// matches; otherwise they return nil. InstanceType() is present for
-// API symmetry but always returns nil — see its comment.
+// validator resolved for it. ModuleType() and ComponentType() each return a
+// non-nil handle iff the export's Kind matches; otherwise they return nil.
 type ValidatedComponentExport struct {
 	Export *ComponentExport
 	et     ComponentEntityType
 	arena  *TypeArena
-}
-
-// FuncType returns the handle if this export is a func, else nil.
-func (v ValidatedComponentExport) FuncType() *FuncType {
-	if v.et.Kind != EntityFunc {
-		return nil
-	}
-	return &FuncType{arena: v.arena, id: v.et.FuncID}
 }
 
 // ModuleType returns the handle if this export is a core module, else nil.
@@ -135,33 +125,13 @@ func (v ValidatedComponentExport) ComponentType() *ComponentType {
 	return &ComponentType{arena: v.arena, id: v.et.CompID}
 }
 
-// InstanceType returns nil. Instance-typed exports do not surface as
-// *InstanceType through this API — *InstanceType represents a fresh
-// runtime instance minted via (*ComponentType).NewInstance, not the
-// static instance-type of a component export. This method exists so
-// the four-accessor shape across handle kinds is complete; callers
-// needing instance-type info should consult the raw Export directly.
-func (v ValidatedComponentExport) InstanceType() *InstanceType {
-	return nil
-}
-
 // ValidatedComponentImport is an import paired with the handle the
-// validator resolved for it. FuncType(), ModuleType(), and
-// ComponentType() each return a non-nil handle iff the import's Kind
-// matches; otherwise they return nil. InstanceType() is present for
-// API symmetry but always returns nil — see its comment.
+// validator resolved for it. ModuleType() and ComponentType() each return a
+// non-nil handle iff the import's Kind matches; otherwise they return nil.
 type ValidatedComponentImport struct {
 	Import *ComponentImport
 	et     ComponentEntityType
 	arena  *TypeArena
-}
-
-// FuncType returns the handle if this import is a func, else nil.
-func (v ValidatedComponentImport) FuncType() *FuncType {
-	if v.et.Kind != EntityFunc {
-		return nil
-	}
-	return &FuncType{arena: v.arena, id: v.et.FuncID}
 }
 
 // ModuleType returns the handle if this import is a core module, else nil.
@@ -180,16 +150,6 @@ func (v ValidatedComponentImport) ComponentType() *ComponentType {
 	return &ComponentType{arena: v.arena, id: v.et.CompID}
 }
 
-// InstanceType returns nil. Instance-typed imports do not surface as
-// *InstanceType through this API — *InstanceType represents a fresh
-// runtime instance minted via (*ComponentType).NewInstance, not the
-// static instance-type of a component import. This method exists so
-// the four-accessor shape across handle kinds is complete; callers
-// needing instance-type info should consult the raw Import directly.
-func (v ValidatedComponentImport) InstanceType() *InstanceType {
-	return nil
-}
-
 // IsInstanceRuntimeEmpty reports whether this import is an instance type
 // that carries no runtime data: every export is a type export or a
 // recursively runtime-empty instance, and the instance introduces no
@@ -205,6 +165,12 @@ func (v ValidatedComponentImport) IsInstanceRuntimeEmpty() bool {
 		return false
 	}
 	return isInstanceTypeRuntimeEmpty(v.arena, v.et.InstID)
+}
+
+// EntityType returns the type the validator resolved for this import, along
+// with the arena its IDs index into.
+func (v ValidatedComponentImport) EntityType() (ComponentEntityType, *TypeArena) {
+	return v.et, v.arena
 }
 
 func isInstanceTypeRuntimeEmpty(arena *TypeArena, instID ComponentInstanceTypeID) bool {
@@ -225,4 +191,102 @@ func isInstanceTypeRuntimeEmpty(arena *TypeArena, instID ComponentInstanceTypeID
 		}
 	}
 	return true
+}
+
+// ValidatedComponentAliasSectionPayload is the alias-side mirror of
+// ValidatedComponentImportSectionPayload.
+type ValidatedComponentAliasSectionPayload struct {
+	raw     *ComponentAliasSectionPayload
+	entries []ComponentEntityType
+	arena   *TypeArena
+}
+
+func (*ValidatedComponentAliasSectionPayload) payload() {}
+
+// Raw returns the underlying raw payload.
+func (p *ValidatedComponentAliasSectionPayload) Raw() *ComponentAliasSectionPayload {
+	return p.raw
+}
+
+// Items returns an iterator yielding each alias paired with the type the
+// validator resolved for it.
+func (p *ValidatedComponentAliasSectionPayload) Items() iter.Seq2[ValidatedComponentAlias, error] {
+	return func(yield func(ValidatedComponentAlias, error) bool) {
+		i := 0
+		for alias, err := range p.raw.Items() {
+			if err != nil {
+				yield(ValidatedComponentAlias{}, err)
+				return
+			}
+			var et ComponentEntityType
+			if i < len(p.entries) {
+				et = p.entries[i]
+			}
+			if !yield(ValidatedComponentAlias{Alias: alias, et: et, arena: p.arena}, nil) {
+				return
+			}
+			i++
+		}
+	}
+}
+
+// ValidatedComponentAlias is an alias paired with the type the validator
+// resolved for it.
+type ValidatedComponentAlias struct {
+	Alias ComponentAlias
+	et    ComponentEntityType
+	arena *TypeArena
+}
+
+// EntityType returns the type the validator resolved for an instance-export
+// alias, along with the arena its IDs index into. ok is false for any other
+// kind of alias.
+func (v ValidatedComponentAlias) EntityType() (et ComponentEntityType, arena *TypeArena, ok bool) {
+	if _, ok := v.Alias.(AliasInstanceExport); !ok {
+		return ComponentEntityType{}, nil, false
+	}
+	return v.et, v.arena, true
+}
+
+// IsInstanceRuntimeEmpty reports whether this alias names an instance that needs
+// nothing at runtime, so that the instance it comes from may omit it. See
+// [ValidatedComponentImport.IsInstanceRuntimeEmpty].
+func (v ValidatedComponentAlias) IsInstanceRuntimeEmpty() bool {
+	if _, ok := v.Alias.(AliasInstanceExport); !ok || v.et.Kind != EntityInstance {
+		return false
+	}
+	return isInstanceTypeRuntimeEmpty(v.arena, v.et.InstID)
+}
+
+// ValidatedComponentCanonicalSectionPayload is a canonical function section with
+// what the validator worked out about each function.
+type ValidatedComponentCanonicalSectionPayload struct {
+	raw     *ComponentCanonicalSectionPayload
+	entries []ValidatedCanonicalFunction
+}
+
+func (*ValidatedComponentCanonicalSectionPayload) payload() {}
+
+// Raw returns the underlying raw payload.
+func (p *ValidatedComponentCanonicalSectionPayload) Raw() *ComponentCanonicalSectionPayload {
+	return p.raw
+}
+
+// Items returns the section's functions in order.
+func (p *ValidatedComponentCanonicalSectionPayload) Items() []ValidatedCanonicalFunction {
+	return p.entries
+}
+
+// ValidatedCanonicalFunction is a canonical function paired with the signature of
+// the core function it creates.
+type ValidatedCanonicalFunction struct {
+	Function        CanonicalFunction
+	created         bool
+	params, results []CoreValType
+}
+
+// CoreFunc returns the signature of the core function this creates. A canon lift
+// creates a component function, so it has none.
+func (f ValidatedCanonicalFunction) CoreFunc() (params, results []CoreValType, ok bool) {
+	return f.params, f.results, f.created
 }

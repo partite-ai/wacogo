@@ -23,6 +23,7 @@ const (
 
 // Validator validates a stream of Payload values from ParseAll.
 type Validator struct {
+	limits *ParseLimits
 	state      validatorState
 	features   FeatureSet
 	components []*ComponentState // stack, one per nesting level
@@ -52,13 +53,20 @@ type Validator struct {
 	// when building a Validated*SectionPayload wrapper.
 	lastImportEntries []ComponentEntityType
 	lastExportEntries []ComponentEntityType
+	lastAliasEntries  []ComponentEntityType
+	// lastCanonicalEntries is populated in order during validateCanonicalSection,
+	// for the same purpose.
+	lastCanonicalEntries []ValidatedCanonicalFunction
 }
 
-// NewValidator creates a new Validator with the given feature set.
-func NewValidator(features FeatureSet) *Validator {
+// NewValidator creates a new Validator with the given feature set. Limits on what
+// has been decoded by the time it reaches the Validator are the Parser's to enforce,
+// so give the Parser or ParseAll the same options.
+func NewValidator(features FeatureSet, opts ...ParseOption) *Validator {
 	return &Validator{
 		state:    validatorStateUnparsed,
 		features: features,
+		limits:   newParseLimits(opts),
 		arena:    newTypeArena(features),
 	}
 }
@@ -146,6 +154,7 @@ func (v *Validator) current() *ComponentState {
 
 func (v *Validator) validateVersion(_ *VersionPayload) error {
 	cs := newComponentState(v.features, v.arena, ComponentKindComponent)
+	cs.body = &componentBody{}
 	v.components = append(v.components, cs)
 	v.state = validatorStateComponent
 	return nil
@@ -156,6 +165,9 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		return fmt.Errorf("validator: unexpected EndPayload with empty component stack")
 	}
 	child := v.components[len(v.components)-1]
+	if err := v.checkImportsNameNoDefinedResources(child); err != nil {
+		return err
+	}
 	v.components = v.components[:len(v.components)-1]
 	if len(v.components) == 0 {
 		// Top-level component end: materialize its ComponentType.
@@ -164,9 +176,17 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 			ImportOrder: child.importOrder,
 			Exports:     child.exports,
 			ExportOrder: child.exportOrder,
+			Funcs:       child.funcs,
+			body:        child.body,
+
+			ImportedResources: importedResources(child),
+			DefinedResources:  v.exposedDefinedResources(child),
 		})
-		if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
+		if v.arena.ComponentTypeSizes[id] > v.limits.EffectiveTypeSize {
 			return fmt.Errorf("effective type size exceeds the limit")
+		}
+		if err := checkInstanceLimits(v.arena, id, v.limits); err != nil {
+			return err
 		}
 		v.topLevelComponentTypeID = id
 		v.topLevelValid = true
@@ -180,11 +200,18 @@ func (v *Validator) validateEnd(_ *EndPayload) error {
 		ct.ImportOrder = child.importOrder
 		ct.Exports = child.exports
 		ct.ExportOrder = child.exportOrder
+		ct.Funcs = child.funcs
+		ct.body = child.body
+		ct.ImportedResources = importedResources(child)
+		ct.DefinedResources = v.exposedDefinedResources(child)
 		size := v.arena.computeComponentTypeSize(ct)
 		v.arena.ComponentTypeSizes[compTypeID] = size
-		if size > MaxEffectiveTypeSize {
+		if size > v.limits.EffectiveTypeSize {
 			return fmt.Errorf("effective type size exceeds the limit")
 		}
+		parent := v.current()
+		parent.components = append(parent.components, compTypeID)
+		parent.record(stepDefineComponent{id: compTypeID})
 	}
 	return nil
 }
@@ -225,12 +252,13 @@ func (v *Validator) validateComponentSection(_ *ComponentSectionPayload) error {
 	}
 	// Push a placeholder component type. The actual type info is filled in
 	// when the sub-component's EndPayload is validated (either by the caller
-	// traversing the sub-ValidatingParser, or by lazy draining).
+	// traversing the sub-ValidatingParser, or by lazy draining), which is also
+	// when it enters this component's index space: until then it isn't a
+	// preceding definition, and nothing can be referring to it.
 	compTypeID := v.arena.pushComponentType(ComponentTypeDesc{
 		Imports: make(map[string]ComponentEntityType),
 		Exports: make(map[string]ComponentEntityType),
 	})
-	cs.components = append(cs.components, compTypeID)
 	v.pendingCompTypeIDs = append(v.pendingCompTypeIDs, compTypeID)
 	return nil
 }

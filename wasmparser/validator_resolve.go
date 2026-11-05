@@ -1,8 +1,10 @@
 package wasmparser
 
-import "slices"
-
-import "fmt"
+import (
+	"fmt"
+	"maps"
+	"slices"
+)
 
 // walkValType recursively visits all DefinedTypeDesc nodes within
 // an ValTypeDesc. For primitive types, there is nothing to visit. For defined
@@ -101,42 +103,26 @@ func (v *Validator) isResultOfOwn(ivt ValTypeDesc) bool {
 	return v.isOwnType(dt.ResultOk.Value)
 }
 
-// contextResourceNames returns the appropriate resource name map for the given kind
-// (import or export). For imports, both imported and exported names are visible.
-// For exports, only exported names are visible.
-func contextResourceNames(cs *ComponentState, kind string) map[ResourceID][]string {
+// contextRefNames returns the names of the resource references in the given
+// context, import or export.
+func contextRefNames(cs *ComponentState, kind string) map[ResourceID]string {
 	if kind == "import" {
-		return cs.resourceNames // imports can see all named resources
+		return cs.importRefNames
 	}
-	return cs.exportResourceNamesMap // exports can only see export-named resources
+	return cs.exportRefNames
 }
 
-// addResourceName appends a name to the slice of names for a resource ID if
-// it isn't already present. A resource can accumulate multiple names when it
-// is exported or imported under several aliases; bracket-prefixed func names
-// match against any of them.
-//
-// When rid is an export-alias half of a fresh→defining pair, the name is
-// also recorded under the defining ResourceID so a subsequent lookup that
-// resolves an alias to its defining still finds the alias's name.
-func addResourceName(arena *TypeArena, m map[ResourceID][]string, rid ResourceID, name string) {
-	addOne := func(id ResourceID) {
-		if slices.Contains(m[id], name) {
-			return
-		}
-		m[id] = append(m[id], name)
+// checkRefName checks that the resource reference a func signature uses has the
+// name its bracket-prefixed func name expects.
+func checkRefName(cs *ComponentState, kind string, id ResourceID, want string) error {
+	name, ok := contextRefNames(cs, kind)[id]
+	if !ok {
+		return fmt.Errorf("resource used in function does not have a name in this context")
 	}
-	addOne(rid)
-	if arena != nil {
-		if defining := arena.resolveResourceAlias(rid); defining != rid {
-			addOne(defining)
-		}
+	if name != want {
+		return fmt.Errorf("function does not match expected resource name `%s`", name)
 	}
-}
-
-// resourceHasName reports whether any recorded name for rid equals name.
-func resourceHasName(names []string, name string) bool {
-	return slices.Contains(names, name)
+	return nil
 }
 
 // checkFuncResourceName checks that a constructor function's return type resource
@@ -160,16 +146,7 @@ func (v *Validator) checkFuncResourceName(cs *ComponentState, resourceName strin
 	} else {
 		return nil
 	}
-	// Check that the resource has a name in the appropriate context
-	nameMap := contextResourceNames(cs, kind)
-	names, ok := v.namesForResource(nameMap, rid)
-	if !ok {
-		return fmt.Errorf("resource used in function does not have a name in this context")
-	}
-	if !resourceHasName(names, resourceName) {
-		return fmt.Errorf("function does not match expected resource name `%s`", names[0])
-	}
-	return nil
+	return checkRefName(cs, kind, rid, resourceName)
 }
 
 // checkMethodResourceName checks that a method's borrow parameter references
@@ -182,88 +159,7 @@ func (v *Validator) checkMethodResourceName(cs *ComponentState, resourceName str
 	if dt.Kind != DefinedKindBorrow {
 		return nil
 	}
-	rid := dt.Borrow
-	nameMap := contextResourceNames(cs, kind)
-	names, ok := v.namesForResource(nameMap, rid)
-	if !ok {
-		return fmt.Errorf("resource used in function does not have a name in this context")
-	}
-	if !resourceHasName(names, resourceName) {
-		return fmt.Errorf("function does not match expected resource name `%s`", names[0])
-	}
-	return nil
-}
-
-// namesForResource returns every name recorded for rid, including names
-// recorded under other resource IDs that alias to the same defining resource.
-// This makes bracket-name validation see all aliases as referring to the
-// same underlying resource type, regardless of which specific alias was
-// used in the func signature.
-func (v *Validator) namesForResource(m map[ResourceID][]string, rid ResourceID) ([]string, bool) {
-	defining := v.arena.resolveResourceAlias(rid)
-	var out []string
-	if names, ok := m[rid]; ok {
-		out = append(out, names...)
-	}
-	if defining != rid {
-		if names, ok := m[defining]; ok {
-			for _, n := range names {
-				if !slices.Contains(out, n) {
-					out = append(out, n)
-				}
-			}
-		}
-	}
-	if len(out) == 0 {
-		return nil, false
-	}
-	return out, true
-}
-
-func (v *Validator) isKnownResourceName(cs *ComponentState, name string) bool {
-	for _, names := range cs.resourceNames {
-		if resourceHasName(names, name) {
-			return true
-		}
-	}
-	return false
-}
-
-// checkFuncResourcesHaveNames validates that all resources referenced in a function type
-// have names in the current context. This is required for non-bracket import/export names.
-func (v *Validator) checkFuncResourcesHaveNames(cs *ComponentState, funcID ComponentFuncTypeID) error {
-	ft := v.arena.FuncTypes[funcID]
-	for _, p := range ft.Params {
-		if err := v.checkValTypeResourcesHaveNames(cs, p.Type); err != nil {
-			return err
-		}
-	}
-	for _, r := range ft.Results {
-		if err := v.checkValTypeResourcesHaveNames(cs, r.Type); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (v *Validator) checkValTypeResourcesHaveNames(cs *ComponentState, ivt ValTypeDesc) error {
-	var checkErr error
-	v.walkValType(ivt, func(dt *DefinedTypeDesc) bool {
-		switch dt.Kind {
-		case DefinedKindOwn:
-			if _, ok := cs.resourceNames[dt.Own]; !ok {
-				checkErr = fmt.Errorf("resource used in function does not have a name in this context")
-				return true
-			}
-		case DefinedKindBorrow:
-			if _, ok := cs.resourceNames[dt.Borrow]; !ok {
-				checkErr = fmt.Errorf("resource used in function does not have a name in this context")
-				return true
-			}
-		}
-		return false
-	})
-	return checkErr
+	return checkRefName(cs, kind, dt.Borrow, resourceName)
 }
 
 // validateAndRegisterNamedTypes validates that an entity type is valid for use as an
@@ -306,29 +202,12 @@ func (v *Validator) validateEntityForExtern(cs *ComponentState, et ComponentEnti
 		}
 		return nil
 	case EntityInstance:
+		// Each export names its types once validated, so it can use what's declared
+		// before it, and only that.
 		instType := v.arena.InstanceTypes[et.InstID]
-		// Pre-register every type-entity export so the instance's type exports
-		// can reference each other independently of map iteration order, and so
-		// later func/value exports of the instance see those types as named.
-		for _, expET := range instType.Exports {
-			if expET.Kind == EntityType {
-				v.registerTypeEntity(cs, expET.TypeRef, kind)
-			}
-		}
-		// Validate types and nested instances.
-		for _, expET := range instType.Exports {
-			if expET.Kind == EntityType || expET.Kind == EntityInstance {
-				if err := v.validateEntityForExtern(cs, expET, kind); err != nil {
-					return fmt.Errorf("instance not valid to be used as %s", kind)
-				}
-			}
-		}
-		// Validate funcs/values now that types are registered.
-		for _, expET := range instType.Exports {
-			if expET.Kind != EntityType && expET.Kind != EntityInstance {
-				if err := v.validateEntityForExtern(cs, expET, kind); err != nil {
-					return fmt.Errorf("instance not valid to be used as %s", kind)
-				}
+		for _, name := range instType.ExportOrder {
+			if err := v.validateEntityForExtern(cs, instType.Exports[name], kind); err != nil {
+				return fmt.Errorf("instance not valid to be used as %s", kind)
 			}
 		}
 		return nil
@@ -575,6 +454,7 @@ func (v *Validator) validateAliasSection(p *ComponentAliasSectionPayload) error 
 	if cs == nil {
 		return fmt.Errorf("alias section outside component")
 	}
+	v.lastAliasEntries = v.lastAliasEntries[:0]
 	for alias, err := range p.Items() {
 		if err != nil {
 			return err
@@ -582,6 +462,12 @@ func (v *Validator) validateAliasSection(p *ComponentAliasSectionPayload) error 
 		if err := v.addAlias(cs, alias); err != nil {
 			return err
 		}
+		var et ComponentEntityType
+		if a, ok := alias.(AliasInstanceExport); ok {
+			// addAlias has checked that the instance and export exist.
+			et = v.arena.InstanceTypes[cs.instances[a.Instance]].Exports[a.Name]
+		}
+		v.lastAliasEntries = append(v.lastAliasEntries, et)
 	}
 	return nil
 }
@@ -632,6 +518,12 @@ func (v *Validator) aliasInstanceExport(cs *ComponentState, a AliasInstanceExpor
 	// Check that the alias kind matches the entity kind
 	if err := checkAliasKindMatchesEntity(a.Kind, et, a.Instance, a.Name); err != nil {
 		return err
+	}
+	switch et.Kind {
+	case EntityInstance:
+		cs.record(stepAliasInstance{from: a.Instance, name: a.Name, view: et.InstID})
+	case EntityComponent:
+		cs.record(stepAliasComponent{from: a.Instance, name: a.Name})
 	}
 	return cs.addEntity(et)
 }
@@ -720,65 +612,124 @@ func (v *Validator) aliasOuter(cs *ComponentState, a AliasOuter) error {
 			return err
 		}
 		cs.components = append(cs.components, comp)
+		cs.record(stepOuterComponent{count: a.Count, index: a.Index})
 	default:
 		return fmt.Errorf("unknown outer alias kind")
 	}
 	return nil
 }
 
-// checkOuterAliasResourceScope validates that an outer-aliased type doesn't reference
-// resources defined in ancestor components that are not accessible from the child.
-// Only checks across COMPONENT boundaries (not type declaration boundaries).
+// checkOuterAliasResourceScope rejects an outer alias that carries a resource
+// into a component from outside it, which keeps each component an isolated unit
+// that could be extracted from those around it. Aliases that only enter type
+// declarations cross no component boundary.
 func (v *Validator) checkOuterAliasResourceScope(ty ComponentAnyTypeID, count uint32) error {
-	resourceIDs := v.gatherResourceIDs(ty)
-	if len(resourceIDs) == 0 {
+	if count == 0 {
 		return nil
 	}
-
-	// Walk from the current component's position up through ancestors.
-	// We need to check if any COMPONENT (not type declaration) boundary
-	// has resources that we're crossing.
-	stackLen := len(v.components)
-	current := v.components[stackLen-1]
-
-	// Walk up from the position just above current to the target (inclusive)
-	// and check only actual components (not type declarations)
-	for i := stackLen - 2; i >= stackLen-1-int(count); i-- {
-		ancestor := v.components[i]
-		// Only check boundaries where the child is a real component
-		// (crossing from component -> component means resources are scoped)
-		if current.kind == ComponentKindComponent {
-			for rid := range resourceIDs {
-				if ancestor.localResources[rid] {
-					return fmt.Errorf("refers to resources not defined in the current component")
-				}
-				// Resource exports are minted as fresh IDs aliasing the
-				// underlying defining ID; resolve once so an outer-aliased
-				// type that re-exports a locally defined resource is
-				// rejected by its defining ancestor.
-				if defining := v.arena.resolveResourceAlias(rid); defining != rid && ancestor.localResources[defining] {
-					return fmt.Errorf("refers to resources not defined in the current component")
-				}
-			}
-		}
-		current = ancestor
+	// Type declarations can only nest at the bottom of the stack, so the alias
+	// crosses a component boundary exactly when the state just inside its target
+	// is a component.
+	if v.components[len(v.components)-int(count)].kind != ComponentKindComponent {
+		return nil
 	}
-
+	if len(v.freeResources(ty)) > 0 {
+		return fmt.Errorf("cannot alias outer type which transitively refers to resources not defined in the current component")
+	}
 	return nil
 }
 
-// gatherResourceIDs returns the set of resource IDs referenced by a type.
-func (v *Validator) gatherResourceIDs(ty ComponentAnyTypeID) map[ResourceID]bool {
+// checkImportsNameNoDefinedResources rejects a component whose imports refer to
+// a resource the component itself defines, which nothing outside it could supply.
+func (v *Validator) checkImportsNameNoDefinedResources(cs *ComponentState) error {
+	free := make(map[ResourceID]bool)
+	for _, et := range cs.imports {
+		v.collectResourceIDsFromEntity(et, free)
+	}
+	for id := range cs.definedResources {
+		if free[id] {
+			return fmt.Errorf("local resource type found in imports")
+		}
+	}
+	return nil
+}
+
+// forEachInstanceResource visits the resources an instance type defines, including
+// through nested instances.
+func (v *Validator) forEachInstanceResource(id ComponentInstanceTypeID, visit func(ResourceID)) {
+	it := v.arena.InstanceTypes[id]
+	for _, res := range it.DefinedResources {
+		visit(res.ID)
+	}
+	for _, et := range it.Exports {
+		if et.Kind == EntityInstance {
+			v.forEachInstanceResource(et.InstID, visit)
+		}
+	}
+}
+
+// addDefinedInstanceResources records the resources an instance type defines as
+// defined by cs.
+func (v *Validator) addDefinedInstanceResources(cs *ComponentState, id ComponentInstanceTypeID) {
+	v.forEachInstanceResource(id, func(res ResourceID) { cs.definedResources[res] = true })
+}
+
+// importedResources returns the resources cs's type imports leave to its
+// instantiator.
+func importedResources(cs *ComponentState) []ImportedResource {
+	var imported []ImportedResource
+	for _, name := range cs.importOrder {
+		et := cs.imports[name]
+		if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource && cs.locallyDefinedSubResources[et.TypeRef.ResID] {
+			imported = append(imported, ImportedResource{ID: et.TypeRef.ResID, Import: name})
+		}
+	}
+	return imported
+}
+
+// exposedDefinedResources returns the resources cs defines that its exports can
+// reach. Those that stay inside can't be told apart between instantiations, so an
+// instantiation has no need of its own copy of them.
+func (v *Validator) exposedDefinedResources(cs *ComponentState) []ResourceID {
+	reachable := make(map[ResourceID]bool)
+	for _, et := range cs.exports {
+		v.collectExportedResources(et, reachable)
+	}
+	var defined []ResourceID
+	for id := range reachable {
+		if cs.definedResources[id] {
+			defined = append(defined, id)
+		}
+	}
+	slices.Sort(defined)
+	return defined
+}
+
+// collectExportedResources adds the resources an entity's instances expose, which
+// unlike those of an instance type aren't bound within it.
+func (v *Validator) collectExportedResources(et ComponentEntityType, set map[ResourceID]bool) {
+	if et.Kind != EntityInstance {
+		v.collectResourceIDsFromEntity(et, set)
+		return
+	}
+	for _, sub := range v.arena.InstanceTypes[et.InstID].Exports {
+		v.collectExportedResources(sub, set)
+	}
+}
+
+// freeResources returns the resources a type refers to without defining them,
+// each as its defining ID.
+func (v *Validator) freeResources(ty ComponentAnyTypeID) map[ResourceID]bool {
 	set := make(map[ResourceID]bool)
 	v.collectResourceIDs(ty, set)
 	return set
 }
 
-// collectResourceIDs collects all resource IDs referenced by a ComponentAnyTypeID.
+// collectResourceIDs collects the free resources of a ComponentAnyTypeID.
 func (v *Validator) collectResourceIDs(ty ComponentAnyTypeID, set map[ResourceID]bool) {
 	switch ty.Kind {
 	case AnyTypeResource:
-		set[ty.ResID] = true
+		set[v.arena.ResolveResourceAlias(ty.ResID)] = true
 	case AnyTypeDefined:
 		v.collectResourceIDsFromDefined(ComponentDefinedTypeID(ty.Index), set)
 	case AnyTypeFunc:
@@ -795,9 +746,9 @@ func (v *Validator) collectResourceIDsFromDefined(id ComponentDefinedTypeID, set
 	v.walkDefinedType(&dt, func(d *DefinedTypeDesc) bool {
 		switch d.Kind {
 		case DefinedKindOwn:
-			set[d.Own] = true
+			set[v.arena.ResolveResourceAlias(d.Own)] = true
 		case DefinedKindBorrow:
-			set[d.Borrow] = true
+			set[v.arena.ResolveResourceAlias(d.Borrow)] = true
 		}
 		return false
 	})
@@ -807,9 +758,9 @@ func (v *Validator) collectResourceIDsFromValType(ivt ValTypeDesc, set map[Resou
 	v.walkValType(ivt, func(dt *DefinedTypeDesc) bool {
 		switch dt.Kind {
 		case DefinedKindOwn:
-			set[dt.Own] = true
+			set[v.arena.ResolveResourceAlias(dt.Own)] = true
 		case DefinedKindBorrow:
-			set[dt.Borrow] = true
+			set[v.arena.ResolveResourceAlias(dt.Borrow)] = true
 		}
 		return false
 	})
@@ -826,20 +777,44 @@ func (v *Validator) collectResourceIDsFromFunc(id ComponentFuncTypeID, set map[R
 }
 
 func (v *Validator) collectResourceIDsFromInstance(id ComponentInstanceTypeID, set map[ResourceID]bool) {
-	it := v.arena.InstanceTypes[id]
-	for _, et := range it.Exports {
-		v.collectResourceIDsFromEntity(et, set)
+	free := make(map[ResourceID]bool)
+	for _, et := range v.arena.InstanceTypes[id].Exports {
+		v.collectResourceIDsFromEntity(et, free)
 	}
+	v.removeInstanceResources(id, free)
+	maps.Copy(set, free)
 }
 
 func (v *Validator) collectResourceIDsFromComponent(id ComponentTypeID, set map[ResourceID]bool) {
 	ct := v.arena.ComponentTypes[id]
-	for _, et := range ct.Imports {
-		v.collectResourceIDsFromEntity(et, set)
+	free := make(map[ResourceID]bool)
+	for _, entities := range []map[string]ComponentEntityType{ct.Imports, ct.Exports} {
+		for _, et := range entities {
+			v.collectResourceIDsFromEntity(et, free)
+		}
 	}
-	for _, et := range ct.Exports {
-		v.collectResourceIDsFromEntity(et, set)
+	for _, res := range ct.ImportedResources {
+		delete(free, res.ID)
 	}
+	for _, rid := range ct.DefinedResources {
+		delete(free, rid)
+	}
+	// A resource an imported or exported instance defines can be aliased out of
+	// it and used by the rest of the component type.
+	for _, entities := range []map[string]ComponentEntityType{ct.Imports, ct.Exports} {
+		for _, et := range entities {
+			if et.Kind == EntityInstance {
+				v.removeInstanceResources(et.InstID, free)
+			}
+		}
+	}
+	maps.Copy(set, free)
+}
+
+// removeInstanceResources removes from set the resources an instance type
+// defines, including through nested instances.
+func (v *Validator) removeInstanceResources(id ComponentInstanceTypeID, set map[ResourceID]bool) {
+	v.forEachInstanceResource(id, func(res ResourceID) { delete(set, res) })
 }
 
 func (v *Validator) collectResourceIDsFromEntity(et ComponentEntityType, set map[ResourceID]bool) {

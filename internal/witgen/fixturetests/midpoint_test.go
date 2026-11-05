@@ -38,8 +38,8 @@ func TestMidpoint_RecordRoundTrip(t *testing.T) {
 	importerWAT := `(component
   (import "h" (instance $h
     (type $pt (record (field "x" u32) (field "y" u32)))
-    (export "point" (type (eq $pt)))
-    (export "avg" (func (param "a" $pt) (param "b" $pt) (result $pt)))
+    (export "point" (type $p (eq $pt)))
+    (export "avg" (func (param "a" $p) (param "b" $p) (result $p)))
   ))
   (alias export $h "avg" (func $a))
   (export "avg" (func $a))

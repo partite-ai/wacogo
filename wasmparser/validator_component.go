@@ -2,6 +2,8 @@ package wasmparser
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 )
 
@@ -52,7 +54,7 @@ func (v *Validator) addDefinedType(cs *ComponentState, dt ComponentDefinedType) 
 		return fmt.Errorf("type nesting is too deep")
 	}
 	id := v.arena.pushDefinedType(idt)
-	if v.arena.DefinedTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.DefinedTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeDefined, Index: uint32(id)})
@@ -119,6 +121,9 @@ func (v *Validator) valTypeDepth(ivt ValTypeDesc) int {
 func (v *Validator) resolveDefinedType(cs *ComponentState, dt ComponentDefinedType) (DefinedTypeDesc, error) {
 	switch t := dt.(type) {
 	case PrimitiveValType:
+		if err := cs.checkPrimitiveEnabled(t); err != nil {
+			return DefinedTypeDesc{}, err
+		}
 		return DefinedTypeDesc{Kind: DefinedKindPrimitive, Primitive: t}, nil
 	case TypeIndexValType:
 		// Type alias - resolve to the underlying defined type
@@ -219,8 +224,8 @@ func (v *Validator) resolveDefinedType(cs *ComponentState, dt ComponentDefinedTy
 		if len(t.Labels) == 0 {
 			return DefinedTypeDesc{}, fmt.Errorf("flags must have at least one entry")
 		}
-		if len(t.Labels) > 32 {
-			return DefinedTypeDesc{}, fmt.Errorf("cannot have more than 32 flags")
+		if len(t.Labels) > maxFlagNames {
+			return DefinedTypeDesc{}, fmt.Errorf("cannot have more than %d flags", maxFlagNames)
 		}
 		flagNames := make(map[string]string)
 		for _, l := range t.Labels {
@@ -349,7 +354,7 @@ func (v *Validator) addFuncType(cs *ComponentState, ft *ComponentFuncType) error
 		}
 	}
 	id := v.arena.pushFuncType(FuncTypeDesc{Params: params, Results: results})
-	if v.arena.FuncTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.FuncTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeFunc, Index: uint32(id)})
@@ -385,13 +390,14 @@ func (v *Validator) addResourceType(cs *ComponentState, rt *ResourceType) error 
 	}
 	rid := v.arena.allocResourceID()
 	cs.localResources[rid] = true
+	cs.definedResources[rid] = true
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeResource, ResID: rid})
 	return nil
 }
 
 func (v *Validator) addComponentTypeDecl(cs *ComponentState, ctd *ComponentTypeDecl) error {
-	if len(v.components) >= MaxNestingDepth {
-		return fmt.Errorf("component nesting depth %d exceeds maximum %d", len(v.components), MaxNestingDepth)
+	if uint32(len(v.components)) >= v.limits.NestingDepth {
+		return fmt.Errorf("component nesting depth %d exceeds maximum %d", len(v.components), v.limits.NestingDepth)
 	}
 	// Create a sub-state for the component type declarations
 	subCS := newComponentState(v.features, v.arena, ComponentKindComponentType)
@@ -408,15 +414,21 @@ func (v *Validator) addComponentTypeDecl(cs *ComponentState, ctd *ComponentTypeD
 		}
 	}
 
+	if err := v.checkImportsNameNoDefinedResources(subCS); err != nil {
+		return err
+	}
+
 	// Build the component type from subCS
 	compType := ComponentTypeDesc{
-		Imports:     subCS.imports,
-		ImportOrder: subCS.importOrder,
-		Exports:     subCS.exports,
-		ExportOrder: subCS.exportOrder,
+		Imports:          subCS.imports,
+		ImportOrder:      subCS.importOrder,
+		Exports:          subCS.exports,
+		ExportOrder:      subCS.exportOrder,
+		ImportedResources: importedResources(subCS),
+		DefinedResources:  v.exposedDefinedResources(subCS),
 	}
 	id := v.arena.pushComponentType(compType)
-	if v.arena.ComponentTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.ComponentTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeComponent, Index: uint32(id)})
@@ -437,15 +449,16 @@ func (v *Validator) processComponentTypeDecl(subCS *ComponentState, decl Compone
 	case InstanceDeclExport:
 		return v.addExportDecl(subCS, d.Export)
 	case ComponentDeclImport:
-		return v.addImportDecl(subCS, d.Import)
+		_, err := v.addImport(subCS, &d.Import)
+		return err
 	default:
 		return fmt.Errorf("unknown component type declaration %T", decl)
 	}
 }
 
 func (v *Validator) addInstanceTypeDecl(cs *ComponentState, itd *InstanceTypeDecl) error {
-	if len(v.components) >= MaxNestingDepth {
-		return fmt.Errorf("instance nesting depth %d exceeds maximum %d", len(v.components), MaxNestingDepth)
+	if uint32(len(v.components)) >= v.limits.NestingDepth {
+		return fmt.Errorf("instance nesting depth %d exceeds maximum %d", len(v.components), v.limits.NestingDepth)
 	}
 	// Create a sub-state for the instance type declarations
 	subCS := newComponentState(v.features, v.arena, ComponentKindInstanceType)
@@ -467,19 +480,26 @@ func (v *Validator) addInstanceTypeDecl(cs *ComponentState, itd *InstanceTypeDec
 	// bounds that were allocated (not aliased in) by this instance type. Outer
 	// aliases pull in existing resource IDs; those are NOT defined here and
 	// must not be freshened on import.
-	var definedResources []ResourceID
-	for _, et := range subCS.exports {
+	//
+	// An (eq) export can only refer to a preceding type, so the first export of
+	// a resource in declaration order is the one that defines it.
+	var definedResources []DefinedResource
+	seen := make(map[ResourceID]bool)
+	for _, name := range subCS.exportOrder {
+		et := subCS.exports[name]
 		if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource &&
-			subCS.locallyDefinedSubResources[et.TypeRef.ResID] {
-			definedResources = append(definedResources, et.TypeRef.ResID)
+			subCS.locallyDefinedSubResources[et.TypeRef.ResID] && !seen[et.TypeRef.ResID] {
+			seen[et.TypeRef.ResID] = true
+			definedResources = append(definedResources, DefinedResource{ID: et.TypeRef.ResID, Export: name})
 		}
 	}
 	instType := InstanceTypeDesc{
 		Exports:          subCS.exports,
+		ExportOrder:      subCS.exportOrder,
 		DefinedResources: definedResources,
 	}
 	id := v.arena.pushInstanceType(instType)
-	if v.arena.InstanceTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.InstanceTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.types = append(cs.types, ComponentAnyTypeID{Kind: AnyTypeInstance, Index: uint32(id)})
@@ -516,7 +536,7 @@ func (v *Validator) validateImportSection(p *ComponentImportSectionPayload) erro
 		if err != nil {
 			return err
 		}
-		et, err := v.addImportCapturing(cs, imp)
+		et, err := v.addImport(cs, imp)
 		if err != nil {
 			return err
 		}
@@ -525,12 +545,9 @@ func (v *Validator) validateImportSection(p *ComponentImportSectionPayload) erro
 	return nil
 }
 
-func (v *Validator) addImport(cs *ComponentState, imp *ComponentImport) error {
-	_, err := v.addImportCapturing(cs, imp)
-	return err
-}
-
-func (v *Validator) addImportCapturing(cs *ComponentState, imp *ComponentImport) (ComponentEntityType, error) {
+// addImport adds an import to a component definition or a component type, where
+// it means the same thing: what an instantiator must supply.
+func (v *Validator) addImport(cs *ComponentState, imp *ComponentImport) (ComponentEntityType, error) {
 	// Check name uniqueness first (before format validation)
 	if err := cs.checkImportName(imp.Name.Name); err != nil {
 		return ComponentEntityType{}, err
@@ -548,7 +565,7 @@ func (v *Validator) addImportCapturing(cs *ComponentState, imp *ComponentImport)
 	}
 
 	// Freshen resources for imported instances that define resources
-	et = v.freshenImportResources(et)
+	et = v.freshenInstanceResources(et)
 
 	// Mint a fresh "created" identity for type entities so subsequent
 	// references to the import name resolve to a different ID than the
@@ -566,14 +583,20 @@ func (v *Validator) addImportCapturing(cs *ComponentState, imp *ComponentImport)
 		return ComponentEntityType{}, err
 	}
 
-	// If this is a type import with SubResource bounds, register the resource name
 	if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-		addResourceName(v.arena, cs.resourceNames, et.TypeRef.ResID, imp.Name.Name)
+		cs.importRefNames[et.TypeRef.ResID] = imp.Name.Name
 	}
 
 	// Add entity to index space
 	if err := cs.addEntity(et); err != nil {
 		return ComponentEntityType{}, err
+	}
+
+	switch et.Kind {
+	case EntityInstance:
+		cs.record(stepImportInstance{name: imp.Name.Name, view: et.InstID})
+	case EntityComponent:
+		cs.record(stepImportComponent{name: imp.Name.Name})
 	}
 
 	// Record in imports map
@@ -614,7 +637,7 @@ func (v *Validator) freshenTypeEntityCreated(cs *ComponentState, et ComponentEnt
 		// Record the alias on the arena, resolving any pre-existing alias
 		// one hop so the recorded defining ID is the original declaration,
 		// never another export alias.
-		v.arena.resourceAliases[fresh] = v.arena.resolveResourceAlias(src)
+		v.arena.resourceAliases[fresh] = v.arena.ResolveResourceAlias(src)
 		// The alias represents the same underlying resource as its source.
 		// Carry forward local-resource flagging so (canon resource.new/rep)
 		// still treats the alias as locally defined when the source was.
@@ -642,100 +665,21 @@ func importTypeRefIsSubResource(tr ComponentTypeRef) bool {
 	return ok
 }
 
-// freshenExportResources freshens resource IDs for exported instances with defined
-// resources in type declarations. Each export of an instance type gets fresh resource
-// IDs so that two exports of the same type produce distinct resources.
-func (v *Validator) freshenExportResources(et ComponentEntityType) ComponentEntityType {
+// freshenInstanceResources gives an instance entity fresh IDs for the resources
+// its type introduces, so that two imports or exports of one instance type have
+// distinct resources.
+func (v *Validator) freshenInstanceResources(et ComponentEntityType) ComponentEntityType {
 	if et.Kind != EntityInstance {
 		return et
 	}
-	instType := v.arena.InstanceTypes[et.InstID]
-	if len(instType.DefinedResources) == 0 {
-		return et
-	}
-
-	// Build remapping from old defined resource IDs to fresh ones
 	sc := v.newSubtypeCheckerWithRemapping()
-	for _, oldRes := range instType.DefinedResources {
-		freshRes := v.arena.allocResourceID()
-		sc.resourceMapping[oldRes] = scopedResID{scope: nil, arena: v.arena, id: freshRes}
-	}
-
-	// Remap the instance type's exports and clear defined resources
-	// (the concrete exported instance has no defined resources — they've been freshened)
-	newInstID := sc.remapInstanceType(et.InstID)
-	return ComponentEntityType{Kind: EntityInstance, InstID: newInstID}
-}
-
-// freshenImportResources freshens resource IDs for imported instances that define
-// resources. Each import of an instance type with defined resources gets fresh
-// resource IDs so that two imports of the same instance type have distinct resources.
-func (v *Validator) freshenImportResources(et ComponentEntityType) ComponentEntityType {
-	if et.Kind != EntityInstance {
+	v.forEachInstanceResource(et.InstID, func(id ResourceID) {
+		sc.resourceMapping[id] = scopedResID{arena: v.arena, id: v.arena.allocResourceID()}
+	})
+	if len(sc.resourceMapping) == 0 {
 		return et
 	}
-	instType := v.arena.InstanceTypes[et.InstID]
-	if len(instType.DefinedResources) == 0 {
-		return et
-	}
-
-	// Build remapping from old defined resource IDs to fresh ones
-	sc := v.newSubtypeCheckerWithRemapping()
-	for _, oldRes := range instType.DefinedResources {
-		freshRes := v.arena.allocResourceID()
-		sc.resourceMapping[oldRes] = scopedResID{scope: nil, arena: v.arena, id: freshRes}
-	}
-
-	// Remap the instance type's exports
-	newInstID := sc.remapInstanceType(et.InstID)
-	return ComponentEntityType{Kind: EntityInstance, InstID: newInstID}
-}
-
-// addImportDecl handles an import within a type declaration.
-func (v *Validator) addImportDecl(cs *ComponentState, imp ComponentImport) error {
-	// Validate the name
-	if err := ValidateImportName(imp.Name); err != nil {
-		return fmt.Errorf("`%s` is not a valid extern name: %s", imp.Name.Name, err)
-	}
-
-	// Check name uniqueness
-	if err := cs.checkImportName(imp.Name.Name); err != nil {
-		return err
-	}
-
-	// Resolve type ref to entity type
-	et, err := cs.typeRefToEntityType(imp.Type)
-	if err != nil {
-		return err
-	}
-
-	// Mint a fresh "created" identity for type entities (see addImportCapturing).
-	et = v.freshenTypeEntityCreated(cs, et, importTypeRefIsSubResource(imp.Type))
-
-	// Validate that the entity type is valid for use as an import
-	if err := v.validateAndRegisterNamedTypes(cs, et, "import"); err != nil {
-		return err
-	}
-
-	// Validate bracket-prefixed names
-	if err := v.validateBracketName(cs, imp.Name.Name, et, "import"); err != nil {
-		return err
-	}
-
-	// If this is a type import with SubResource bounds, register the resource name
-	if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-		addResourceName(v.arena, cs.resourceNames, et.TypeRef.ResID, imp.Name.Name)
-	}
-
-	// Add entity to index space
-	if err := cs.addEntity(et); err != nil {
-		return err
-	}
-
-	// Record in imports map
-	cs.imports[imp.Name.Name] = et
-	cs.importOrder = append(cs.importOrder, imp.Name.Name)
-	return nil
+	return ComponentEntityType{Kind: EntityInstance, InstID: sc.remapInstanceType(et.InstID)}
 }
 
 // ---------- Export Section ----------
@@ -750,7 +694,7 @@ func (v *Validator) validateExportSection(p *ComponentExportSectionPayload) erro
 		if err != nil {
 			return err
 		}
-		et, err := v.addExportCapturing(cs, exp)
+		et, err := v.addExport(cs, exp)
 		if err != nil {
 			return err
 		}
@@ -759,12 +703,7 @@ func (v *Validator) validateExportSection(p *ComponentExportSectionPayload) erro
 	return nil
 }
 
-func (v *Validator) addExport(cs *ComponentState, exp *ComponentExport) error {
-	_, err := v.addExportCapturing(cs, exp)
-	return err
-}
-
-func (v *Validator) addExportCapturing(cs *ComponentState, exp *ComponentExport) (ComponentEntityType, error) {
+func (v *Validator) addExport(cs *ComponentState, exp *ComponentExport) (ComponentEntityType, error) {
 	// Get entity type from the exported index first (check bounds before name validation)
 	et, err := v.resolveExportedEntity(cs, exp.Kind, exp.Index)
 	if err != nil {
@@ -778,7 +717,10 @@ func (v *Validator) addExportCapturing(cs *ComponentState, exp *ComponentExport)
 		if err != nil {
 			return ComponentEntityType{}, err
 		}
-		sc := v.newSubtypeCheckerWithRemapping()
+		// Unlike instantiation, which binds a component's imported resources to
+		// the supplied ones, nothing here is open to binding: an ascription can
+		// only name resources that already exist, so each must match by identity.
+		sc := &SubtypeChecker{aArena: v.arena, bArena: v.arena}
 		if err := sc.isSubtype(et, ascribed); err != nil {
 			return ComponentEntityType{}, fmt.Errorf("ascribed type of export is not compatible: %w", err)
 		}
@@ -813,16 +755,20 @@ func (v *Validator) addExportCapturing(cs *ComponentState, exp *ComponentExport)
 		return ComponentEntityType{}, err
 	}
 
-	// If this is a type export with a resource, register the resource name.
-	// A resource may be exported under multiple names; all are valid.
 	if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-		addResourceName(v.arena, cs.resourceNames, et.TypeRef.ResID, exp.Name.Name)
-		addResourceName(v.arena, cs.exportResourceNamesMap, et.TypeRef.ResID, exp.Name.Name)
+		cs.exportRefNames[et.TypeRef.ResID] = exp.Name.Name
 	}
 
 	// Add the exported entity to the appropriate index space
 	if err := cs.addEntity(et); err != nil {
 		return ComponentEntityType{}, err
+	}
+
+	switch et.Kind {
+	case EntityInstance:
+		cs.record(stepExportInstance{name: exp.Name.Name, from: exp.Index})
+	case EntityComponent:
+		cs.record(stepExportComponent{name: exp.Name.Name, from: exp.Index})
 	}
 
 	// Record in exports map
@@ -853,15 +799,20 @@ func (v *Validator) addExportDecl(cs *ComponentState, exp ComponentExport) error
 
 	// Freshen resources for exported instances with defined resources
 	// (in type declarations, each export of the same instance type gets fresh resource IDs)
-	et = v.freshenExportResources(et)
+	et = v.freshenInstanceResources(et)
 
-	// Note: type-entity exports inside a type declaration intentionally do
-	// NOT get a freshly minted identity. Their AscribedType always carries an
-	// (eq ...) or (sub resource) bound, and our representation encodes the eq
-	// constraint by reusing the referenced type's ID — minting a fresh ID here
-	// would break that linkage and cause downstream subtype checks to lose the
-	// eq relationship between, e.g., two instance imports that reference the
-	// same alias.
+	switch {
+	case et.Kind == EntityInstance:
+		v.addDefinedInstanceResources(cs, et.InstID)
+	case exp.AscribedType.Valid && importTypeRefIsSubResource(exp.AscribedType.Value):
+		cs.definedResources[et.TypeRef.ResID] = true
+	}
+
+	// An (eq) export is a new reference to the type it names, as in a component
+	// definition. Comparing types looks through it; only it is named.
+	if exp.AscribedType.Valid {
+		et = v.freshenTypeEntityCreated(cs, et, importTypeRefIsSubResource(exp.AscribedType.Value))
+	}
 
 	// Validate the name
 	if err := ValidateExportNameStr(exp.Name); err != nil {
@@ -886,11 +837,8 @@ func (v *Validator) addExportDecl(cs *ComponentState, exp ComponentExport) error
 		return err
 	}
 
-	// If this is a type export with a resource, register the resource name.
-	// A resource may be exported under multiple names; all are valid.
 	if et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
-		addResourceName(v.arena, cs.resourceNames, et.TypeRef.ResID, exp.Name.Name)
-		addResourceName(v.arena, cs.exportResourceNamesMap, et.TypeRef.ResID, exp.Name.Name)
+		cs.exportRefNames[et.TypeRef.ResID] = exp.Name.Name
 	}
 
 	// Add entities to their respective index spaces
@@ -968,13 +916,8 @@ func (v *Validator) validateBracketName(cs *ComponentState, name string, et Comp
 		if et.Kind != EntityFunc {
 			return fmt.Errorf("%s name `%s` is not valid: %s is not a func", kind, name, et.Desc())
 		}
-		// Check resource name is known
-		if !v.isKnownResourceName(cs, resourceName) {
+		if !slices.Contains(slices.Collect(maps.Values(contextRefNames(cs, kind))), resourceName) {
 			return fmt.Errorf("static resource name is not known in this context")
-		}
-		// Validate function type resources have names in this context
-		if err := v.checkFuncResourcesHaveNames(cs, et.FuncID); err != nil {
-			return err
 		}
 		return nil
 	}

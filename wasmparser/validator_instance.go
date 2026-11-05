@@ -58,34 +58,64 @@ func (v *Validator) instantiateComponent(cs *ComponentState, inst Instantiate) e
 		suppliedArgs[arg.Name] = argType
 	}
 
+	step := stepInstantiate{component: inst.ComponentIndex}
+	for _, arg := range inst.Args {
+		step.args = append(step.args, bodyRef{name: arg.Name, kind: arg.Kind, index: arg.Index})
+		if et := suppliedArgs[arg.Name]; et.Kind == EntityType && et.TypeRef.Kind == AnyTypeResource {
+			if step.resources == nil {
+				step.resources = make(map[string]ResourceID)
+			}
+			step.resources[arg.Name] = et.TypeRef.ResID
+		}
+	}
+
 	// Check all imports are satisfied, building resource mapping.
 	// Process in insertion order for deterministic error messages and correct resource mapping.
 	sc := v.newSubtypeCheckerWithRemapping()
+	sc.bBound = make(map[ResourceID]scopedResID)
+	open := make(map[ResourceID]bool, len(compType.ImportedResources))
+	for _, res := range compType.ImportedResources {
+		open[res.ID] = true
+	}
+	for _, importName := range compType.ImportOrder {
+		if argType, ok := suppliedArgs[importName]; ok {
+			sc.bindOpenResources(argType, compType.Imports[importName], open)
+		}
+	}
 	for _, importName := range compType.ImportOrder {
 		importType := compType.Imports[importName]
 		argType, ok := suppliedArgs[importName]
 		if !ok {
 			return fmt.Errorf("missing import named `%s`", importName)
 		}
-		// Subtype check with resource remapping
 		if err := sc.isSubtype(argType, importType); err != nil {
 			return fmt.Errorf("type mismatch for import `%s`: %w", importName, err)
 		}
 	}
+	maps.Copy(sc.resourceMapping, sc.bBound)
 
-	// Build instance exports from the component's exports, remapping resource IDs
+	// Build instance exports from the component's exports: its imports are now what
+	// was supplied, and what it creates is new with this instance.
 	instType := InstanceTypeDesc{
-		Exports: make(map[string]ComponentEntityType),
+		Exports:     make(map[string]ComponentEntityType),
+		ExportOrder: compType.ExportOrder,
+	}
+	for _, res := range compType.DefinedResources {
+		fresh := v.arena.allocResourceID()
+		sc.resourceMapping[res] = scopedResID{arena: v.arena, id: fresh}
+		cs.definedResources[fresh] = true
 	}
 	for name, et := range compType.Exports {
 		instType.Exports[name] = sc.remapEntityType(et)
 	}
 
 	id := v.arena.pushInstanceType(instType)
-	if v.arena.InstanceTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.InstanceTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.instances = append(cs.instances, id)
+	step.view = id
+	cs.record(step)
 	return nil
 }
 
@@ -125,13 +155,19 @@ func (v *Validator) instantiateFromExports(cs *ComponentState, inst InstantiateF
 		}
 
 		instType.Exports[exp.Name.Name] = et
+		instType.ExportOrder = append(instType.ExportOrder, exp.Name.Name)
 	}
 
 	id := v.arena.pushInstanceType(instType)
-	if v.arena.InstanceTypeSizes[id] > MaxEffectiveTypeSize {
+	if v.arena.InstanceTypeSizes[id] > v.limits.EffectiveTypeSize {
 		return fmt.Errorf("effective type size exceeds the limit")
 	}
 	cs.instances = append(cs.instances, id)
+	step := stepInlineInstance{view: id}
+	for _, exp := range inst.Exports {
+		step.exports = append(step.exports, bodyRef{name: exp.Name.Name, kind: exp.Kind, index: exp.Index})
+	}
+	cs.record(step)
 	return nil
 }
 
@@ -157,6 +193,7 @@ func (v *Validator) addCoreInstance(cs *ComponentState, inst Instance) error {
 	if cs.kind != ComponentKindComponent {
 		return fmt.Errorf("core instances cannot be defined in type declarations")
 	}
+	cs.body.coreInstances++
 	switch i := inst.(type) {
 	case CoreInstantiate:
 		return v.coreInstantiate(cs, i)
@@ -491,6 +528,9 @@ func (v *Validator) validateStartSection(p *ComponentStartSectionPayload) error 
 	}
 	if cs.kind != ComponentKindComponent {
 		return fmt.Errorf("start not allowed in type declarations")
+	}
+	if err := cs.checkValuesEnabled(); err != nil {
+		return err
 	}
 	if cs.hasStart {
 		return fmt.Errorf("multiple start sections")

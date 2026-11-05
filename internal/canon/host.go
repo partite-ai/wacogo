@@ -1,7 +1,7 @@
 package canon
 
 import (
-	"sync"
+	"context"
 
 	"github.com/tetratelabs/wazero"
 )
@@ -11,14 +11,12 @@ import (
 type Host struct {
 	runtime wazero.Runtime
 
-	// batchHelperCache memoizes compiled batched-realloc helper modules,
-	// keyed by the target realloc's export name (the helper's only
-	// target-specific bake-in; the module name is a fixed placeholder
-	// rebound per instantiation via an ImportResolver). In practice the
-	// key is almost always "cabi_realloc", so the whole process compiles
-	// a single helper module instead of one per adapter.
-	mu               sync.Mutex
-	batchHelperCache map[string]wazero.CompiledModule
+	// batchHelper is the one compiled batched-realloc helper, shared by every
+	// adapter and freed with the runtime. If it failed to compile, as a runtime
+	// configuration could make it, batchHelperErr says why and building a helper
+	// reports it.
+	batchHelper    wazero.CompiledModule
+	batchHelperErr error
 
 	// maxLiftBytes bounds each lift performed by adapters this Host
 	// builds; 0 means unlimited.
@@ -28,10 +26,12 @@ type Host struct {
 // NewHost wraps a wazero.Runtime in a canon Host. maxLiftBytes bounds the
 // bytes any single lift performed by the Host's adapters may materialize
 // (0 means unlimited).
-func NewHost(runtime wazero.Runtime, maxLiftBytes uint64) *Host {
+func NewHost(ctx context.Context, runtime wazero.Runtime, maxLiftBytes uint64) *Host {
+	helper, err := runtime.CompileModule(ctx, encodeBatchReallocHelperModule())
 	return &Host{
-		runtime:          runtime,
-		batchHelperCache: make(map[string]wazero.CompiledModule),
-		maxLiftBytes:     maxLiftBytes,
+		runtime:        runtime,
+		batchHelper:    helper,
+		batchHelperErr: err,
+		maxLiftBytes:   maxLiftBytes,
 	}
 }

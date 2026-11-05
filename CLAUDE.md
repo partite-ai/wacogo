@@ -14,11 +14,11 @@ Wacogo is a WebAssembly Component Model (MVP) runtime in Go. It uses wazero as t
 go build ./...                          # build all packages
 go test ./wasmparser/ -count=1          # run all wasmparser tests
 go test ./wasmparser/ -run TestName     # run a single test
-go test ./wasmparser/ -run TestComponentModelWast/empty -v  # run a specific wast suite
-go generate ./wasmparser/...            # regenerate test fixtures (requires wasm-tools >= 1.245.0)
+go test ./internal/core/ -run TestSpecConformance/local/parser/local-resource-in-imports -v  # run a specific wast file
+go generate ./testdata                  # regenerate spec test fixtures (requires wasm-tools >= 1.245.0)
 ```
 
-Test infrastructure uses `wasm-tools json-from-wast` to pre-compile `.wast` test files into JSON + binary fixtures. Source `.wast` files live in `wasmparser/testdata/wast/` (committed). Generated fixtures live in `wasmparser/testdata/generated/` (gitignored — run `go generate` to create them).
+Spec tests pre-compile `.wast` files into JSON + binary fixtures with `wasm-tools json-from-wast`, and `TestSpecConformance` in `internal/core` runs them. Source `.wast` files live in `testdata/spec/` (upstream mirror) and `testdata/local/` (our own), both committed. Generated fixtures live in `testdata/generated/` (gitignored — run `go generate ./testdata` to create them; the test fails if any are missing).
 
 ## Architecture
 
@@ -32,7 +32,7 @@ Streaming parser and validator for WebAssembly Component Model binaries. Two sep
 **Type system conventions:**
 
 - Unions → interface with private marker method + concrete types (use type switch)
-- Optional fields → `Optional[T]` generic (never pointers)
+- Optional fields → `Optional[T]` generic (don't use a pointer solely to make something optional)
 - All struct fields exported
 - Types decode themselves via `BinaryUnmarshaler` interface
 
@@ -78,7 +78,11 @@ Witgen-emitted `*<R>Handle` types use a small state machine (`handleState` inter
 
 ### Cross-Component Adapters
 
-`canon.Host.BuildAdapter` (`internal/canon/build_adapter.go`) constructs a wasm stub module whose export bridges a cross-component call. Internally it compiles a `transferPlan`, builds an `adapterFunc` Go host function, and wraps it in a tiny wasm stub (import + re-export) because wazero's `ImportResolver` only works with real wasm module instances. The core's `execLowerWithGoAdapter` is a thin wrapper that resolves caller/callee `CallSide`+`Callee` descriptors from instantiation state and calls the factory; the returned `*canon.CallAdapter` is tracked in `ComponentInstance.auxiliaryAdapters` for teardown on `Close`.
+`canon.Host.BuildAdapter` (`internal/canon/build_adapter.go`) builds the Go function that bridges a cross-component call. It compiles a `transferPlan` and returns a `*canon.CallAdapter` holding an `adapterFunc` and its core signature, plus a batched-realloc helper instance for each side with a wasm realloc. The `BuildResource*` functions return the same shape for resource builtins. Nothing in `canon` compiles a host module for these.
+
+All of these functions live in one host module per instantiation (`internal/core/host_funcs.go`), because compiling a module per function dominated instantiation. The loader records each one's core signature from the validator, along with what the component calls it for stack traces, so the module can be built before the plan runs. Each `planLower` and resource step then fills in its `hostFuncSlot`, and `bindHostFunc` checks that the adapter's signature matches the validated one. The core's `execLowerWithGoAdapter` resolves caller/callee `CallSide`+`Callee` descriptors from instantiation state and calls the factory; the returned adapter is tracked in `ComponentInstance.owned` for teardown on `Close`.
+
+Inline core instances are implemented by bridge modules: generated wasm with no code of their own, whose imports are re-exported under the requested names. wazero can rebind an import's module but not its name, so each realloc helper gets one too, letting every adapter share the single helper compiled when the engine is created.
 
 ### Import Resolution
 

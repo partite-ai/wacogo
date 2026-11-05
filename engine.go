@@ -5,7 +5,9 @@
 // The entry point is Engine: construct one with NewEngine, load
 // components from binaries with LoadComponent, call Instantiate on
 // the returned Component to obtain a running ComponentInstance, and
-// mint host-side components via NewHostBuilder.
+// mint host-side components via NewHostBuilder. Close a Component when
+// no more instances will be created, or its compiled code stays in
+// memory until the Engine closes.
 package wacogo
 
 import (
@@ -39,8 +41,9 @@ func (e *Engine) Close(ctx context.Context) error {
 }
 
 // LoadComponent parses, validates, and compiles a component-model
-// binary read from r. The returned *Component is immutable and safe
-// for concurrent Instantiate calls.
+// binary read from r. The returned *Component is safe for concurrent
+// Instantiate calls. Call its Close when no more instances will be
+// created, or its compiled code stays in memory until the Engine closes.
 func (e *Engine) LoadComponent(ctx context.Context, r io.Reader) (*Component, error) {
 	return e.core.LoadComponent(ctx, r)
 }

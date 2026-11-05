@@ -23,8 +23,8 @@ func (rt *RecordType) unmarshalBinary(r *BinaryReader) error {
 	if err != nil {
 		return err
 	}
-	if count > MaxRecordFields {
-		return errfAt(r.Offset(), "record field count %d exceeds maximum %d", count, MaxRecordFields)
+	if count > r.limits.RecordFields {
+		return errfAt(r.Offset(), "record field count %d exceeds maximum %d", count, r.limits.RecordFields)
 	}
 	rt.Fields = make([]Field, 0, count)
 	for range count {
@@ -60,8 +60,8 @@ func (vt *VariantType) unmarshalBinary(r *BinaryReader) error {
 	if err != nil {
 		return err
 	}
-	if count > MaxVariantCases {
-		return errfAt(r.Offset(), "variant case count %d exceeds maximum %d", count, MaxVariantCases)
+	if count > r.limits.VariantCases {
+		return errfAt(r.Offset(), "variant case count %d exceeds maximum %d", count, r.limits.VariantCases)
 	}
 	vt.Cases = make([]VariantCase, 0, count)
 	for range count {
@@ -138,8 +138,8 @@ func (tt *TupleType) unmarshalBinary(r *BinaryReader) error {
 	if err != nil {
 		return err
 	}
-	if count > MaxTupleTypes {
-		return errfAt(r.Offset(), "tuple type count %d exceeds maximum %d", count, MaxTupleTypes)
+	if count > r.limits.TupleTypes {
+		return errfAt(r.Offset(), "tuple type count %d exceeds maximum %d", count, r.limits.TupleTypes)
 	}
 	tt.Types = make([]ComponentValType, 0, count)
 	for range count {
@@ -164,8 +164,8 @@ func (ft *FlagsType) unmarshalBinary(r *BinaryReader) error {
 	if err != nil {
 		return err
 	}
-	if count > MaxFlagNames {
-		return errfAt(r.Offset(), "cannot have more than %d flags", MaxFlagNames)
+	if count > maxFlagNames {
+		return errfAt(r.Offset(), "cannot have more than %d flags", maxFlagNames)
 	}
 	ft.Labels = make([]string, 0, count)
 	for range count {
@@ -190,8 +190,8 @@ func (et *EnumType) unmarshalBinary(r *BinaryReader) error {
 	if err != nil {
 		return err
 	}
-	if count > MaxEnumCases {
-		return errfAt(r.Offset(), "enum case count %d exceeds maximum %d", count, MaxEnumCases)
+	if count > r.limits.EnumCases {
+		return errfAt(r.Offset(), "enum case count %d exceeds maximum %d", count, r.limits.EnumCases)
 	}
 	et.Labels = make([]string, 0, count)
 	for range count {
