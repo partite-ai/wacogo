@@ -5,10 +5,43 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/tetratelabs/wazero"
 )
+
+// TestInstantiate_NilImport checks a nil import is an error rather than a crash. A
+// failed lookup such as ExportedInstance("typo") returns nil, so it's easy to pass.
+func TestInstantiate_NilImport(t *testing.T) {
+	ctx := context.Background()
+	engine := NewEngine(ctx)
+	defer engine.Close(ctx)
+
+	for name, c := range map[string]struct {
+		wat  string
+		opt  InstantiateOption
+		want string
+	}{
+		"instance":  {`(component (import "x" (instance)))`, WithInstanceImport("x", nil), "no instance supplied"},
+		"func":      {`(component (import "x" (func)))`, WithFuncImport("x", nil), "no func supplied"},
+		"module":    {`(component (import "x" (core module)))`, WithModuleImport("x", nil), "no module supplied"},
+		"component": {`(component (import "x" (instance)))`, WithComponentImport("x", nil), "no component supplied"},
+		"resource":  {`(component (import "x" (type (sub resource))))`, WithResourceTypeImport("x", nil, "r"), "no instance supplied"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			comp, err := engine.LoadComponent(ctx, bytes.NewReader(parseLinkWat(t, c.wat)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer comp.Close(ctx)
+			_, err = comp.Instantiate(ctx, c.opt)
+			if err == nil || !strings.Contains(err.Error(), c.want) || !strings.Contains(err.Error(), `import "x"`) {
+				t.Fatalf("got %v", err)
+			}
+		})
+	}
+}
 
 // compileCounter counts the modules compiled through a runtime and those closed,
 // which is otherwise only visible as memory that's never returned.

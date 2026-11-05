@@ -111,18 +111,30 @@ func (e *Engine) instantiate(ctx context.Context, component *Component, opts ...
 	for name, v := range cfg.imports {
 		switch ap := v.(type) {
 		case *ComponentInstance:
+			if ap == nil {
+				return nil, fmt.Errorf("wacogo: instantiate: import %q: no instance supplied", name)
+			}
 			if ap.wpInstance != nil {
 				args[name] = ap.wpInstance
 			}
 		case *ExportedFunc:
+			if ap == nil {
+				return nil, fmt.Errorf("wacogo: instantiate: import %q: no func supplied", name)
+			}
 			if ft := ap.ParserFunctionType(); ft != nil {
 				args[name] = ft
 			}
 		case *CompiledModule:
+			if ap == nil {
+				return nil, fmt.Errorf("wacogo: instantiate: import %q: no module supplied", name)
+			}
 			if ap.wpModuleType != nil {
 				args[name] = ap.wpModuleType
 			}
 		case *Component:
+			if ap == nil {
+				return nil, fmt.Errorf("wacogo: instantiate: import %q: no component supplied", name)
+			}
 			if ap.wpType != nil {
 				args[name] = ap.wpType
 			}
